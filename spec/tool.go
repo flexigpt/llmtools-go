@@ -17,9 +17,9 @@ const (
 var SchemaStartTime = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
 type (
-	JSONRawString = string
-	JSONSchema    = json.RawMessage
-	FuncID        = string
+	JSONRawString string
+	JSONSchema    json.RawMessage
+	FuncID        string
 )
 
 // GoToolImpl - Register-by-name pattern for Go tools.

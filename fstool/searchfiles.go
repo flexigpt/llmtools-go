@@ -4,12 +4,13 @@ import (
 	"context"
 
 	"github.com/ppipada/llmtools-go/internal/fileutil"
+	"github.com/ppipada/llmtools-go/internal/toolutil"
 	"github.com/ppipada/llmtools-go/spec"
 )
 
-const SearchFilesFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/searchfiles.SearchFiles"
+const searchFilesFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/searchfiles.SearchFiles"
 
-var SearchFilesTool = spec.Tool{
+var searchFilesTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "018fe0f4-b8cd-7e55-82d5-9df0bd70e4bc",
 	Slug:          "searchfiles",
@@ -40,10 +41,14 @@ var SearchFilesTool = spec.Tool{
 		"required": ["pattern"],
 		"additionalProperties": false
 	}`),
-	GoImpl: spec.GoToolImpl{FuncID: SearchFilesFuncID},
+	GoImpl: spec.GoToolImpl{FuncID: searchFilesFuncID},
 
 	CreatedAt:  spec.SchemaStartTime,
 	ModifiedAt: spec.SchemaStartTime,
+}
+
+func SearchFilesTool() spec.Tool {
+	return toolutil.CloneTool(searchFilesTool)
 }
 
 type SearchFilesArgs struct {

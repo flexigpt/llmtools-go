@@ -5,12 +5,13 @@ import (
 	"time"
 
 	"github.com/ppipada/llmtools-go/internal/fileutil"
+	"github.com/ppipada/llmtools-go/internal/toolutil"
 	"github.com/ppipada/llmtools-go/spec"
 )
 
-const InspectImageFuncID spec.FuncID = "github.com/ppipada/llmtools-go/imagetool/inspectimage.InspectImage"
+const inspectImageFuncID spec.FuncID = "github.com/ppipada/llmtools-go/imagetool/inspectimage.InspectImage"
 
-var InspectImageTool = spec.Tool{
+var inspectImageTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "018fe0f4-b8cd-7e55-82d5-9df0bd70e4be",
 	Slug:          "inspectimage",
@@ -31,10 +32,14 @@ var InspectImageTool = spec.Tool{
 		"required": ["path"],
 		"additionalProperties": false
 	}`),
-	GoImpl: spec.GoToolImpl{FuncID: InspectImageFuncID},
+	GoImpl: spec.GoToolImpl{FuncID: inspectImageFuncID},
 
 	CreatedAt:  spec.SchemaStartTime,
 	ModifiedAt: spec.SchemaStartTime,
+}
+
+func InspectImageTool() spec.Tool {
+	return toolutil.CloneTool(inspectImageTool)
 }
 
 type InspectImageArgs struct {

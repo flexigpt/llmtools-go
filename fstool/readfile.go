@@ -11,12 +11,13 @@ import (
 
 	"github.com/ppipada/llmtools-go/internal/fileutil"
 	"github.com/ppipada/llmtools-go/internal/pdfutil"
+	"github.com/ppipada/llmtools-go/internal/toolutil"
 	"github.com/ppipada/llmtools-go/spec"
 )
 
-const ReadFileFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/readfile.ReadFile"
+const readFileFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/readfile.ReadFile"
 
-var ReadFileTool = spec.Tool{
+var readFileTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "018fe0f4-b8cd-7e55-82d5-9df0bd70e4ba",
 	Slug:          "readfile",
@@ -43,10 +44,14 @@ var ReadFileTool = spec.Tool{
 		"required": ["path"],
 		"additionalProperties": false
 	}`),
-	GoImpl: spec.GoToolImpl{FuncID: ReadFileFuncID},
+	GoImpl: spec.GoToolImpl{FuncID: readFileFuncID},
 
 	CreatedAt:  spec.SchemaStartTime,
 	ModifiedAt: spec.SchemaStartTime,
+}
+
+func ReadFileTool() spec.Tool {
+	return toolutil.CloneTool(readFileTool)
 }
 
 type ReadFileArgs struct {
@@ -59,6 +64,9 @@ const maxReadBytes = 16 * 1024 * 1024 // 16MB safety limit
 // ReadFile reads a file from disk and returns its contents.
 // If Encoding == "binary" the output is base64-encoded.
 func ReadFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUnion, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// Normalize and validate encoding.
 	enc := fileutil.ReadEncoding(strings.TrimSpace(args.Encoding))
 	if enc == "" {

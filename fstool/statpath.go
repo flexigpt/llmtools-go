@@ -5,12 +5,13 @@ import (
 	"time"
 
 	"github.com/ppipada/llmtools-go/internal/fileutil"
+	"github.com/ppipada/llmtools-go/internal/toolutil"
 	"github.com/ppipada/llmtools-go/spec"
 )
 
-const StatPathFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/statpath.StatPath"
+const statPathFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/statpath.StatPath"
 
-var StatPathTool = spec.Tool{
+var statPathTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "018fe0f4-b8cd-7e55-82d5-9df0bd70e4bd",
 	Slug:          "statpath",
@@ -31,10 +32,14 @@ var StatPathTool = spec.Tool{
 		"required": ["path"],
 		"additionalProperties": false
 	}`),
-	GoImpl: spec.GoToolImpl{FuncID: StatPathFuncID},
+	GoImpl: spec.GoToolImpl{FuncID: statPathFuncID},
 
 	CreatedAt:  spec.SchemaStartTime,
 	ModifiedAt: spec.SchemaStartTime,
+}
+
+func StatPathTool() spec.Tool {
+	return toolutil.CloneTool(statPathTool)
 }
 
 type StatPathArgs struct {

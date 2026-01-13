@@ -4,12 +4,13 @@ import (
 	"context"
 
 	"github.com/ppipada/llmtools-go/internal/fileutil"
+	"github.com/ppipada/llmtools-go/internal/toolutil"
 	"github.com/ppipada/llmtools-go/spec"
 )
 
-const ListDirectoryFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/listdirectory.ListDirectory"
+const listDirectoryFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/listdirectory.ListDirectory"
 
-var ListDirectoryTool = spec.Tool{
+var listDirectoryTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "018fe0f4-b8cd-7e55-82d5-9df0bd70e4bb",
 	Slug:          "listdir",
@@ -35,10 +36,14 @@ var ListDirectoryTool = spec.Tool{
 		"required": [],
 		"additionalProperties": false
 	}`),
-	GoImpl: spec.GoToolImpl{FuncID: ListDirectoryFuncID},
+	GoImpl: spec.GoToolImpl{FuncID: listDirectoryFuncID},
 
 	CreatedAt:  spec.SchemaStartTime,
 	ModifiedAt: spec.SchemaStartTime,
+}
+
+func ListDirectoryTool() spec.Tool {
+	return toolutil.CloneTool(listDirectoryTool)
 }
 
 type ListDirectoryArgs struct {

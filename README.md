@@ -7,13 +7,39 @@
 LLM Tool implementations for Golang
 
 - [Features at a glance](#features-at-a-glance)
+- [Package overview](#package-overview)
 - [Installation](#installation)
 - [Quickstart](#quickstart)
-- [Examples](#examples)
-- [Notes](#notes)
+  - [Registry with Built-ins](#registry-with-built-ins)
+  - [Direct Tool Usage](#direct-tool-usage)
 - [Development](#development)
 
 ## Features at a glance
+
+- Go-native tool implementations for common local tasks. Current tools:
+
+  - File system (`fstool`):
+
+    - List directory (`listdir`): Lists entries under a directory, optionally filtered via glob.
+    - Read file (`readfile`): Reads local files as UTF-8 text (rejects non-text content) or base64 binary (with image/file output kinds). Includes a size cap for safety.
+    - Search files (`searchfiles`): Recursively searches path and (text) content using RE2 regex.
+    - Inspect path (`statpath`): Returns existence, size, timestamps, and directory flag.
+
+  - Images (`imagetool`):
+
+    - Inspect image (`inspectimage`): Returns dimensions, format, size, modtime for local images.
+
+- Tool registry for:
+  - collecting and listing tool manifests (stable ordering)
+  - invoking tools via JSON input/output with strict JSON input decoding
+  - tool call timeout handling
+
+## Package overview
+
+- `llmtools`: Registry and registration helpers
+- `spec`: Tool manifests + IO/output schema
+- `fstool`: Filesystem tools (standalone callable)
+- `imagetool`: Image tools (standalone callable)
 
 ## Installation
 
@@ -24,9 +50,67 @@ go get github.com/ppipada/llmtools-go
 
 ## Quickstart
 
-## Examples
+### Registry with Built-ins
 
-## Notes
+```go
+package main
+
+import (
+    "context"
+    "encoding/json"
+    "fmt"
+
+    "github.com/ppipada/llmtools-go"
+    "github.com/ppipada/llmtools-go/spec"
+)
+
+func main() {
+    r, err := llmtools.NewBuiltinRegistry(
+        llmtools.WithCallTimeoutForAll(5), // or 5*time.Second
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    // List tool manifests (for prompt/tool definition)
+    for _, t := range r.Tools() {
+        fmt.Printf("%s (%s): %s\n", t.Slug, t.GoImpl.FuncID, t.Description)
+    }
+
+    // Call a tool by FuncID using JSON input
+    in := json.RawMessage(`{"path": ".", "pattern": "*.go"}`)
+    out, err := r.Call(context.Background(), spec.FuncID("..."), in)
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Printf("tool outputs: %+v\n", out)
+}
+```
+
+### Direct Tool Usage
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+
+    "github.com/ppipada/llmtools-go/fstool"
+)
+
+func main() {
+    out, err := fstool.ListDirectory(context.Background(), fstool.ListDirectoryArgs{
+        Path:    ".",
+        Pattern: "*.md",
+    })
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(out.Entries)
+}
+```
 
 ## Development
 

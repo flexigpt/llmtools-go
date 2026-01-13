@@ -1,7 +1,6 @@
 package llmtools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +14,7 @@ import (
 	"github.com/ppipada/llmtools-go/imagetool"
 	"github.com/ppipada/llmtools-go/internal/jsonutil"
 	"github.com/ppipada/llmtools-go/internal/logutil"
+	"github.com/ppipada/llmtools-go/internal/toolutil"
 	"github.com/ppipada/llmtools-go/spec"
 )
 
@@ -33,10 +33,10 @@ type RegistryOption func(*Registry) error
 
 // NewBuiltinRegistry returns a Registry with all built-in tools registered.
 // By default it applies a 5s timeout, but callers can override it by passing
-// WithCallTimeoutForAll as a later option.
+// WithDefaultCallTimeout as a later option.
 func NewBuiltinRegistry(opts ...RegistryOption) (*Registry, error) {
 	defaults := []RegistryOption{
-		WithCallTimeoutForAll(5 * time.Second),
+		WithDefaultCallTimeout(5 * time.Second),
 	}
 	defaults = append(defaults, opts...)
 	r, err := NewRegistry(defaults...)
@@ -49,7 +49,7 @@ func NewBuiltinRegistry(opts ...RegistryOption) (*Registry, error) {
 	return r, nil
 }
 
-func WithCallTimeoutForAll(d time.Duration) RegistryOption {
+func WithDefaultCallTimeout(d time.Duration) RegistryOption {
 	return func(gr *Registry) error {
 		gr.timeout = d
 		return nil
@@ -83,19 +83,19 @@ func NewRegistry(opts ...RegistryOption) (*Registry, error) {
 
 // RegisterBuiltins registers the built-in tools into r.
 func RegisterBuiltins(r *Registry) error {
-	if err := RegisterOutputsTool(r, fstool.ReadFileTool, fstool.ReadFile); err != nil {
+	if err := RegisterOutputsTool(r, fstool.ReadFileTool(), fstool.ReadFile); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, fstool.ListDirectoryTool, fstool.ListDirectory); err != nil {
+	if err := RegisterTypedAsTextTool(r, fstool.ListDirectoryTool(), fstool.ListDirectory); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, fstool.SearchFilesTool, fstool.SearchFiles); err != nil {
+	if err := RegisterTypedAsTextTool(r, fstool.SearchFilesTool(), fstool.SearchFiles); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, fstool.StatPathTool, fstool.StatPath); err != nil {
+	if err := RegisterTypedAsTextTool(r, fstool.StatPathTool(), fstool.StatPath); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, imagetool.InspectImageTool, imagetool.InspectImage); err != nil {
+	if err := RegisterTypedAsTextTool(r, imagetool.InspectImageTool(), imagetool.InspectImage); err != nil {
 		return err
 	}
 	return nil
@@ -126,6 +126,20 @@ func (r *Registry) RegisterTool(tool spec.Tool, fn spec.ToolFunc) error {
 	if tool.GoImpl.FuncID == "" {
 		return errors.New("invalid tool: missing funcID")
 	}
+
+	if tool.SchemaVersion == "" {
+		return errors.New("invalid tool: missing schemaVersion")
+	}
+	if tool.SchemaVersion != spec.SchemaVersion {
+		return fmt.Errorf(
+			"invalid tool: schemaVersion %q does not match library schemaVersion %q",
+			tool.SchemaVersion,
+			spec.SchemaVersion,
+		)
+	}
+	if len(tool.ArgSchema) > 0 && !json.Valid(tool.ArgSchema) {
+		return errors.New("invalid tool: argSchema is not valid JSON")
+	}
 	if fn == nil {
 		return errors.New("invalid tool: nil func")
 	}
@@ -136,7 +150,7 @@ func (r *Registry) RegisterTool(tool spec.Tool, fn spec.ToolFunc) error {
 		return fmt.Errorf("go-tool already registered: %s", tool.GoImpl.FuncID)
 	}
 	r.toolMap[tool.GoImpl.FuncID] = fn
-	r.toolSpecMap[tool.GoImpl.FuncID] = cloneTool(tool)
+	r.toolSpecMap[tool.GoImpl.FuncID] = toolutil.CloneTool(tool)
 
 	return nil
 }
@@ -209,7 +223,7 @@ func (r *Registry) Tools() []spec.Tool {
 
 	out := make([]spec.Tool, 0, len(r.toolSpecMap))
 	for _, t := range r.toolSpecMap {
-		out = append(out, cloneTool(t))
+		out = append(out, toolutil.CloneTool(t))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		// Stable tool manifests matter for prompts and tests.
@@ -268,16 +282,4 @@ func typedToText[T, R any](fn func(context.Context, T) (R, error)) spec.ToolFunc
 			},
 		}, nil
 	}
-}
-
-func cloneTool(t spec.Tool) spec.Tool {
-	// ArgSchema is json.RawMessage ([]byte) => must deep copy.
-	if len(t.ArgSchema) > 0 {
-		t.ArgSchema = bytes.Clone(t.ArgSchema)
-	}
-	// Tags is a slice => must deep copy.
-	if len(t.Tags) > 0 {
-		t.Tags = append([]string(nil), t.Tags...)
-	}
-	return t
 }
