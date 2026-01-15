@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
 [![Go Report Card](https://goreportcard.com/badge/github.com/flexigpt/llmtools-go)](https://goreportcard.com/report/github.com/flexigpt/llmtools-go)
 [![lint](https://github.com/flexigpt/llmtools-go/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/flexigpt/llmtools-go/actions/workflows/lint.yml)
+[![test](https://github.com/ppipada/llmtools-go/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/ppipada/llmtools-go/actions/workflows/test.yml)
 
 LLM Tool implementations for Golang
 
