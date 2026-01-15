@@ -10,12 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ppipada/llmtools-go/fstool"
-	"github.com/ppipada/llmtools-go/imagetool"
-	"github.com/ppipada/llmtools-go/internal/jsonutil"
-	"github.com/ppipada/llmtools-go/internal/logutil"
-	"github.com/ppipada/llmtools-go/internal/toolutil"
-	"github.com/ppipada/llmtools-go/spec"
+	"github.com/flexigpt/llmtools-go/fstool"
+	"github.com/flexigpt/llmtools-go/imagetool"
+	"github.com/flexigpt/llmtools-go/internal/jsonutil"
+	"github.com/flexigpt/llmtools-go/internal/logutil"
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
+	"github.com/flexigpt/llmtools-go/spec"
 )
 
 // Registry provides lookup/register for Go tools by funcID, with json.RawMessage I/O.

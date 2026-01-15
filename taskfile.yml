@@ -31,7 +31,7 @@ tasks:
 
   godepgraph:
     cmds:
-      - godepgraph -s -o github.com/ppipada/llmtools-go,command-line-arguments registry.go | dot -Tpng -o godepgraph.png
+      - godepgraph -s -o github.com/flexigpt/llmtools-go,command-line-arguments registry.go | dot -Tpng -o godepgraph.png
 
   tagstats:
     cmds:

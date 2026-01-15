@@ -9,13 +9,13 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/ppipada/llmtools-go/internal/fileutil"
-	"github.com/ppipada/llmtools-go/internal/pdfutil"
-	"github.com/ppipada/llmtools-go/internal/toolutil"
-	"github.com/ppipada/llmtools-go/spec"
+	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/pdfutil"
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
+	"github.com/flexigpt/llmtools-go/spec"
 )
 
-const readFileFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/readfile.ReadFile"
+const readFileFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/fstool/readfile.ReadFile"
 
 var readFileTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,

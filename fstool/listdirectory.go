@@ -3,12 +3,12 @@ package fstool
 import (
 	"context"
 
-	"github.com/ppipada/llmtools-go/internal/fileutil"
-	"github.com/ppipada/llmtools-go/internal/toolutil"
-	"github.com/ppipada/llmtools-go/spec"
+	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
+	"github.com/flexigpt/llmtools-go/spec"
 )
 
-const listDirectoryFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/listdirectory.ListDirectory"
+const listDirectoryFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/fstool/listdirectory.ListDirectory"
 
 var listDirectoryTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,

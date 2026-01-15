@@ -4,12 +4,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/ppipada/llmtools-go/internal/fileutil"
-	"github.com/ppipada/llmtools-go/internal/toolutil"
-	"github.com/ppipada/llmtools-go/spec"
+	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
+	"github.com/flexigpt/llmtools-go/spec"
 )
 
-const statPathFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/statpath.StatPath"
+const statPathFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/fstool/statpath.StatPath"
 
 var statPathTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,

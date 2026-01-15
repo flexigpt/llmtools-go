@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ppipada/llmtools-go/spec"
+	"github.com/flexigpt/llmtools-go/spec"
 )
 
 // TestReadFile covers happy, error, and boundary cases for ReadFile.

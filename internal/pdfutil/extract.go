@@ -8,8 +8,8 @@ import (
 	"io"
 	"strings"
 
+	"github.com/flexigpt/llmtools-go/internal/logutil"
 	"github.com/ledongthuc/pdf"
-	"github.com/ppipada/llmtools-go/internal/logutil"
 )
 
 // ExtractPDFTextSafe extracts text from a local PDF with a byte limit and panic recovery.

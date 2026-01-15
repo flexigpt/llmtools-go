@@ -3,12 +3,12 @@ package fstool
 import (
 	"context"
 
-	"github.com/ppipada/llmtools-go/internal/fileutil"
-	"github.com/ppipada/llmtools-go/internal/toolutil"
-	"github.com/ppipada/llmtools-go/spec"
+	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
+	"github.com/flexigpt/llmtools-go/spec"
 )
 
-const searchFilesFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/searchfiles.SearchFiles"
+const searchFilesFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/fstool/searchfiles.SearchFiles"
 
 var searchFilesTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,

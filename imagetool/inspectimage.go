@@ -4,12 +4,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/ppipada/llmtools-go/internal/fileutil"
-	"github.com/ppipada/llmtools-go/internal/toolutil"
-	"github.com/ppipada/llmtools-go/spec"
+	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
+	"github.com/flexigpt/llmtools-go/spec"
 )
 
-const inspectImageFuncID spec.FuncID = "github.com/ppipada/llmtools-go/imagetool/inspectimage.InspectImage"
+const inspectImageFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/imagetool/inspectimage.InspectImage"
 
 var inspectImageTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,

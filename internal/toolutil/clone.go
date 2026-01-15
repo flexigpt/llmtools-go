@@ -3,7 +3,7 @@ package toolutil
 import (
 	"bytes"
 
-	"github.com/ppipada/llmtools-go/spec"
+	"github.com/flexigpt/llmtools-go/spec"
 )
 
 func CloneTool(t spec.Tool) spec.Tool {

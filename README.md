@@ -1,8 +1,8 @@
 # LLM Tools for Go
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
-[![Go Report Card](https://goreportcard.com/badge/github.com/ppipada/llmtools-go)](https://goreportcard.com/report/github.com/ppipada/llmtools-go)
-[![lint](https://github.com/ppipada/llmtools-go/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/ppipada/llmtools-go/actions/workflows/lint.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/flexigpt/llmtools-go)](https://goreportcard.com/report/github.com/flexigpt/llmtools-go)
+[![lint](https://github.com/flexigpt/llmtools-go/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/flexigpt/llmtools-go/actions/workflows/lint.yml)
 
 LLM Tool implementations for Golang
 
@@ -45,7 +45,7 @@ LLM Tool implementations for Golang
 
 ```bash
 # Go 1.25+
-go get github.com/ppipada/llmtools-go
+go get github.com/flexigpt/llmtools-go
 ```
 
 ## Quickstart
@@ -60,8 +60,8 @@ import (
     "encoding/json"
     "fmt"
 
-    "github.com/ppipada/llmtools-go"
-    "github.com/ppipada/llmtools-go/spec"
+    "github.com/flexigpt/llmtools-go"
+    "github.com/flexigpt/llmtools-go/spec"
 )
 
 func main() {
@@ -97,7 +97,7 @@ import (
     "context"
     "fmt"
 
-    "github.com/ppipada/llmtools-go/fstool"
+    "github.com/flexigpt/llmtools-go/fstool"
 )
 
 func main() {

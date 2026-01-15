@@ -1,4 +1,4 @@
-module github.com/ppipada/llmtools-go
+module github.com/flexigpt/llmtools-go
 
 go 1.25.3
 
