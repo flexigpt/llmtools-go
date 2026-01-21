@@ -35,9 +35,8 @@ type RegistryOption func(*Registry) error
 // By default it applies a 5s timeout, but callers can override it by passing
 // WithDefaultCallTimeout as a later option.
 func NewBuiltinRegistry(opts ...RegistryOption) (*Registry, error) {
-	defaults := []RegistryOption{
-		WithDefaultCallTimeout(5 * time.Second),
-	}
+	defaults := make([]RegistryOption, 0, 1+len(opts))
+	defaults = append(defaults, WithDefaultCallTimeout(5*time.Second))
 	defaults = append(defaults, opts...)
 	r, err := NewRegistry(defaults...)
 	if err != nil {
