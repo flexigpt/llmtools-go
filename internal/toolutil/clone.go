@@ -7,13 +7,17 @@ import (
 )
 
 func CloneTool(t spec.Tool) spec.Tool {
-	// ArgSchema is json.RawMessage ([]byte) => must deep copy.
-	if len(t.ArgSchema) > 0 {
-		t.ArgSchema = bytes.Clone(t.ArgSchema)
+	// ArgSchema: deep copy even if len==0 but slice is non-nil (may have cap>0 backing array).
+	if t.ArgSchema != nil {
+		t.ArgSchema = spec.JSONSchema(bytes.Clone([]byte(t.ArgSchema)))
 	}
-	// Tags is a slice => must deep copy.
-	if len(t.Tags) > 0 {
-		t.Tags = append([]string(nil), t.Tags...)
+
+	// Tags: deep copy even if len==0 but slice is non-nil (may have cap>0 backing array).
+	if t.Tags != nil {
+		dst := make([]string, len(t.Tags))
+		copy(dst, t.Tags)
+		t.Tags = dst
 	}
+
 	return t
 }
