@@ -94,6 +94,12 @@ func RegisterBuiltins(r *Registry) error {
 	if err := RegisterTypedAsTextTool(r, fstool.StatPathTool(), fstool.StatPath); err != nil {
 		return err
 	}
+	if err := RegisterTypedAsTextTool(r, fstool.MIMEForPathTool(), fstool.MIMEForPath); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, fstool.MIMEForExtensionTool(), fstool.MIMEForExtension); err != nil {
+		return err
+	}
 	if err := RegisterTypedAsTextTool(r, imagetool.ReadImageTool(), imagetool.ReadImage); err != nil {
 		return err
 	}
