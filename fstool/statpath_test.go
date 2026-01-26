@@ -1,7 +1,6 @@
 package fstool
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,7 +13,7 @@ func TestStatPath(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	res, err := StatPath(context.Background(), StatPathArgs{Path: filePath})
+	res, err := StatPath(t.Context(), StatPathArgs{Path: filePath})
 	if err != nil {
 		t.Fatalf("StatPath returned error: %v", err)
 	}
@@ -28,7 +27,7 @@ func TestStatPath(t *testing.T) {
 		t.Fatalf("expected mod time to be set")
 	}
 
-	dirRes, err := StatPath(context.Background(), StatPathArgs{Path: tmpDir})
+	dirRes, err := StatPath(t.Context(), StatPathArgs{Path: tmpDir})
 	if err != nil {
 		t.Fatalf("StatPath dir error: %v", err)
 	}
@@ -36,7 +35,7 @@ func TestStatPath(t *testing.T) {
 		t.Fatalf("expected dir to exist and be dir: %+v", dirRes)
 	}
 
-	nonExistent, err := StatPath(context.Background(), StatPathArgs{
+	nonExistent, err := StatPath(t.Context(), StatPathArgs{
 		Path: filepath.Join(tmpDir, "missing.txt"),
 	})
 	if err != nil {
@@ -46,7 +45,7 @@ func TestStatPath(t *testing.T) {
 		t.Fatalf("expected missing path to report Exists=false")
 	}
 
-	if _, err := StatPath(context.Background(), StatPathArgs{}); err == nil {
+	if _, err := StatPath(t.Context(), StatPathArgs{}); err == nil {
 		t.Fatalf("expected error for empty path")
 	}
 }

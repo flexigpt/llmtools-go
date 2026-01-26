@@ -1,7 +1,6 @@
 package fstool
 
 import (
-	"context"
 	"encoding/base64"
 	"os"
 	"path/filepath"
@@ -96,7 +95,7 @@ func TestReadFile(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			outs, err := ReadFile(context.Background(), tt.args)
+			outs, err := ReadFile(t.Context(), tt.args)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ReadFile error = %v, wantErr = %v", err, tt.wantErr)
 			}

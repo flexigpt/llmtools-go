@@ -1,7 +1,6 @@
 package fstool
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -72,7 +71,7 @@ func TestListDirectory(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out, err := ListDirectory(context.Background(), tt.args)
+			out, err := ListDirectory(t.Context(), tt.args)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ListDirectory error = %v, wantErr = %v", err, tt.wantErr)
 			}

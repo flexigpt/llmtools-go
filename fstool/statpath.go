@@ -47,6 +47,8 @@ type StatPathArgs struct {
 }
 
 type StatPathOut struct {
+	Path      string     `json:"path"`
+	Name      string     `json:"name"`
 	Exists    bool       `json:"exists"`
 	IsDir     bool       `json:"isDir"`
 	SizeBytes int64      `json:"sizeBytes,omitempty"`
@@ -63,6 +65,8 @@ func StatPath(ctx context.Context, args StatPathArgs) (*StatPathOut, error) {
 		return nil, err
 	}
 	return &StatPathOut{
+		Path:      pathInfo.Path,
+		Name:      pathInfo.Name,
 		Exists:    pathInfo.Exists,
 		IsDir:     pathInfo.IsDir,
 		SizeBytes: pathInfo.Size,

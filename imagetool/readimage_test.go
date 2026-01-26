@@ -1,7 +1,6 @@
 package imagetool
 
 import (
-	"context"
 	"encoding/base64"
 	"image"
 	"image/color"
@@ -36,7 +35,7 @@ func TestReadImage(t *testing.T) {
 	}
 
 	t.Run("metadata only", func(t *testing.T) {
-		out, err := ReadImage(context.Background(), ReadImageArgs{
+		out, err := ReadImage(t.Context(), ReadImageArgs{
 			Path:              imgPath,
 			IncludeBase64Data: false,
 		})
@@ -68,7 +67,7 @@ func TestReadImage(t *testing.T) {
 	})
 
 	t.Run("metadata + base64", func(t *testing.T) {
-		out, err := ReadImage(context.Background(), ReadImageArgs{
+		out, err := ReadImage(t.Context(), ReadImageArgs{
 			Path:              imgPath,
 			IncludeBase64Data: true,
 		})
@@ -94,7 +93,7 @@ func TestReadImage(t *testing.T) {
 
 	t.Run("non-existent path is not an error", func(t *testing.T) {
 		missing := filepath.Join(tmpDir, "missing.png")
-		out, err := ReadImage(context.Background(), ReadImageArgs{Path: missing})
+		out, err := ReadImage(t.Context(), ReadImageArgs{Path: missing})
 		if err != nil {
 			t.Fatalf("expected nil error for missing file, got %v", err)
 		}
@@ -115,19 +114,19 @@ func TestReadImage(t *testing.T) {
 		if err := os.WriteFile(textPath, []byte("plain"), 0o600); err != nil {
 			t.Fatalf("write text: %v", err)
 		}
-		if _, err := ReadImage(context.Background(), ReadImageArgs{Path: textPath}); err == nil {
+		if _, err := ReadImage(t.Context(), ReadImageArgs{Path: textPath}); err == nil {
 			t.Fatalf("expected error for non-image file")
 		}
 	})
 
 	t.Run("directory path errors", func(t *testing.T) {
-		if _, err := ReadImage(context.Background(), ReadImageArgs{Path: tmpDir}); err == nil {
+		if _, err := ReadImage(t.Context(), ReadImageArgs{Path: tmpDir}); err == nil {
 			t.Fatalf("expected error for directory path")
 		}
 	})
 
 	t.Run("empty path errors", func(t *testing.T) {
-		if _, err := ReadImage(context.Background(), ReadImageArgs{}); err == nil {
+		if _, err := ReadImage(t.Context(), ReadImageArgs{}); err == nil {
 			t.Fatalf("expected error for empty path")
 		}
 	})
