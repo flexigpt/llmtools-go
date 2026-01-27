@@ -1,4 +1,4 @@
-package commandtool
+package shelltool
 
 import (
 	"context"
@@ -16,55 +16,10 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
-func resetSessionsForTest(t *testing.T) {
-	t.Helper()
-
-	// Clear global sessions map, and mark old sessions closed to avoid leaks.
-	sessionsMu.Lock()
-	old := sessions
-	sessions = map[string]*shellCommandSession{}
-	sessionsMu.Unlock()
-
-	for _, s := range old {
-		if s == nil {
-			continue
-		}
-		s.mu.Lock()
-		s.closed = true
-		s.mu.Unlock()
-	}
-}
-
-func decodeShellResponse(t *testing.T, out []spec.ToolStoreOutputUnion) ShellCommandToolResponse {
-	t.Helper()
-
-	if len(out) != 1 {
-		t.Fatalf("expected 1 output item, got %d", len(out))
-	}
-	if out[0].Kind != spec.ToolStoreOutputKindText || out[0].TextItem == nil {
-		t.Fatalf("expected text output, got kind=%q textItem=%v", out[0].Kind, out[0].TextItem)
-	}
-
-	var resp ShellCommandToolResponse
-	if err := json.Unmarshal([]byte(out[0].TextItem.Text), &resp); err != nil {
-		t.Fatalf("failed to unmarshal response JSON: %v\njson=%s", err, out[0].TextItem.Text)
-	}
-	return resp
-}
-
-func mustLookPath(t *testing.T, name string) string {
-	t.Helper()
-	p, err := exec.LookPath(name)
-	if err != nil || strings.TrimSpace(p) == "" {
-		t.Skipf("missing dependency on PATH: %s (%v)", name, err)
-	}
-	return p
-}
-
 func TestShellCommand_ArgValidation_MutualExclusionAndRequirements(t *testing.T) {
-	resetSessionsForTest(t)
+	st := newTestShellTool(t)
 
-	_, err := ShellCommand(t.Context(), ShellCommandArgs{
+	_, err := st.Run(t.Context(), ShellCommandArgs{
 		CreateSession: true,
 		SessionID:     "sess_abc",
 		Commands:      []string{"echo hi"},
@@ -73,7 +28,7 @@ func TestShellCommand_ArgValidation_MutualExclusionAndRequirements(t *testing.T)
 		t.Fatalf("expected createSession+sessionID error, got: %v", err)
 	}
 
-	_, err = ShellCommand(t.Context(), ShellCommandArgs{
+	_, err = st.Run(t.Context(), ShellCommandArgs{
 		CreateSession: true,
 		CloseSession:  true,
 		Commands:      []string{"echo hi"},
@@ -82,7 +37,7 @@ func TestShellCommand_ArgValidation_MutualExclusionAndRequirements(t *testing.T)
 		t.Fatalf("expected createSession+closeSession error, got: %v", err)
 	}
 
-	_, err = ShellCommand(t.Context(), ShellCommandArgs{
+	_, err = st.Run(t.Context(), ShellCommandArgs{
 		CloseSession: true,
 		Commands:     []string{"echo hi"},
 	})
@@ -90,7 +45,7 @@ func TestShellCommand_ArgValidation_MutualExclusionAndRequirements(t *testing.T)
 		t.Fatalf("expected closeSession+commands error, got: %v", err)
 	}
 
-	_, err = ShellCommand(t.Context(), ShellCommandArgs{
+	_, err = st.Run(t.Context(), ShellCommandArgs{
 		RestartSession: true,
 		Commands:       []string{"echo hi"},
 	})
@@ -98,14 +53,14 @@ func TestShellCommand_ArgValidation_MutualExclusionAndRequirements(t *testing.T)
 		t.Fatalf("expected restartSession without sessionID error, got: %v", err)
 	}
 
-	_, err = ShellCommand(t.Context(), ShellCommandArgs{
+	_, err = st.Run(t.Context(), ShellCommandArgs{
 		CloseSession: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "sessionID is required") {
 		t.Fatalf("expected closeSession without sessionID error, got: %v", err)
 	}
 
-	_, err = ShellCommand(t.Context(), ShellCommandArgs{
+	_, err = st.Run(t.Context(), ShellCommandArgs{
 		SessionID: "sess_unknown",
 		Commands:  []string{"echo hi"},
 	})
@@ -113,17 +68,17 @@ func TestShellCommand_ArgValidation_MutualExclusionAndRequirements(t *testing.T)
 		t.Fatalf("expected unknown sessionID error, got: %v", err)
 	}
 
-	_, err = ShellCommand(t.Context(), ShellCommandArgs{})
+	_, err = st.Run(t.Context(), ShellCommandArgs{})
 	if err == nil || !strings.Contains(err.Error(), "commands is required") {
 		t.Fatalf("expected commands required error, got: %v", err)
 	}
 }
 
 func TestShellCommand_CreateSession_CleansUpOnLaterError(t *testing.T) {
-	resetSessionsForTest(t)
+	st := newTestShellTool(t)
 
 	// Force an error after session creation by omitting commands.
-	_, err := ShellCommand(t.Context(), ShellCommandArgs{
+	_, err := st.Run(t.Context(), ShellCommandArgs{
 		CreateSession: true,
 		Commands:      nil,
 	})
@@ -132,10 +87,10 @@ func TestShellCommand_CreateSession_CleansUpOnLaterError(t *testing.T) {
 	}
 
 	// Ensure no leaked session.
-	sessionsMu.RLock()
-	defer sessionsMu.RUnlock()
-	if len(sessions) != 0 {
-		t.Fatalf("expected no sessions left, found %d", len(sessions))
+	st.sessions.mu.RLock()
+	defer st.sessions.mu.RUnlock()
+	if len(st.sessions.m) != 0 {
+		t.Fatalf("expected no sessions left, found %d", len(st.sessions.m))
 	}
 }
 
@@ -153,57 +108,51 @@ func TestNormalizedCommandList(t *testing.T) {
 }
 
 func TestEffectiveTimeout_ClampsAndDefaults(t *testing.T) {
-	orig := DefaultShellCommandPolicy
-	t.Cleanup(func() { DefaultShellCommandPolicy = orig })
+	p := DefaultShellCommandPolicy
+	p.DefaultTimeout = 1500 * time.Millisecond
 
-	DefaultShellCommandPolicy.DefaultTimeout = 1500 * time.Millisecond
-
-	if got := effectiveTimeout(nil); got != 1500*time.Millisecond {
+	if got := effectiveTimeout(p, nil); got != 1500*time.Millisecond {
 		t.Fatalf("expected default timeout 1500ms, got %v", got)
 	}
 
 	neg := int64(-5)
-	if got := effectiveTimeout(&neg); got != 1500*time.Millisecond {
+	if got := effectiveTimeout(p, &neg); got != 1500*time.Millisecond {
 		t.Fatalf("expected default timeout for negative, got %v", got)
 	}
 
 	// Hard max is 10 min.
 	big := (11 * time.Minute).Milliseconds()
-	if got := effectiveTimeout(&big); got != 10*time.Minute {
+	if got := effectiveTimeout(p, &big); got != 10*time.Minute {
 		t.Fatalf("expected hard max 10m, got %v", got)
 	}
 }
 
 func TestEffectiveMaxOutputBytes_ClampsAndDefaults(t *testing.T) {
-	orig := DefaultShellCommandPolicy
-	t.Cleanup(func() { DefaultShellCommandPolicy = orig })
+	p := DefaultShellCommandPolicy
+	p.DefaultMaxOutputBytes = 2048
+	p.HardMaxOutputBytes = 4096
 
-	DefaultShellCommandPolicy.DefaultMaxOutputBytes = 2048
-	DefaultShellCommandPolicy.HardMaxOutputBytes = 4096
-
-	if got := effectiveMaxOutputBytes(nil); got != 2048 {
+	if got := effectiveMaxOutputBytes(p, nil); got != 2048 {
 		t.Fatalf("expected default 2048, got %d", got)
 	}
 
 	zero := int64(0)
-	if got := effectiveMaxOutputBytes(&zero); got != 2048 {
+	if got := effectiveMaxOutputBytes(p, &zero); got != 2048 {
 		t.Fatalf("expected default for 0, got %d", got)
 	}
 
 	tooSmall := int64(1)
-	if got := effectiveMaxOutputBytes(&tooSmall); got != 1024 {
+	if got := effectiveMaxOutputBytes(p, &tooSmall); got != 1024 {
 		t.Fatalf("expected min clamp 1024, got %d", got)
 	}
 
 	tooBig := int64(999999)
-	if got := effectiveMaxOutputBytes(&tooBig); got != 4096 {
+	if got := effectiveMaxOutputBytes(p, &tooBig); got != 4096 {
 		t.Fatalf("expected hard max clamp 4096, got %d", got)
 	}
 }
 
 func TestCanonicalWorkdir_AndEnsureDirExists(t *testing.T) {
-	resetSessionsForTest(t)
-
 	td := t.TempDir()
 
 	got, err := canonicalWorkdir(td)
@@ -222,7 +171,7 @@ func TestCanonicalWorkdir_AndEnsureDirExists(t *testing.T) {
 	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	_, err = effectiveWorkdir(f, nil)
+	_, err = effectiveWorkdir(f, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "not a directory") {
 		t.Fatalf("expected not-a-directory error, got: %v", err)
 	}
@@ -329,9 +278,8 @@ func TestClassifyWarnings(t *testing.T) {
 func TestCappedWriter_TruncatesAndCounts(t *testing.T) {
 	w := newCappedWriter(1024)
 
-	chunk := strings.Repeat("a", 600)
-	_, _ = w.Write([]byte(chunk))
-	_, _ = w.Write([]byte(chunk)) // total 1200 > 1024
+	_, _ = w.Write([]byte(strings.Repeat("a", 600)))
+	_, _ = w.Write([]byte(strings.Repeat("b", 600))) // total 1200 > 1024
 
 	if w.TotalBytes() != 1200 {
 		t.Fatalf("expected totalBytes 1200, got %d", w.TotalBytes())
@@ -341,6 +289,10 @@ func TestCappedWriter_TruncatesAndCounts(t *testing.T) {
 	}
 	if got := len(w.Bytes()); got != 1024 {
 		t.Fatalf("expected stored bytes len 1024, got %d", got)
+	}
+	b := w.Bytes()
+	if len(b) == 0 || b[len(b)-1] != 'b' {
+		t.Fatalf("expected tail capture ending with 'b'")
 	}
 }
 
@@ -358,9 +310,9 @@ func TestShellCommand_Run_CapturesStdoutStderr_ExitCode(t *testing.T) {
 	if runtime.GOOS == GOOSWindows {
 		t.Skip("unix command expectations")
 	}
-	resetSessionsForTest(t)
+	st := newTestShellTool(t)
 
-	out, err := ShellCommand(t.Context(), ShellCommandArgs{
+	out, err := st.Run(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
 		Commands: []string{`printf '%s' hello; printf '%s' err_msg 1>&2`},
 	})
@@ -393,10 +345,10 @@ func TestShellCommand_ExitCode_NonZeroAndSignaled(t *testing.T) {
 	if runtime.GOOS == GOOSWindows {
 		t.Skip("unix-specific exit/signal expectations")
 	}
-	resetSessionsForTest(t)
+	st := newTestShellTool(t)
 
 	// Exit with explicit code.
-	out, err := ShellCommand(t.Context(), ShellCommandArgs{
+	out, err := st.Run(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
 		Commands: []string{`exit 7`},
 	})
@@ -409,7 +361,7 @@ func TestShellCommand_ExitCode_NonZeroAndSignaled(t *testing.T) {
 	}
 
 	// Signal self with SIGKILL; expect 128+9=137 per unix convention in exitCodeFromProcessState.
-	out, err = ShellCommand(t.Context(), ShellCommandArgs{
+	out, err = st.Run(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
 		Commands: []string{`kill -9 $$`},
 	})
@@ -426,15 +378,15 @@ func TestShellCommand_Timeout_SetsTimedOutAnd124(t *testing.T) {
 	if runtime.GOOS == GOOSWindows {
 		t.Skip("unix-specific sleep/timeout expectations")
 	}
-	resetSessionsForTest(t)
+	st := newTestShellTool(t)
 
 	to := int64(150) // ms
-	out, err := ShellCommand(t.Context(), ShellCommandArgs{
+	out, err := st.Run(t.Context(), ShellCommandArgs{
 		Shell:        ShellNameSh,
 		TimeoutMS:    &to,
 		Commands:     []string{`sleep 2`},
 		Notes:        "timeout test",
-		Login:        ptrBool(false),
+		Login:        false,
 		SessionID:    "",
 		Workdir:      "",
 		Env:          nil,
@@ -460,10 +412,10 @@ func TestShellCommand_MaxOutput_Truncates(t *testing.T) {
 	if runtime.GOOS == GOOSWindows {
 		t.Skip("unix-specific sh loop expectations")
 	}
-	resetSessionsForTest(t)
+	st := newTestShellTool(t)
 
 	maxOut := int64(1024)
-	out, err := ShellCommand(t.Context(), ShellCommandArgs{
+	out, err := st.Run(t.Context(), ShellCommandArgs{
 		Shell:           ShellNameSh,
 		MaxOutputLength: &maxOut,
 		Commands: []string{
@@ -492,9 +444,9 @@ func TestShellCommand_DangerousRejected_BeforeExec(t *testing.T) {
 	if runtime.GOOS == GOOSWindows {
 		t.Skip("unix-specific dangerous patterns")
 	}
-	resetSessionsForTest(t)
+	st := newTestShellTool(t)
 
-	_, err := ShellCommand(t.Context(), ShellCommandArgs{
+	_, err := st.Run(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
 		Commands: []string{`rm -rf /`},
 	})
@@ -510,12 +462,12 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	if runtime.GOOS == GOOSWindows {
 		t.Skip("unix-specific")
 	}
-	resetSessionsForTest(t)
+	st := newTestShellTool(t)
 
 	td := t.TempDir()
 
 	// 1) Create session, set workdir and env, and run "pwd".
-	out, err := ShellCommand(t.Context(), ShellCommandArgs{
+	out, err := st.Run(t.Context(), ShellCommandArgs{
 		CreateSession: true,
 		Shell:         ShellNameSh,
 		Workdir:       td,
@@ -544,7 +496,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	sid := resp.SessionID
 
 	// 2) Verify env persists without passing Env.
-	out, err = ShellCommand(t.Context(), ShellCommandArgs{
+	out, err = st.Run(t.Context(), ShellCommandArgs{
 		SessionID: sid,
 		Shell:     ShellNameSh,
 		Commands:  []string{`printf '%s' "$FOO"`},
@@ -561,7 +513,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	}
 
 	// 3) Update session env by providing Env; should persist for subsequent calls.
-	out, err = ShellCommand(t.Context(), ShellCommandArgs{
+	out, err = st.Run(t.Context(), ShellCommandArgs{
 		SessionID: sid,
 		Shell:     ShellNameSh,
 		Env:       map[string]string{"FOO": "baz"},
@@ -575,7 +527,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 		t.Fatalf("expected FOO=baz, got %q", resp.Results[0].Stdout)
 	}
 
-	out, err = ShellCommand(t.Context(), ShellCommandArgs{
+	out, err = st.Run(t.Context(), ShellCommandArgs{
 		SessionID: sid,
 		Shell:     ShellNameSh,
 		Commands:  []string{`printf '%s' "$FOO"`},
@@ -593,7 +545,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
-	out, err = ShellCommand(t.Context(), ShellCommandArgs{
+	out, err = st.Run(t.Context(), ShellCommandArgs{
 		SessionID:      sid,
 		RestartSession: true,
 		Shell:          ShellNameSh,
@@ -613,7 +565,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	}
 
 	// 5) Close session; should return message and then be unusable.
-	out, err = ShellCommand(t.Context(), ShellCommandArgs{
+	out, err = st.Run(t.Context(), ShellCommandArgs{
 		SessionID:      sid,
 		CloseSession:   true,
 		Commands:       nil,
@@ -631,7 +583,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 		t.Fatalf("expected no results on closeSession, got %d", len(resp.Results))
 	}
 
-	_, err = ShellCommand(t.Context(), ShellCommandArgs{
+	_, err = st.Run(t.Context(), ShellCommandArgs{
 		SessionID: sid,
 		Shell:     ShellNameSh,
 		Commands:  []string{"echo hi"},
@@ -697,12 +649,12 @@ func TestToolJSONText_ProducesTextUnion(t *testing.T) {
 }
 
 func TestShellCommand_ContextCanceledEarly(t *testing.T) {
-	resetSessionsForTest(t)
+	st := newTestShellTool(t)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, err := ShellCommand(ctx, ShellCommandArgs{
+	_, err := st.Run(ctx, ShellCommandArgs{
 		Commands: []string{"echo hi"},
 	})
 	if err == nil {
@@ -713,8 +665,42 @@ func TestShellCommand_ContextCanceledEarly(t *testing.T) {
 	}
 }
 
+func newTestShellTool(t *testing.T, opts ...ShellToolOption) *ShellTool {
+	t.Helper()
+
+	st, err := NewShellTool(opts...)
+	if err != nil {
+		t.Fatalf("NewShellTool: %v", err)
+	}
+	return st
+}
+
+func decodeShellResponse(t *testing.T, out []spec.ToolStoreOutputUnion) ShellCommandResponse {
+	t.Helper()
+
+	if len(out) != 1 {
+		t.Fatalf("expected 1 output item, got %d", len(out))
+	}
+	if out[0].Kind != spec.ToolStoreOutputKindText || out[0].TextItem == nil {
+		t.Fatalf("expected text output, got kind=%q textItem=%v", out[0].Kind, out[0].TextItem)
+	}
+
+	var resp ShellCommandResponse
+	if err := json.Unmarshal([]byte(out[0].TextItem.Text), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response JSON: %v\njson=%s", err, out[0].TextItem.Text)
+	}
+	return resp
+}
+
+func mustLookPath(t *testing.T, name string) string {
+	t.Helper()
+	p, err := exec.LookPath(name)
+	if err != nil || strings.TrimSpace(p) == "" {
+		t.Skipf("missing dependency on PATH: %s (%v)", name, err)
+	}
+	return p
+}
+
 func contains(ss []string, want string) bool {
 	return slices.Contains(ss, want)
 }
-
-func ptrBool(v bool) *bool { return &v }

@@ -29,7 +29,7 @@ LLM Tool implementations for Golang
   - Images (`imagetool`):
     - Read image (`readimage`): Read intrinsic metadata for a local image file, optionally including base64-encoded contents.
 
-  - Commands (`commandtool`):
+  - Commands (`shelltool`):
     - Execute Shell commands (`shell`): Execute local shell commands (cross-platform) with timeouts, output caps, and session-like persistence for workdir/env. (Check notes below too).
 
 - Tool registry for:
@@ -43,7 +43,7 @@ LLM Tool implementations for Golang
 - `spec`: Tool manifests + IO/output schema
 - `fstool`: Filesystem tools.
 - `imagetool`: Image tools.
-- `commandtool`: Command tools.
+- `shelltool`: Shell tools.
 
 ## Installation
 
@@ -123,12 +123,12 @@ func main() {
   - No consumer build tags are required.
 
 - Timeouts:
-  - `commandtool.ShellCommand` enforces its own per-command timeout via `timeoutMS`.
+  - The tool enforces its own per-command timeout via `timeoutMS`.
   - If you also set a registry-level timeout (`WithDefaultCallTimeout` or `WithCallTimeout`),
     ensure it is >= the tool timeout or set it to 0 to avoid early cancellation.
 
 - Policy knobs:
-  - Hosts can tune `commandtool.DefaultShellCommandPolicy` (set once at startup; treat it as immutable after concurrent use).
+  - Hosts can pass a policy into tool instantiation. The default policy is at: `shelltool.DefaultShellCommandPolicy`.
 
 ## Development
 

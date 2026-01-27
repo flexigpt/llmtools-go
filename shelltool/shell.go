@@ -1,4 +1,4 @@
-package commandtool
+package shelltool
 
 import (
 	"bytes"
@@ -21,11 +21,11 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
-const shellCommandFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/commandtool/shell.ShellCommand"
+const shellCommandFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/shelltool/shell.ShellCommand"
 
 const GOOSWindows = "windows"
 
-var shellCommandTool = spec.Tool{
+var shellToolSpec = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019bfeda-33f2-7315-9007-de55935d2302",
 	Slug:          "shell",
@@ -57,6 +57,11 @@ var shellCommandTool = spec.Tool{
 				"enum": ["auto", "bash", "zsh", "sh", "powershell", "cmd"],
 				"default": "auto",
 				"description": "Which shell to run. 'auto' chooses a safe default per OS."
+			},
+			"continueOnError": {
+				"type": "boolean",
+				"default": false,
+				"description": "If true, continue executing subsequent commands after a non-zero exit code or timeout."
 			},
 			"login": {
 				"type": "boolean",
@@ -112,10 +117,6 @@ var shellCommandTool = spec.Tool{
 	ModifiedAt: spec.SchemaStartTime,
 }
 
-func ShellCommandTool() spec.Tool {
-	return toolutil.CloneTool(shellCommandTool)
-}
-
 type ShellName string
 
 const (
@@ -138,9 +139,10 @@ type ShellCommandArgs struct {
 	Workdir string            `json:"workdir,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
 
-	Shell     ShellName `json:"shell,omitempty"`
-	Login     *bool     `json:"login,omitempty"` // default false
-	TimeoutMS *int64    `json:"timeoutMS,omitempty"`
+	Shell           ShellName `json:"shell,omitempty"`
+	ContinueOnError bool      `json:"continueOnError,omitempty"`
+	Login           bool      `json:"login,omitempty"`
+	TimeoutMS       *int64    `json:"timeoutMS,omitempty"`
 
 	// In bytes, per stream (stdout and stderr each).
 	MaxOutputLength *int64 `json:"maxOutputLength,omitempty"`
@@ -152,19 +154,6 @@ type ShellCommandArgs struct {
 
 	Notes string `json:"notes,omitempty"`
 }
-
-type shellCommandSession struct {
-	id      string
-	workdir string
-	env     map[string]string
-	mu      sync.RWMutex
-	closed  bool
-}
-
-var (
-	sessionsMu sync.RWMutex
-	sessions   = map[string]*shellCommandSession{}
-)
 
 type ShellCommandExecResult struct {
 	Command   string    `json:"command"`
@@ -188,7 +177,7 @@ type ShellCommandExecResult struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-type ShellCommandToolResponse struct {
+type ShellCommandResponse struct {
 	SessionID string `json:"sessionID,omitempty"`
 	Workdir   string `json:"workdir,omitempty"`
 
@@ -224,7 +213,70 @@ var DefaultShellCommandPolicy = ShellCommandPolicy{
 	HardMaxCommandLength:  64 * 1024, // 64KiB
 }
 
-func ShellCommand(ctx context.Context, args ShellCommandArgs) (out []spec.ToolStoreOutputUnion, err error) {
+// ShellTool is an instance-owned shell tool runner.
+// It owns sessions, policy, and environment inheritance settings.
+type ShellTool struct {
+	mu                  sync.RWMutex
+	policy              ShellCommandPolicy
+	allowedWorkdirRoots []string // optional; if empty, allow any
+	sessions            *sessionStore
+}
+
+type ShellToolOption func(*ShellTool) error
+
+func WithShellCommandPolicy(p ShellCommandPolicy) ShellToolOption {
+	return func(st *ShellTool) error {
+		st.policy = p
+		return nil
+	}
+}
+
+// WithShellAllowedWorkdirRoots restricts workdir to be within one of the provided roots.
+// Roots are canonicalized (clean+abs) and must exist as directories.
+func WithShellAllowedWorkdirRoots(roots []string) ShellToolOption {
+	return func(st *ShellTool) error {
+		canon, err := canonicalizeAllowedRoots(roots)
+		if err != nil {
+			return err
+		}
+		st.allowedWorkdirRoots = canon
+		return nil
+	}
+}
+
+func NewShellTool(opts ...ShellToolOption) (*ShellTool, error) {
+	st := &ShellTool{
+		policy:              DefaultShellCommandPolicy,
+		allowedWorkdirRoots: nil,
+		sessions:            newSessionStore(),
+	}
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		if err := opt(st); err != nil {
+			return nil, err
+		}
+	}
+	return st, nil
+}
+
+func (st *ShellTool) Tool() spec.Tool { return toolutil.CloneTool(shellToolSpec) }
+
+// SetAllowedWorkdirRoots allows changing workdir roots at runtime (best-effort).
+// Existing sessions whose workdir falls outside the new roots will fail when used.
+func (st *ShellTool) SetAllowedWorkdirRoots(roots []string) error {
+	canon, err := canonicalizeAllowedRoots(roots)
+	if err != nil {
+		return err
+	}
+	st.mu.Lock()
+	st.allowedWorkdirRoots = canon
+	st.mu.Unlock()
+	return nil
+}
+
+func (st *ShellTool) Run(ctx context.Context, args ShellCommandArgs) (out []spec.ToolStoreOutputUnion, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -241,39 +293,47 @@ func ShellCommand(ctx context.Context, args ShellCommandArgs) (out []spec.ToolSt
 		return nil, errors.New("closeSession=true cannot be used with commands")
 	}
 
+	st.mu.RLock()
+	policy := st.policy
+	roots := append([]string(nil), st.allowedWorkdirRoots...)
+	st.mu.RUnlock()
+
 	createdSessionID := ""
 	defer func() {
 		// If we created a session but the call failed, do not leak it.
 		if err != nil && createdSessionID != "" {
-			deleteSessionLocked(createdSessionID)
+			st.sessions.delete(createdSessionID)
 		}
 	}()
 
 	// Handle session lifecycle first.
-	var sess *shellCommandSession
+	var sess *shellSession
 	if args.CreateSession {
-		sess = newSessionLocked()
+		sess = st.sessions.newSession()
+
 		args.SessionID = sess.id
 		createdSessionID = sess.id
 
 	}
 	if args.SessionID != "" && sess == nil {
 		var ok bool
-		sess, ok = getSessionLocked(args.SessionID)
+		sess, ok = st.sessions.get(args.SessionID)
+
 		if !ok {
 			return nil, fmt.Errorf("unknown sessionID: %s", args.SessionID)
 		}
 		if args.RestartSession {
-			resetSessionLocked(sess)
+			st.sessions.reset(sess)
 		}
 		if args.CloseSession {
-			deleteSessionLocked(args.SessionID)
-			resp := ShellCommandToolResponse{
+			st.sessions.delete(args.SessionID)
+
+			resp := ShellCommandResponse{
 				SessionID:       args.SessionID,
 				Message:         "session closed",
 				Notes:           args.Notes,
-				MaxOutputLength: effectiveMaxOutputBytes(args.MaxOutputLength),
-				TimeoutMS:       effectiveTimeout(args.TimeoutMS).Milliseconds(),
+				MaxOutputLength: effectiveMaxOutputBytes(policy, args.MaxOutputLength),
+				TimeoutMS:       effectiveTimeout(policy, args.TimeoutMS).Milliseconds(),
 			}
 			out, err = toolJSONText(resp)
 			return out, err
@@ -288,21 +348,19 @@ func ShellCommand(ctx context.Context, args ShellCommandArgs) (out []spec.ToolSt
 		return nil, errors.New("commands is required (unless closeSession=true)")
 	}
 
-	if DefaultShellCommandPolicy.HardMaxCommands > 0 && len(cmds) > DefaultShellCommandPolicy.HardMaxCommands {
-		return nil, fmt.Errorf("too many commands: %d (max %d)", len(cmds), DefaultShellCommandPolicy.HardMaxCommands)
+	if policy.HardMaxCommands > 0 && len(cmds) > policy.HardMaxCommands {
+		return nil, fmt.Errorf("too many commands: %d (max %d)", len(cmds), policy.HardMaxCommands)
 	}
-
 	// Determine effective settings.
-	timeout := effectiveTimeout(args.TimeoutMS)
-	maxOut := effectiveMaxOutputBytes(args.MaxOutputLength)
+	timeout := effectiveTimeout(policy, args.TimeoutMS)
+	maxOut := effectiveMaxOutputBytes(policy, args.MaxOutputLength)
 
-	login := false
-	if args.Login != nil {
-		login = *args.Login
-	}
+	login := args.Login
+
+	stopOnError := !args.ContinueOnError
 
 	// Determine effective workdir (args > session > current).
-	workdir, err := effectiveWorkdir(args.Workdir, sess)
+	workdir, err := effectiveWorkdir(args.Workdir, sess, roots)
 	if err != nil {
 		return nil, err
 	}
@@ -377,12 +435,12 @@ func ShellCommand(ctx context.Context, args ShellCommandArgs) (out []spec.ToolSt
 		if command == "" {
 			continue
 		}
-		if DefaultShellCommandPolicy.HardMaxCommandLength > 0 &&
-			len(command) > DefaultShellCommandPolicy.HardMaxCommandLength {
+		if policy.HardMaxCommandLength > 0 &&
+			len(command) > policy.HardMaxCommandLength {
 			return nil, fmt.Errorf(
 				"command too long (%d bytes; max %d)",
 				len(command),
-				DefaultShellCommandPolicy.HardMaxCommandLength,
+				policy.HardMaxCommandLength,
 			)
 		}
 		if strings.ContainsRune(command, '\x00') {
@@ -391,7 +449,7 @@ func ShellCommand(ctx context.Context, args ShellCommandArgs) (out []spec.ToolSt
 
 		warnings := classifyWarnings(command)
 
-		if !DefaultShellCommandPolicy.AllowDangerous {
+		if !policy.AllowDangerous {
 			if err := toolutil.RejectDangerousCommand(command, string(sel.Name), sel.Path); err != nil {
 				return nil, err
 			}
@@ -418,9 +476,12 @@ func ShellCommand(ctx context.Context, args ShellCommandArgs) (out []spec.ToolSt
 			}
 		}
 		results = append(results, res)
+		if stopOnError && (res.TimedOut || res.ExitCode != 0) {
+			break
+		}
 	}
 
-	resp := ShellCommandToolResponse{
+	resp := ShellCommandResponse{
 		SessionID:       args.SessionID,
 		Workdir:         workdir,
 		MaxOutputLength: maxOut,
@@ -554,8 +615,10 @@ func safeUTF8(b []byte) string {
 
 type cappedWriter struct {
 	mu        sync.Mutex
-	capBytes  int64
-	buf       bytes.Buffer
+	capBytes  int
+	buf       []byte // fixed size capBytes
+	start     int    // ring start
+	n         int    // number of valid bytes in ring
 	total     int64
 	truncated bool
 }
@@ -564,7 +627,12 @@ func newCappedWriter(capBytes int64) *cappedWriter {
 	if capBytes < 1024 {
 		capBytes = 1024
 	}
-	return &cappedWriter{capBytes: capBytes}
+	// "capBytes" is bounded by policy hard-max (<= 4MiB), safe to cast to int.
+	cb := int(capBytes)
+	return &cappedWriter{
+		capBytes: cb,
+		buf:      make([]byte, cb),
+	}
 }
 
 func (w *cappedWriter) Write(p []byte) (int, error) {
@@ -573,27 +641,56 @@ func (w *cappedWriter) Write(p []byte) (int, error) {
 
 	w.total += int64(len(p))
 
-	// Still accept writes, but only store up to capBytes.
-	remain := w.capBytes - int64(w.buf.Len())
-	if remain <= 0 {
+	if len(p) == 0 || w.capBytes <= 0 {
+		return len(p), nil
+	}
+
+	// Tail-capture semantics:
+	// Keep the last capBytes bytes written across all writes.
+	if len(p) >= w.capBytes {
+		copy(w.buf, p[len(p)-w.capBytes:])
+		w.start = 0
+		w.n = w.capBytes
 		w.truncated = true
 		return len(p), nil
 	}
 
-	if int64(len(p)) > remain {
-		_, _ = w.buf.Write(p[:int(remain)])
+	// If we would exceed capacity, drop from the front (advance start).
+	overflow := (w.n + len(p)) - w.capBytes
+	if overflow > 0 {
+		w.start = (w.start + overflow) % w.capBytes
+		w.n -= overflow
 		w.truncated = true
-		return len(p), nil
 	}
 
-	_, _ = w.buf.Write(p)
+	// Append at end position.
+	end := (w.start + w.n) % w.capBytes
+	// Copy with wrap.
+	first := min(len(p), w.capBytes-end)
+	copy(w.buf[end:end+first], p[:first])
+	if first < len(p) {
+		copy(w.buf[0:len(p)-first], p[first:])
+	}
+	w.n += len(p)
 	return len(p), nil
 }
 
 func (w *cappedWriter) Bytes() []byte {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return append([]byte(nil), w.buf.Bytes()...)
+	if w.n == 0 {
+		return nil
+	}
+	out := make([]byte, w.n)
+	if w.start+w.n <= w.capBytes {
+		copy(out, w.buf[w.start:w.start+w.n])
+		return out
+	}
+	// Wrapped.
+	n1 := w.capBytes - w.start
+	copy(out, w.buf[w.start:])
+	copy(out[n1:], w.buf[:w.n-n1])
+	return out
 }
 
 func (w *cappedWriter) TotalBytes() int64 {
@@ -608,11 +705,11 @@ func (w *cappedWriter) Truncated() bool {
 	return w.truncated
 }
 
-func effectiveTimeout(ms *int64) time.Duration {
+func effectiveTimeout(policy ShellCommandPolicy, ms *int64) time.Duration {
 	// Tool schema max is 10 minutes; clamp even if caller bypassed schema validation.
 	const hardMax = 10 * time.Minute
 	if ms == nil || *ms <= 0 {
-		d := max(DefaultShellCommandPolicy.DefaultTimeout, 0)
+		d := max(policy.DefaultTimeout, 0)
 		return min(d, hardMax)
 	}
 	maxMS := int64(hardMax / time.Millisecond)
@@ -622,9 +719,9 @@ func effectiveTimeout(ms *int64) time.Duration {
 	return time.Duration(*ms) * time.Millisecond
 }
 
-func effectiveMaxOutputBytes(v *int64) int64 {
-	hardMax := max(DefaultShellCommandPolicy.HardMaxOutputBytes, 1024)
-	def := max(DefaultShellCommandPolicy.DefaultMaxOutputBytes, 1024)
+func effectiveMaxOutputBytes(policy ShellCommandPolicy, v *int64) int64 {
+	hardMax := max(policy.HardMaxOutputBytes, 1024)
+	def := max(policy.DefaultMaxOutputBytes, 1024)
 	if v == nil || *v <= 0 {
 		return min(def, hardMax)
 	}
@@ -644,13 +741,16 @@ func normalizedCommandList(args ShellCommandArgs) []string {
 	return nil
 }
 
-func effectiveWorkdir(arg string, sess *shellCommandSession) (string, error) {
+func effectiveWorkdir(arg string, sess *shellSession, allowedRoots []string) (string, error) {
 	if strings.TrimSpace(arg) != "" {
 		p, err := canonicalWorkdir(arg)
 		if err != nil {
 			return "", err
 		}
 		if err := ensureDirExists(p); err != nil {
+			return "", err
+		}
+		if err := ensureWorkdirAllowed(p, allowedRoots); err != nil {
 			return "", err
 		}
 		return p, nil
@@ -671,12 +771,18 @@ func effectiveWorkdir(arg string, sess *shellCommandSession) (string, error) {
 			if err := ensureDirExists(p); err != nil {
 				return "", err
 			}
+			if err := ensureWorkdirAllowed(p, allowedRoots); err != nil {
+				return "", err
+			}
 			return p, nil
 
 		}
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
+		return "", err
+	}
+	if err := ensureWorkdirAllowed(cwd, allowedRoots); err != nil {
 		return "", err
 	}
 	return cwd, nil
@@ -705,12 +811,61 @@ func ensureDirExists(p string) error {
 	return nil
 }
 
+func canonicalizeAllowedRoots(roots []string) ([]string, error) {
+	var out []string
+	for _, r := range roots {
+		if strings.TrimSpace(r) == "" {
+			continue
+		}
+		cr, err := canonicalWorkdir(r)
+		if err != nil {
+			return nil, fmt.Errorf("invalid allowed root %q: %w", r, err)
+		}
+		if err := ensureDirExists(cr); err != nil {
+			return nil, fmt.Errorf("invalid allowed root %q: %w", r, err)
+		}
+		out = append(out, cr)
+	}
+	return out, nil
+}
+
+func ensureWorkdirAllowed(p string, roots []string) error {
+	if len(roots) == 0 {
+		return nil
+	}
+	for _, r := range roots {
+		ok, err := pathWithinRoot(r, p)
+		if err != nil {
+			continue
+		}
+		if ok {
+			return nil
+		}
+	}
+	return fmt.Errorf("workdir %q is outside allowed roots", p)
+}
+
+func pathWithinRoot(root, p string) (bool, error) {
+	rel, err := filepath.Rel(root, p)
+	if err != nil {
+		return false, err
+	}
+	rel = filepath.Clean(rel)
+	if rel == "." {
+		return true, nil
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return false, nil
+	}
+	return true, nil
+}
+
 type envEntry struct {
 	key string
 	val string
 }
 
-func effectiveEnv(sess *shellCommandSession, overrides map[string]string) ([]string, error) {
+func effectiveEnv(sess *shellSession, overrides map[string]string) ([]string, error) {
 	// Start with current process env.
 	envMap := map[string]envEntry{}
 
@@ -926,63 +1081,6 @@ func classifyWarnings(cmd string) []string {
 		w = append(w, "potentially_destructive")
 	}
 	return w
-}
-
-func newSessionLocked() *shellCommandSession {
-	sessionsMu.Lock()
-	defer sessionsMu.Unlock()
-
-	id := newSessionID()
-	s := &shellCommandSession{
-		id:      id,
-		workdir: "",
-		env:     map[string]string{},
-	}
-	sessions[id] = s
-	return s
-}
-
-func getSessionLocked(id string) (*shellCommandSession, bool) {
-	sessionsMu.RLock()
-	defer sessionsMu.RUnlock()
-
-	s, ok := sessions[id]
-	if !ok || s == nil {
-		return nil, false
-	}
-	s.mu.RLock()
-	closed := s.closed
-	s.mu.RUnlock()
-	if closed {
-		return nil, false
-	}
-	return s, ok
-}
-
-func deleteSessionLocked(id string) {
-	sessionsMu.Lock()
-	s := sessions[id]
-	delete(sessions, id)
-	sessionsMu.Unlock()
-	if s != nil {
-		s.mu.Lock()
-		s.closed = true
-		s.mu.Unlock()
-	}
-}
-
-func resetSessionLocked(s *shellCommandSession) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return
-	}
-	s.workdir = ""
-	s.env = map[string]string{}
-	s.mu.Unlock()
 }
 
 func newSessionID() string {

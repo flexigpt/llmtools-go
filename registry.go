@@ -10,12 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flexigpt/llmtools-go/commandtool"
 	"github.com/flexigpt/llmtools-go/fstool"
 	"github.com/flexigpt/llmtools-go/imagetool"
 	"github.com/flexigpt/llmtools-go/internal/jsonutil"
 	"github.com/flexigpt/llmtools-go/internal/logutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
+	"github.com/flexigpt/llmtools-go/shelltool"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -104,7 +104,14 @@ func RegisterBuiltins(r *Registry) error {
 	if err := RegisterTypedAsTextTool(r, imagetool.ReadImageTool(), imagetool.ReadImage); err != nil {
 		return err
 	}
-	if err := RegisterOutputsTool(r, commandtool.ShellCommandTool(), commandtool.ShellCommand); err != nil {
+	sh, err := shelltool.NewShellTool(
+	// Defaults are fine for builtins; hosts should instantiate their own tool with custom policy/sessions/env/workdir
+	// settings as needed.
+	)
+	if err != nil {
+		return err
+	}
+	if err := RegisterOutputsTool(r, sh.Tool(), sh.Run); err != nil {
 		return err
 	}
 	return nil

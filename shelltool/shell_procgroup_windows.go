@@ -1,6 +1,6 @@
 //go:build windows
 
-package commandtool
+package shelltool
 
 import (
 	"context"
