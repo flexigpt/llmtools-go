@@ -8,95 +8,6 @@ import (
 	"testing"
 )
 
-type ctxKey string
-
-// recordSink collects handled slog records for assertions.
-type recordSink struct {
-	mu      sync.Mutex
-	entries []capturedEntry
-}
-
-type capturedEntry struct {
-	ctx context.Context
-	rec slog.Record
-}
-
-func (s *recordSink) add(ctx context.Context, r slog.Record) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.entries = append(s.entries, capturedEntry{ctx: ctx, rec: r})
-}
-
-func (s *recordSink) snapshot() []capturedEntry {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]capturedEntry, len(s.entries))
-	copy(out, s.entries)
-	return out
-}
-
-func (s *recordSink) len() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.entries)
-}
-
-// captureHandler is a minimal slog.Handler that captures records.
-// It also supports WithAttrs so tests can validate logutil.With(...).
-type captureHandler struct {
-	sink     *recordSink
-	preAttrs []slog.Attr
-	groups   []string // not used in assertions; kept to satisfy Handler semantics
-}
-
-func newCaptureLogger(sink *recordSink) *slog.Logger {
-	return slog.New(&captureHandler{sink: sink})
-}
-
-func (h *captureHandler) Enabled(context.Context, slog.Level) bool { return true }
-
-func (h *captureHandler) Handle(ctx context.Context, r slog.Record) error {
-	rc := r.Clone()
-	if len(h.preAttrs) > 0 {
-		rc.AddAttrs(h.preAttrs...)
-	}
-	h.sink.add(ctx, rc)
-	return nil
-}
-
-func (h *captureHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := &captureHandler{
-		sink:     h.sink,
-		preAttrs: append(append([]slog.Attr(nil), h.preAttrs...), attrs...),
-		groups:   append([]string(nil), h.groups...),
-	}
-	return next
-}
-
-func (h *captureHandler) WithGroup(name string) slog.Handler {
-	next := &captureHandler{
-		sink:     h.sink,
-		preAttrs: append([]slog.Attr(nil), h.preAttrs...),
-		groups:   append(append([]string(nil), h.groups...), name),
-	}
-	return next
-}
-
-func attrsMap(r slog.Record) map[string]slog.Value {
-	m := map[string]slog.Value{}
-	r.Attrs(func(a slog.Attr) bool {
-		m[a.Key] = a.Value
-		return true
-	})
-	return m
-}
-
-func restoreGlobal(t *testing.T) func() {
-	t.Helper()
-	old := Default()
-	return func() { SetDefault(old) }
-}
-
 func TestSetDefault_NilBecomesDiscardAndIsSilent(t *testing.T) {
 	defer restoreGlobal(t)()
 
@@ -383,4 +294,45 @@ func TestConcurrentLogging_AllRecordsCaptured(t *testing.T) {
 	if got := sink.len(); got != want {
 		t.Fatalf("expected %d records, got %d", want, got)
 	}
+}
+
+// captureHandler is a minimal slog.Handler that captures records.
+// It also supports WithAttrs so tests can validate logutil.With(...).
+type captureHandler struct {
+	sink     *recordSink
+	preAttrs []slog.Attr
+	groups   []string // not used in assertions; kept to satisfy Handler semantics
+}
+
+func newCaptureLogger(sink *recordSink) *slog.Logger {
+	return slog.New(&captureHandler{sink: sink})
+}
+
+func (h *captureHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *captureHandler) Handle(ctx context.Context, r slog.Record) error {
+	rc := r.Clone()
+	if len(h.preAttrs) > 0 {
+		rc.AddAttrs(h.preAttrs...)
+	}
+	h.sink.add(ctx, rc)
+	return nil
+}
+
+func (h *captureHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	next := &captureHandler{
+		sink:     h.sink,
+		preAttrs: append(append([]slog.Attr(nil), h.preAttrs...), attrs...),
+		groups:   append([]string(nil), h.groups...),
+	}
+	return next
+}
+
+func (h *captureHandler) WithGroup(name string) slog.Handler {
+	next := &captureHandler{
+		sink:     h.sink,
+		preAttrs: append([]slog.Attr(nil), h.preAttrs...),
+		groups:   append(append([]string(nil), h.groups...), name),
+	}
+	return next
 }

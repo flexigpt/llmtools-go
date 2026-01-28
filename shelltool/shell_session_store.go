@@ -62,59 +62,6 @@ func (ss *sessionStore) setMaxSessions(maxSessions int) {
 	ss.mu.Unlock()
 }
 
-func (ss *sessionStore) evictExpiredLocked(now time.Time) {
-	if ss.ttl <= 0 {
-		return
-	}
-	// Oldest at back; stop once we find a non-expired entry.
-	for e := ss.lru.Back(); e != nil; {
-		prev := e.Prev()
-		it, ok := e.Value.(*sessionItem)
-		if !ok || it == nil {
-			// Corrupt entry; delete defensively.
-			ss.deleteElemLocked(e)
-			e = prev
-			continue
-		}
-		if now.Sub(it.lastUsed) <= ss.ttl {
-			break
-		}
-		ss.deleteElemLocked(e)
-		e = prev
-	}
-}
-
-func (ss *sessionStore) evictOverLimitLocked() {
-	if ss.max <= 0 {
-		return
-	}
-	for ss.lru.Len() > ss.max {
-		if e := ss.lru.Back(); e != nil {
-			ss.deleteElemLocked(e)
-		} else {
-			return
-		}
-	}
-}
-
-func (ss *sessionStore) deleteElemLocked(e *list.Element) {
-	if e == nil {
-		return
-	}
-	it, _ := e.Value.(*sessionItem)
-	if it == nil || it.s == nil {
-		ss.lru.Remove(e)
-		return
-	}
-	delete(ss.m, it.s.id)
-	ss.lru.Remove(e)
-
-	// Mark closed.
-	it.s.mu.Lock()
-	it.s.closed = true
-	it.s.mu.Unlock()
-}
-
 func (ss *sessionStore) newSession() *shellSession {
 	now := time.Now()
 	ss.mu.Lock()
@@ -173,6 +120,59 @@ func (ss *sessionStore) delete(id string) {
 		ss.deleteElemLocked(e)
 	}
 	ss.mu.Unlock()
+}
+
+func (ss *sessionStore) evictExpiredLocked(now time.Time) {
+	if ss.ttl <= 0 {
+		return
+	}
+	// Oldest at back; stop once we find a non-expired entry.
+	for e := ss.lru.Back(); e != nil; {
+		prev := e.Prev()
+		it, ok := e.Value.(*sessionItem)
+		if !ok || it == nil {
+			// Corrupt entry; delete defensively.
+			ss.deleteElemLocked(e)
+			e = prev
+			continue
+		}
+		if now.Sub(it.lastUsed) <= ss.ttl {
+			break
+		}
+		ss.deleteElemLocked(e)
+		e = prev
+	}
+}
+
+func (ss *sessionStore) evictOverLimitLocked() {
+	if ss.max <= 0 {
+		return
+	}
+	for ss.lru.Len() > ss.max {
+		if e := ss.lru.Back(); e != nil {
+			ss.deleteElemLocked(e)
+		} else {
+			return
+		}
+	}
+}
+
+func (ss *sessionStore) deleteElemLocked(e *list.Element) {
+	if e == nil {
+		return
+	}
+	it, _ := e.Value.(*sessionItem)
+	if it == nil || it.s == nil {
+		ss.lru.Remove(e)
+		return
+	}
+	delete(ss.m, it.s.id)
+	ss.lru.Remove(e)
+
+	// Mark closed.
+	it.s.mu.Lock()
+	it.s.closed = true
+	it.s.mu.Unlock()
 }
 
 func (ss *sessionStore) sizeForTest() int {

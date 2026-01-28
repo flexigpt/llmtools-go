@@ -1,4 +1,4 @@
-package toolutil
+package shelltool
 
 import (
 	"runtime"
@@ -15,38 +15,6 @@ type rejectTC struct {
 	wantSubstr string // optional substring to assert in error message
 }
 
-func runRejectCases(t *testing.T, cases []rejectTC) {
-	t.Helper()
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Helper()
-			if tc.shellName == "" {
-				tc.shellName = "sh"
-			}
-			if tc.shellPath == "" {
-				if runtime.GOOS == goosWindows {
-					tc.shellPath = `C:\Windows\System32\cmd.exe`
-				} else {
-					tc.shellPath = "/bin/sh"
-				}
-			}
-
-			err := RejectDangerousCommand(tc.cmd, tc.shellName, tc.shellPath)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected reject for %q", tc.cmd)
-				}
-				if tc.wantSubstr != "" &&
-					!strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.wantSubstr)) {
-					t.Fatalf("error %q does not contain %q (cmd=%q)", err.Error(), tc.wantSubstr, tc.cmd)
-				}
-			} else if err != nil {
-				t.Fatalf("did not expect reject for %q: %v", tc.cmd, err)
-			}
-		})
-	}
-}
-
 func TestRejectDangerous_EmptyAndWhitespace(t *testing.T) {
 	runRejectCases(t, []rejectTC{
 		{name: "empty", cmd: "", wantErr: false},
@@ -56,7 +24,7 @@ func TestRejectDangerous_EmptyAndWhitespace(t *testing.T) {
 }
 
 func TestRejectDangerous_Unix_SafeInputs(t *testing.T) {
-	if runtime.GOOS == goosWindows {
+	if runtime.GOOS == GOOSWindows {
 		t.Skip("unix-focused expectations")
 	}
 
@@ -84,11 +52,9 @@ func TestRejectDangerous_Unix_SafeInputs(t *testing.T) {
 		{name: "amp_redir_stderr_to_stdout", cmd: `echo hi 2>&1`, wantErr: false},
 		{name: "pipe_stderr_too", cmd: `echo hi |& tee out.txt`, wantErr: false},
 
-		// "rm": non-root targets should not be rejected.
-		{name: "rm_recursive_tmp", cmd: `rm -r /tmp`, wantErr: false},
-		{name: "rm_recursive_not_root_absolute", cmd: `rm --recursive /etc`, wantErr: false},
-		{name: "rm_recursive_relative", cmd: `rm -r ./`, wantErr: false},
-		{name: "rm_recursive_relative_parent", cmd: `rm -r ../`, wantErr: false},
+		// Blocklist should not false-positive on arguments.
+		{name: "echo_rm_argument", cmd: "echo rm", wantErr: false},
+		{name: "echo_curl_argument", cmd: "echo curl", wantErr: false},
 
 		// "mkfs / shutdown / editors" as arguments (not commands) should be allowed.
 		{name: "echo_mkfs_argument", cmd: "echo mkfs /dev/sda", wantErr: false},
@@ -98,28 +64,29 @@ func TestRejectDangerous_Unix_SafeInputs(t *testing.T) {
 }
 
 func TestRejectDangerous_Unix_RejectedInputs(t *testing.T) {
-	if runtime.GOOS == goosWindows {
+	if runtime.GOOS == GOOSWindows {
 		t.Skip("unix-focused expectations")
 	}
 
 	runRejectCases(t, []rejectTC{
 		// Sudo/su.
-		{name: "sudo_simple", cmd: "sudo ls", wantErr: true, wantSubstr: "sudo/su"},
-		{name: "su_simple", cmd: "su -c id", wantErr: true, wantSubstr: "sudo/su"},
-		{name: "sudo_after_semicolon", cmd: "echo x; sudo ls", wantErr: true, wantSubstr: "sudo/su"},
-		{name: "sudo_after_andand", cmd: "echo x && sudo ls", wantErr: true, wantSubstr: "sudo/su"},
-		{name: "sudo_after_oror", cmd: "echo x || sudo ls", wantErr: true, wantSubstr: "sudo/su"},
-		{name: "sudo_after_pipe", cmd: "echo x | sudo ls", wantErr: true, wantSubstr: "sudo/su"},
-		{name: "sudo_in_parens", cmd: "(sudo ls)", wantErr: true, wantSubstr: "sudo/su"},
-		{name: "sudo_with_path", cmd: "/usr/bin/sudo ls", wantErr: true, wantSubstr: "sudo/su"},
+		{name: "sudo_simple", cmd: "sudo ls", wantErr: true, wantSubstr: "blocked command"},
+		{name: "su_simple", cmd: "su -c id", wantErr: true, wantSubstr: "blocked command"},
+		{name: "sudo_after_semicolon", cmd: "echo x; sudo ls", wantErr: true, wantSubstr: "sudo"},
+		{name: "sudo_after_andand", cmd: "echo x && sudo ls", wantErr: true, wantSubstr: "sudo"},
+		{name: "sudo_after_oror", cmd: "echo x || sudo ls", wantErr: true, wantSubstr: "sudo"},
+		{name: "sudo_after_pipe", cmd: "echo x | sudo ls", wantErr: true, wantSubstr: "sudo"},
+		{name: "sudo_in_parens", cmd: "(sudo ls)", wantErr: true, wantSubstr: "sudo"},
+		{name: "sudo_with_path", cmd: "/usr/bin/sudo ls", wantErr: true, wantSubstr: "sudo"},
 
 		// Fork bomb (whitespace variations).
 		{name: "fork_bomb_classic", cmd: ":(){ :|:& };:", wantErr: true, wantSubstr: "fork bomb"},
 		{name: "fork_bomb_extra_spaces", cmd: ": ( ) {  : | : & } ; :", wantErr: true, wantSubstr: "fork bomb"},
 		{name: "fork_bomb_with_newlines", cmd: ":\n(){\n:|:&\n};:\n", wantErr: true, wantSubstr: "fork bomb"},
 
-		// "rm" root-like targets (paranoid).
-		{name: "rm_rf_root", cmd: "rm -rf /", wantErr: true, wantSubstr: "rm"},
+		// "rm" is ALWAYS blocked  (any target).
+		{name: "rm_simple", cmd: "rm foo", wantErr: true, wantSubstr: "blocked command"},
+		{name: "rm_rf_root", cmd: "rm -rf /", wantErr: true, wantSubstr: "blocked command"},
 		{name: "rm_fr_root_glob", cmd: "rm -fr /*", wantErr: true, wantSubstr: "rm"},
 		{name: "rm_r_root_no_force", cmd: "rm -r /", wantErr: true, wantSubstr: "rm"},
 		{name: "rm_R_root", cmd: "rm -R /", wantErr: true, wantSubstr: "rm"},
@@ -133,20 +100,23 @@ func TestRejectDangerous_Unix_RejectedInputs(t *testing.T) {
 		{name: "rm_recursive_root_via_clean_parent2", cmd: `rm -R /../`, wantErr: true, wantSubstr: "rm"},
 
 		// Mkfs.
-		{name: "mkfs_plain", cmd: "mkfs /dev/sda", wantErr: true, wantSubstr: "mkfs"},
-		{name: "mkfs_variant_ext4", cmd: "mkfs.ext4 /dev/sda1", wantErr: true, wantSubstr: "mkfs"},
+		{name: "mkfs_plain", cmd: "mkfs /dev/sda", wantErr: true, wantSubstr: "blocked command"},
+		{name: "mkfs_variant_ext4", cmd: "mkfs.ext4 /dev/sda1", wantErr: true, wantSubstr: "blocked command"},
+
+		// Network tools.
+		{name: "curl_blocked", cmd: "curl https://example.com", wantErr: true, wantSubstr: "blocked command"},
 
 		// Shutdown/reboot/halt/poweroff.
-		{name: "shutdown", cmd: "shutdown -h now", wantErr: true, wantSubstr: "shutdown"},
-		{name: "reboot", cmd: "reboot", wantErr: true, wantSubstr: "shutdown"},
-		{name: "halt", cmd: "halt", wantErr: true, wantSubstr: "shutdown"},
-		{name: "poweroff", cmd: "poweroff", wantErr: true, wantSubstr: "shutdown"},
+		{name: "shutdown", cmd: "shutdown -h now", wantErr: true, wantSubstr: "blocked command"},
+		{name: "reboot", cmd: "reboot", wantErr: true, wantSubstr: "blocked command"},
+		{name: "halt", cmd: "halt", wantErr: true, wantSubstr: "blocked command"},
+		{name: "poweroff", cmd: "poweroff", wantErr: true, wantSubstr: "blocked command"},
 
 		// Interactive tools.
-		{name: "vim", cmd: "vim foo.txt", wantErr: true, wantSubstr: "interactive"},
-		{name: "less", cmd: "less /var/log/syslog", wantErr: true, wantSubstr: "interactive"},
-		{name: "top", cmd: "top", wantErr: true, wantSubstr: "interactive"},
-		{name: "pipeline_into_less", cmd: "echo hi | less", wantErr: true, wantSubstr: "interactive"},
+		{name: "vim", cmd: "vim foo.txt", wantErr: true, wantSubstr: "blocked command"},
+		{name: "less", cmd: "less /var/log/syslog", wantErr: true, wantSubstr: "blocked command"},
+		{name: "top", cmd: "top", wantErr: true, wantSubstr: "blocked command"},
+		{name: "pipeline_into_less", cmd: "echo hi | less", wantErr: true, wantSubstr: "blocked command"},
 
 		// Backgrounding/chaining with "&".
 		{name: "background_trailing", cmd: "sleep 1 &", wantErr: true, wantSubstr: "background"},
@@ -156,52 +126,52 @@ func TestRejectDangerous_Unix_RejectedInputs(t *testing.T) {
 }
 
 func TestRejectDangerous_Unix_WrappersAndAssignments(t *testing.T) {
-	if runtime.GOOS == goosWindows {
+	if runtime.GOOS == GOOSWindows {
 		t.Skip("unix-focused expectations")
 	}
 
 	runRejectCases(t, []rejectTC{
 		// Env assignments should be skipped to find the real command.
-		{name: "assignment_then_sudo", cmd: "X=1 sudo ls", wantErr: true, wantSubstr: "sudo/su"},
-		{name: "multiple_assignments_then_su", cmd: "A=1 B=2 su -c id", wantErr: true, wantSubstr: "sudo/su"},
+		{name: "assignment_then_sudo", cmd: "X=1 sudo ls", wantErr: true, wantSubstr: "sudo"},
+		{name: "multiple_assignments_then_su", cmd: "A=1 B=2 su -c id", wantErr: true, wantSubstr: "su"},
 		{name: "assignment_then_echo_sudo_is_safe", cmd: "X=1 echo sudo", wantErr: false},
 
 		// Unwrap env/command/builtin wrappers.
-		{name: "env_wraps_sudo", cmd: "env sudo ls", wantErr: true, wantSubstr: "sudo/su"},
-		{name: "env_with_flags_wraps_sudo", cmd: "env -i FOO=bar sudo ls", wantErr: true, wantSubstr: "sudo/su"},
-		{name: "command_wraps_sudo", cmd: "command sudo ls", wantErr: true, wantSubstr: "sudo/su"},
-		{name: "builtin_wraps_sudo", cmd: "builtin sudo ls", wantErr: true, wantSubstr: "sudo/su"},
+		{name: "env_wraps_sudo", cmd: "env sudo ls", wantErr: true, wantSubstr: "sudo"},
+		{name: "env_with_flags_wraps_sudo", cmd: "env -i FOO=bar sudo ls", wantErr: true, wantSubstr: "sudo"},
+		{name: "command_wraps_sudo", cmd: "command sudo ls", wantErr: true, wantSubstr: "sudo"},
+		{name: "builtin_wraps_sudo", cmd: "builtin sudo ls", wantErr: true, wantSubstr: "sudo"},
 	})
 }
 
 func TestRejectDangerous_Windows_Patterns(t *testing.T) {
-	if runtime.GOOS != goosWindows {
+	if runtime.GOOS != GOOSWindows {
 		t.Skip("windows-only patterns")
 	}
 
 	runRejectCases(t, []rejectTC{
 		// Diskpart anywhere on Windows.
-		{name: "diskpart", cmd: "diskpart", wantErr: true, wantSubstr: "diskpart"},
-		{name: "diskpart_exe", cmd: "diskpart.exe", wantErr: true, wantSubstr: "diskpart"},
+		{name: "diskpart", cmd: "diskpart", wantErr: true, wantSubstr: "blocked command"},
+		{name: "diskpart_exe", cmd: "diskpart.exe", wantErr: true, wantSubstr: "blocked command"},
 		{name: "diskpart_full_path", cmd: `C:\Windows\System32\diskpart.exe`, wantErr: true, wantSubstr: "diskpart"},
 		{name: "diskpart_after_andand", cmd: "echo hi && diskpart", wantErr: true, wantSubstr: "diskpart"},
 		{name: "echo_diskpart_argument_safe", cmd: "echo diskpart", wantErr: false},
 
 		// Format.com anywhere.
-		{name: "format_com", cmd: "format.com C:", wantErr: true, wantSubstr: "format.com"},
+		{name: "format_com", cmd: "format.com C:", wantErr: true, wantSubstr: "blocked command"},
 
 		// Format only when using cmd.exe shellName.
 		{
 			name:       "format_cmd_shell_reject",
 			cmd:        "format C:",
-			shellName:  shellNameCmd,
+			shellName:  string(ShellNameCmd),
 			wantErr:    true,
-			wantSubstr: "format",
+			wantSubstr: "blocked command",
 		},
 		{
 			name:       "format_exe_cmd_shell_reject",
 			cmd:        "format.exe C:",
-			shellName:  shellNameCmd,
+			shellName:  string(ShellNameCmd),
 			wantErr:    true,
 			wantSubstr: "format",
 		},
@@ -215,4 +185,36 @@ func TestRejectDangerous_Windows_Patterns(t *testing.T) {
 		{name: "sudo_blocked_on_windows_too", cmd: "sudo whoami", wantErr: true, wantSubstr: "sudo/su"},
 		{name: "mkfs_blocked_on_windows_too", cmd: "mkfs.ext4 /dev/sda1", wantErr: true, wantSubstr: "mkfs"},
 	})
+}
+
+func runRejectCases(t *testing.T, cases []rejectTC) {
+	t.Helper()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Helper()
+			if tc.shellName == "" {
+				tc.shellName = "sh"
+			}
+			if tc.shellPath == "" {
+				if runtime.GOOS == GOOSWindows {
+					tc.shellPath = `C:\Windows\System32\cmd.exe`
+				} else {
+					tc.shellPath = "/bin/sh"
+				}
+			}
+
+			err := rejectDangerousCommand(tc.cmd, tc.shellPath, ShellName(tc.shellName), hardBlockedCommands, true)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected reject for %q", tc.cmd)
+				}
+				if tc.wantSubstr != "" &&
+					!strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.wantSubstr)) {
+					t.Fatalf("error %q does not contain %q (cmd=%q)", err.Error(), tc.wantSubstr, tc.cmd)
+				}
+			} else if err != nil {
+				t.Fatalf("did not expect reject for %q: %v", tc.cmd, err)
+			}
+		})
+	}
 }

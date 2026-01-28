@@ -657,6 +657,48 @@ func TestShellCommand_ContextCanceledEarly(t *testing.T) {
 	}
 }
 
+func TestShellCommand_Blocklist_DefaultBlocksRMAndCurl(t *testing.T) {
+	st := newTestShellTool(t)
+
+	_, err := st.Run(t.Context(), ShellCommandArgs{
+		Commands: []string{`rm foo`},
+	})
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "blocked") {
+		t.Fatalf("expected rm to be blocked, got %v", err)
+	}
+
+	_, err = st.Run(t.Context(), ShellCommandArgs{
+		Commands: []string{`curl https://example.com`},
+	})
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "blocked") {
+		t.Fatalf("expected curl to be blocked, got %v", err)
+	}
+}
+
+func TestShellCommand_Blocklist_NotOverridableByAllowDangerous(t *testing.T) {
+	p := DefaultShellCommandPolicy
+	p.AllowDangerous = true
+	st := newTestShellTool(t, WithShellCommandPolicy(p))
+
+	_, err := st.Run(t.Context(), ShellCommandArgs{
+		Commands: []string{`rm foo`},
+	})
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "blocked") {
+		t.Fatalf("expected rm to be blocked even with AllowDangerous=true, got %v", err)
+	}
+}
+
+func TestShellCommand_Blocklist_AdditionalBlocks(t *testing.T) {
+	st := newTestShellTool(t, WithShellBlockedCommands([]string{"echo"}))
+
+	_, err := st.Run(t.Context(), ShellCommandArgs{
+		Commands: []string{`echo hi`},
+	})
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "blocked") {
+		t.Fatalf("expected echo to be blocked via additional blocklist, got %v", err)
+	}
+}
+
 func newTestShellTool(t *testing.T, opts ...ShellToolOption) *ShellTool {
 	t.Helper()
 

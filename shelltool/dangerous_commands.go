@@ -1,37 +1,75 @@
-package toolutil
+package shelltool
 
 import (
 	"errors"
-	"path"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"unicode"
 )
 
-const (
-	goosWindows  = "windows"
-	shellNameCmd = "cmd"
-)
+var hardBlockedCommands = func() map[string]struct{} {
+	// Non-overridable baseline. These are blocked regardless of AllowDangerous.
+	hard := []string{
+		// Privilege escalation / destructive.
+		"sudo", "su",
+		"rm",
+		"mkfs",
+		"shutdown", "reboot", "halt", "poweroff",
 
-func RejectDangerousCommand(cmd, shellName, shellPath string) error {
+		// Interactive/TUI editors (not useful in non-interactive tool).
+		"vim", "vi", "nano", "emacs", "less", "more", "top", "htop",
+
+		// Network/communication tools.
+		"curl", "wget",
+		"nc", "netcat", "ncat", "socat",
+		"ssh", "scp", "sftp",
+		"ftp", "tftp", "telnet",
+
+		// PowerShell network cmdlets/aliases (relevant when shell is pwsh/powershell).
+		"invoke-webrequest", "iwr",
+		"invoke-restmethod", "irm",
+
+		// Windows destructive / deletion equivalents (also harmless to block on unix).
+		"diskpart",
+		"format.com",
+		"del", "erase", "rmdir", "rd",
+		"remove-item", "ri",
+	}
+
+	m := make(map[string]struct{}, len(hard))
+	for _, c := range hard {
+		m[c] = struct{}{}
+	}
+	return m
+}()
+
+func rejectDangerousCommand(
+	cmd, shellPath string, shellName ShellName,
+	blockedCommands map[string]struct{},
+	enableHeuristicChecks bool,
+) error {
 	c := strings.TrimSpace(cmd)
 	if c == "" {
 		return nil
 	}
+	if len(blockedCommands) == 0 {
+		blockedCommands = map[string]struct{}{}
+	}
 
 	// Cheap whole-input checks first.
-	if looksLikeForkBomb(c) {
-		return errors.New("blocked dangerous command pattern (fork bomb)")
-	}
-	if hasBackgroundAmpersand(c) {
-		return errors.New("blocked backgrounding with '&' (leaks processes)")
+	if enableHeuristicChecks {
+		if looksLikeForkBomb(c) {
+			return errors.New("blocked dangerous command pattern (fork bomb)")
+		}
+		if hasBackgroundAmpersand(c) {
+			return errors.New("blocked backgrounding with '&' (leaks processes)")
+		}
 	}
 
 	// Scan each "command segment" separated by ";, &&, ||, |, &, newline, (, )".
 	return forEachSegment(c, func(seg string) error {
-		toks := shellFields(seg, runtime.GOOS == goosWindows)
+		toks := shellFields(seg, runtime.GOOS == GOOSWindows)
 		if len(toks) == 0 {
 			return nil
 		}
@@ -40,45 +78,70 @@ func RejectDangerousCommand(cmd, shellName, shellPath string) error {
 		if name == "" {
 			return nil
 		}
+		_ = args // args intentionally unused; we now block by command name, not by argument heuristics.
 
-		// UNIX / cross-platform.
-		switch name {
-		case "sudo", "su":
-			return errors.New("blocked privileged escalation (sudo/su)")
-
-		case "rm":
-			if rmIsDangerous(args) {
-				return errors.New("blocked destructive rm on root-like path")
-			}
-
-		case "mkfs":
-			return errors.New("blocked filesystem formatting command (mkfs)")
-
-		case "shutdown", "reboot", "halt", "poweroff":
-			return errors.New("blocked shutdown/reboot/poweroff command")
-
-		case "vim", "vi", "nano", "emacs", "less", "more", "top", "htop":
-			return errors.New("blocked interactive TUI/editor command (non-interactive tool)")
-		}
+		// Block mkfs variants like mkfs.ext4 if mkfs is blocked.
 		if strings.HasPrefix(name, "mkfs.") {
-			return errors.New("blocked filesystem formatting command (mkfs)")
+			if _, ok := blockedCommands["mkfs"]; ok {
+				return errors.New("blocked command: " + name)
+			}
 		}
 
-		// Windows-only.
-		if runtime.GOOS == goosWindows {
-			switch name {
-			case "diskpart", "diskpart.exe":
-				return errors.New("blocked destructive disk operation (diskpart)")
-			case "format.com":
-				return errors.New("blocked destructive disk operation (format.com)")
+		// Block by exact command name (plus a Windows no-extension variant).
+		if isBlockedName(name, blockedCommands) {
+			return errors.New("blocked command: " + name)
+		}
+
+		// Windows-only: block "format" when using cmd (but do not block PowerShell's formatting cmdlets/aliases).
+		if runtime.GOOS == GOOSWindows && shellName == ShellNameCmd {
+			// Name may be "format" or "format.exe"; treat both as blocked in cmd.
+			if isBlockedName("format", map[string]struct{}{"format": {}}) &&
+				isBlockedName(name, map[string]struct{}{"format": {}}) {
+				return errors.New("blocked command: " + name)
 			}
-			if shellName == shellNameCmd && (name == "format" || name == "format.exe") {
-				return errors.New("blocked destructive disk operation (format)")
+			if strings.EqualFold(name, "format") || strings.EqualFold(name, "format.exe") {
+				return errors.New("blocked command: " + name)
 			}
 		}
 
 		return nil
 	})
+}
+
+func isBlockedName(name string, blocked map[string]struct{}) bool {
+	if blocked == nil {
+		return false
+	}
+	// Exact match first.
+	if _, ok := blocked[name]; ok {
+		return true
+	}
+	// On Windows, also match by stripping a common executable extension.
+	if runtime.GOOS == GOOSWindows {
+		ext := strings.ToLower(filepath.Ext(name))
+		switch ext {
+		case ".exe", ".com", ".bat", ".cmd":
+			if _, ok := blocked[strings.TrimSuffix(name, ext)]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizeBlockedCommand(s string) (string, error) {
+	x := strings.TrimSpace(s)
+	if x == "" {
+		return "", nil
+	}
+	if strings.ContainsRune(x, '\x00') {
+		return "", errors.New("blocked command contains NUL byte")
+	}
+	if strings.IndexFunc(x, unicode.IsSpace) >= 0 {
+		return "", errors.New("blocked command must be a single command name (no whitespace)")
+	}
+	// Allow passing "/bin/rm" etc; we only store the basename.
+	return strings.ToLower(filepath.Base(x)), nil
 }
 
 func forEachSegment(s string, fn func(seg string) error) error {
@@ -334,46 +397,4 @@ func hasBackgroundAmpersand(s string) bool {
 		return true
 	}
 	return false
-}
-
-// Paranoid simple rm rule: block any recursive rm targeting "/" or "/*".
-func rmIsDangerous(args []string) bool {
-	recursive := false
-	inOpts := true
-	var targets []string
-
-	for _, a := range args {
-		if inOpts && a == "--" {
-			inOpts = false
-			continue
-		}
-		if inOpts && strings.HasPrefix(a, "-") && a != "-" {
-			if a == "--recursive" {
-				recursive = true
-			} else if !strings.HasPrefix(a, "--") && strings.ContainsAny(a, "rR") {
-				recursive = true // -r, -R, -fr, -rf, etc
-			}
-			continue
-		}
-		inOpts = false
-		targets = append(targets, a)
-	}
-
-	if !recursive {
-		return false
-	}
-	return slices.ContainsFunc(targets, isUnixRootLike)
-}
-
-func isUnixRootLike(arg string) bool {
-	if arg == "" {
-		return false
-	}
-	if strings.HasPrefix(arg, "/*") {
-		return true
-	}
-	if strings.HasPrefix(arg, "/") && path.Clean(arg) == "/" {
-		return true
-	}
-	return arg == "/"
 }

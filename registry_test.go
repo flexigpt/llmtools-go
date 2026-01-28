@@ -12,33 +12,6 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
-func mkTool(funcID, slug string) spec.Tool {
-	return spec.Tool{
-		SchemaVersion: spec.SchemaVersion,
-		ID:            "0190f3f3-6a2c-7c1a-9f59-aaaaaaaaaaaa",
-		Slug:          slug,
-		Version:       "v1",
-		DisplayName:   slug,
-		Description:   "desc",
-		ArgSchema:     spec.JSONSchema([]byte(`{}`)),
-		GoImpl:        spec.GoToolImpl{FuncID: spec.FuncID(funcID)},
-		CreatedAt:     spec.SchemaStartTime,
-		ModifiedAt:    spec.SchemaStartTime,
-		Tags:          []string{"t1", "t2"},
-	}
-}
-
-func textOut(s string) []spec.ToolStoreOutputUnion {
-	return []spec.ToolStoreOutputUnion{
-		{
-			Kind: spec.ToolStoreOutputKindText,
-			TextItem: &spec.ToolStoreOutputText{
-				Text: s,
-			},
-		},
-	}
-}
-
 func TestNewRegistry_Options(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -550,5 +523,32 @@ func TestRegisterOutputsTool_StrictDecode(t *testing.T) {
 				t.Fatalf("Call output text: got %q want %q", out[0].TextItem.Text, tc.wantText)
 			}
 		})
+	}
+}
+
+func mkTool(funcID, slug string) spec.Tool {
+	return spec.Tool{
+		SchemaVersion: spec.SchemaVersion,
+		ID:            "0190f3f3-6a2c-7c1a-9f59-aaaaaaaaaaaa",
+		Slug:          slug,
+		Version:       "v1",
+		DisplayName:   slug,
+		Description:   "desc",
+		ArgSchema:     spec.JSONSchema([]byte(`{}`)),
+		GoImpl:        spec.GoToolImpl{FuncID: spec.FuncID(funcID)},
+		CreatedAt:     spec.SchemaStartTime,
+		ModifiedAt:    spec.SchemaStartTime,
+		Tags:          []string{"t1", "t2"},
+	}
+}
+
+func textOut(s string) []spec.ToolStoreOutputUnion {
+	return []spec.ToolStoreOutputUnion{
+		{
+			Kind: spec.ToolStoreOutputKindText,
+			TextItem: &spec.ToolStoreOutputText{
+				Text: s,
+			},
+		},
 	}
 }

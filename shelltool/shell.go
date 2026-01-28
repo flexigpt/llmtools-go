@@ -146,7 +146,7 @@ type ShellCommandResponse struct {
 
 // ShellCommandPolicy provides policy / hardening knobs (package-level, so host app can tune).
 type ShellCommandPolicy struct {
-	// If true, skip dangerous-command checks (NOT recommended as default).
+	// If true, skip heuristic checks (fork-bomb/backgrounding). NOTE: hard-blocked commands are ALWAYS blocked.
 	AllowDangerous bool
 
 	// Policy limits (clamped to package hard limits).
@@ -169,7 +169,8 @@ var DefaultShellCommandPolicy = ShellCommandPolicy{
 type ShellTool struct {
 	mu                  sync.RWMutex
 	policy              ShellCommandPolicy
-	allowedWorkdirRoots []string // optional; if empty, allow any
+	allowedWorkdirRoots []string            // optional; if empty, allow any
+	blockedCommands     map[string]struct{} // instance-owned blocklist (includes non-overridable hard defaults)
 	sessions            *sessionStore
 }
 
@@ -178,6 +179,33 @@ type ShellToolOption func(*ShellTool) error
 func WithShellCommandPolicy(p ShellCommandPolicy) ShellToolOption {
 	return func(st *ShellTool) error {
 		st.policy = p
+		return nil
+	}
+}
+
+// WithShellBlockedCommands adds additional commands to the instance blocklist.
+// These are enforced before execution and cannot override/remove the hard default blocklist.
+// Entries must be command names (e.g. "git", "python", "curl"), not full command lines.
+func WithShellBlockedCommands(cmds []string) ShellToolOption {
+	return func(st *ShellTool) error {
+		for _, c := range cmds {
+			n, err := normalizeBlockedCommand(c)
+			if err != nil {
+				return err
+			}
+			if n == "" {
+				continue
+			}
+			st.blockedCommands[n] = struct{}{}
+			// On Windows, also add the no-extension variant if it looks like an executable name.
+			if runtime.GOOS == GOOSWindows {
+				ext := strings.ToLower(filepath.Ext(n))
+				switch ext {
+				case ".exe", ".com", ".bat", ".cmd":
+					st.blockedCommands[strings.TrimSuffix(n, ext)] = struct{}{}
+				}
+			}
+		}
 		return nil
 	}
 }
@@ -217,6 +245,7 @@ func NewShellTool(opts ...ShellToolOption) (*ShellTool, error) {
 	st := &ShellTool{
 		policy:              DefaultShellCommandPolicy,
 		allowedWorkdirRoots: nil,
+		blockedCommands:     maps.Clone(hardBlockedCommands),
 		sessions:            newSessionStore(),
 	}
 	for _, opt := range opts {
@@ -261,6 +290,7 @@ func (st *ShellTool) run(ctx context.Context, args ShellCommandArgs) (out *Shell
 	st.mu.RLock()
 	policy := st.policy
 	roots := append([]string(nil), st.allowedWorkdirRoots...)
+	blocked := st.blockedCommands
 	st.mu.RUnlock()
 
 	// Determine commands early (so we don't create sessions for invalid requests).
@@ -392,10 +422,9 @@ func (st *ShellTool) run(ctx context.Context, args ShellCommandArgs) (out *Shell
 			return nil, errors.New("command contains NUL byte")
 		}
 
-		if !policy.AllowDangerous {
-			if err := toolutil.RejectDangerousCommand(command, string(sel.Name), sel.Path); err != nil {
-				return nil, err
-			}
+		// Always enforce command blocklist. Heuristic checks are optional.
+		if err := rejectDangerousCommand(command, sel.Path, sel.Name, blocked, !policy.AllowDangerous); err != nil {
+			return nil, err
 		}
 
 		res, err := runOne(ctx, sel, command, workdir, env, timeout, maxOut)
@@ -692,29 +721,6 @@ func effectiveWorkdir(arg string, sess *shellSession, allowedRoots []string) (st
 	return cwd, nil
 }
 
-func canonicalWorkdir(p string) (string, error) {
-	if strings.ContainsRune(p, '\x00') {
-		return "", errors.New("workdir contains NUL byte")
-	}
-	cleaned := filepath.Clean(p)
-	abs, err := filepath.Abs(cleaned)
-	if err != nil {
-		return "", err
-	}
-	return abs, nil
-}
-
-func ensureDirExists(p string) error {
-	st, err := os.Stat(p)
-	if err != nil {
-		return err
-	}
-	if !st.IsDir() {
-		return fmt.Errorf("workdir is not a directory: %s", p)
-	}
-	return nil
-}
-
 func canonicalizeAllowedRoots(roots []string) ([]string, error) {
 	var out []string
 	for _, r := range roots {
@@ -731,6 +737,29 @@ func canonicalizeAllowedRoots(roots []string) ([]string, error) {
 		out = append(out, cr)
 	}
 	return out, nil
+}
+
+func ensureDirExists(p string) error {
+	st, err := os.Stat(p)
+	if err != nil {
+		return err
+	}
+	if !st.IsDir() {
+		return fmt.Errorf("workdir is not a directory: %s", p)
+	}
+	return nil
+}
+
+func canonicalWorkdir(p string) (string, error) {
+	if strings.ContainsRune(p, '\x00') {
+		return "", errors.New("workdir contains NUL byte")
+	}
+	cleaned := filepath.Clean(p)
+	abs, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", err
+	}
+	return abs, nil
 }
 
 func ensureWorkdirAllowed(p string, roots []string) error {
@@ -841,6 +870,15 @@ func canonicalEnvKey(k string) string {
 	return k
 }
 
+func validateEnvMap(m map[string]string) error {
+	for k, v := range m {
+		if err := validateEnvKV(k, v); err != nil {
+			return fmt.Errorf("env %q: %w", k, err)
+		}
+	}
+	return nil
+}
+
 func validateEnvKV(k, v string) error {
 	kk := strings.TrimSpace(k)
 	if kk == "" {
@@ -851,15 +889,6 @@ func validateEnvKV(k, v string) error {
 	}
 	if strings.Contains(kk, "=") {
 		return errors.New("name contains '='")
-	}
-	return nil
-}
-
-func validateEnvMap(m map[string]string) error {
-	for k, v := range m {
-		if err := validateEnvKV(k, v); err != nil {
-			return fmt.Errorf("env %q: %w", k, err)
-		}
 	}
 	return nil
 }

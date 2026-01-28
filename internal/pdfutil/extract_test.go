@@ -9,98 +9,6 @@ import (
 	"testing"
 )
 
-// buildMinimalPDF returns a small, valid PDF (with xref) that ledongthuc/pdf can parse.
-// If text == "", it emits a page with no shown text (BT/ET only), so extraction should be empty.
-func buildMinimalPDF(text string) []byte {
-	escape := func(s string) string {
-		// Minimal escaping for PDF literal strings.
-		s = strings.ReplaceAll(s, `\`, `\\`)
-		s = strings.ReplaceAll(s, "(", `\(`)
-		s = strings.ReplaceAll(s, ")", `\)`)
-		return s
-	}
-
-	var content string
-	if strings.TrimSpace(text) == "" {
-		content = "BT\nET\n"
-	} else {
-		content = "BT\n/F1 24 Tf\n72 120 Td\n(" + escape(text) + ") Tj\nET\n"
-	}
-
-	// We generate a simple 5-object PDF:
-	// 1: Catalog
-	// 2: Pages
-	// 3: Page
-	// 4: Contents (stream)
-	// 5: Font
-	//
-	// And then a correct xref section.
-	var b []byte
-	write := func(s string) { b = append(b, []byte(s)...) }
-
-	offsets := make([]int, 6) // 0..5 (we use 1..5)
-	write("%PDF-1.4\n")
-
-	writeObj := func(i int, s string) {
-		offsets[i] = len(b)
-		write(s)
-	}
-
-	writeObj(1, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
-	writeObj(2, "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n")
-	writeObj(
-		3,
-		"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n",
-	)
-	writeObj(4, "4 0 obj\n<< /Length "+itoa(len([]byte(content)))+" >>\nstream\n"+content+"endstream\nendobj\n")
-	writeObj(5, "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n")
-
-	xrefStart := len(b)
-	write("xref\n0 6\n")
-	write("0000000000 65535 f \n")
-	for i := 1; i <= 5; i++ {
-		// Xref entries are 10-digit, zero-padded byte offsets.
-		write(pad10(offsets[i]) + " 00000 n \n")
-	}
-	write("trailer\n<< /Size 6 /Root 1 0 R >>\n")
-	write("startxref\n")
-	write(itoa(xrefStart) + "\n")
-	write("%%EOF\n")
-
-	return b
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [32]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + (n % 10))
-		n /= 10
-	}
-	return string(buf[i:])
-}
-
-func pad10(n int) string {
-	s := itoa(n)
-	if len(s) >= 10 {
-		return s
-	}
-	return strings.Repeat("0", 10-len(s)) + s
-}
-
-func writeTempFile(t *testing.T, dir, name string, data []byte) string {
-	t.Helper()
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	return path
-}
-
 func TestExtractPDFTextSafe_TableDriven(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -240,4 +148,96 @@ func TestBuildMinimalPDF_Sanity(t *testing.T) {
 	// Avoid unused import in case you uncomment the base64 test above.
 	_ = base64.StdEncoding
 	_ = errors.Is
+}
+
+// buildMinimalPDF returns a small, valid PDF (with xref) that ledongthuc/pdf can parse.
+// If text == "", it emits a page with no shown text (BT/ET only), so extraction should be empty.
+func buildMinimalPDF(text string) []byte {
+	escape := func(s string) string {
+		// Minimal escaping for PDF literal strings.
+		s = strings.ReplaceAll(s, `\`, `\\`)
+		s = strings.ReplaceAll(s, "(", `\(`)
+		s = strings.ReplaceAll(s, ")", `\)`)
+		return s
+	}
+
+	var content string
+	if strings.TrimSpace(text) == "" {
+		content = "BT\nET\n"
+	} else {
+		content = "BT\n/F1 24 Tf\n72 120 Td\n(" + escape(text) + ") Tj\nET\n"
+	}
+
+	// We generate a simple 5-object PDF:
+	// 1: Catalog
+	// 2: Pages
+	// 3: Page
+	// 4: Contents (stream)
+	// 5: Font
+	//
+	// And then a correct xref section.
+	var b []byte
+	write := func(s string) { b = append(b, []byte(s)...) }
+
+	offsets := make([]int, 6) // 0..5 (we use 1..5)
+	write("%PDF-1.4\n")
+
+	writeObj := func(i int, s string) {
+		offsets[i] = len(b)
+		write(s)
+	}
+
+	writeObj(1, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+	writeObj(2, "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n")
+	writeObj(
+		3,
+		"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n",
+	)
+	writeObj(4, "4 0 obj\n<< /Length "+itoa(len([]byte(content)))+" >>\nstream\n"+content+"endstream\nendobj\n")
+	writeObj(5, "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n")
+
+	xrefStart := len(b)
+	write("xref\n0 6\n")
+	write("0000000000 65535 f \n")
+	for i := 1; i <= 5; i++ {
+		// Xref entries are 10-digit, zero-padded byte offsets.
+		write(pad10(offsets[i]) + " 00000 n \n")
+	}
+	write("trailer\n<< /Size 6 /Root 1 0 R >>\n")
+	write("startxref\n")
+	write(itoa(xrefStart) + "\n")
+	write("%%EOF\n")
+
+	return b
+}
+
+func pad10(n int) string {
+	s := itoa(n)
+	if len(s) >= 10 {
+		return s
+	}
+	return strings.Repeat("0", 10-len(s)) + s
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [32]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + (n % 10))
+		n /= 10
+	}
+	return string(buf[i:])
+}
+
+func writeTempFile(t *testing.T, dir, name string, data []byte) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return path
 }
