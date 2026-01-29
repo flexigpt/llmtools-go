@@ -5,6 +5,8 @@ import (
 	"errors"
 	"runtime"
 	"testing"
+
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 func TestDeleteTextLines_HappyPaths(t *testing.T) {
@@ -225,8 +227,8 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 		{
 			name: "symlink_file_rejected",
 			setup: func() string {
-				if runtime.GOOS == "windows" {
-					t.Skip("symlink creation often requires elevated privileges on Windows")
+				if runtime.GOOS == toolutil.GOOSWindows {
+					return ""
 				}
 				target := writeTempTextFile(t, dir, "target-*.txt", "A\n")
 				link := dir + string(filepathSep()) + "link.txt"
@@ -246,6 +248,9 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := tt.setup()
+			if path == "" {
+				return
+			}
 			args := tt.args(path)
 
 			ctx := t.Context()

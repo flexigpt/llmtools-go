@@ -148,7 +148,17 @@ func TestDeleteFile(t *testing.T) {
 			t.Fatalf("DeleteFile(auto): %v", err)
 		}
 
-		wantTrash := filepath.Join(xdg, "Trash", "files")
+		var wantTrash string
+		switch runtime.GOOS {
+		case "darwin":
+			// "macOS" uses ~/.Trash as the system trash.
+			wantTrash = filepath.Join(tmpHome, ".Trash")
+		case "linux", "freebsd", "openbsd", "netbsd", "dragonfly":
+			// XDG trash spec location when XDG_DATA_HOME is set.
+			wantTrash = filepath.Join(xdg, "Trash", "files")
+		default:
+			t.Skipf("system trash not defined for GOOS=%q in this test", runtime.GOOS)
+		}
 		if filepath.Dir(out.TrashedPath) != wantTrash {
 			t.Fatalf("TrashDirUsed=%q want=%q", filepath.Dir(out.TrashedPath), wantTrash)
 		}
