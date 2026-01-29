@@ -28,7 +28,7 @@ jobs:
           - os: ubuntu-24.04
             coverage: true
           - os: windows-2022
-            coverage: true
+            coverage: false
           - os: macos-15
             coverage: true
 
