@@ -198,7 +198,7 @@ func TestForEachSegment_SplitsPipeAndOrOr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	// Expect: ["echo x", "sudo ls", "cat"]
+	// Expect: ["echo x", "sudo ls", "cat"].
 	if len(segs) != 3 {
 		t.Fatalf("segs=%#v", segs)
 	}
