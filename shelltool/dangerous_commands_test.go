@@ -195,7 +195,11 @@ func runRejectCases(t *testing.T, cases []rejectTC) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Helper()
 			if tc.shellName == "" {
-				tc.shellName = "sh"
+				if runtime.GOOS == toolutil.GOOSWindows {
+					tc.shellName = string(ShellNameCmd)
+				} else {
+					tc.shellName = string(ShellNameSh)
+				}
 			}
 			if tc.shellPath == "" {
 				if runtime.GOOS == toolutil.GOOSWindows {

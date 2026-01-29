@@ -6,12 +6,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 var (
@@ -135,74 +132,6 @@ func RequireExistingRegularFileNoSymlink(path string) (fs.FileInfo, error) {
 	return st, nil
 }
 
-// WriteTextFileAtomic writes content to path using an atomic replace (temp file in same dir + rename).
-// It attempts to fsync the file and (best-effort) the containing directory.
-//
-// Notes:
-//   - On Windows, directory fsync is skipped (it often errors).
-//   - If another process holds the destination open on Windows, rename may fail.
-func WriteTextFileAtomic(path, content string, perm fs.FileMode) error {
-	p, err := NormalizePath(path)
-	if err != nil {
-		return err
-	}
-
-	// Ensure parent directories are not symlinks (best effort).
-	parent := filepath.Dir(p)
-	if parent != "" && parent != "." {
-		if err := VerifyDirNoSymlink(parent); err != nil {
-			return err
-		}
-	}
-
-	// Create temp file next to destination to keep rename atomic on same filesystem.
-	tmp, err := os.CreateTemp(parent, ".tmp-llmtools-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-
-	cleanup := func(retErr error) error {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return retErr
-	}
-
-	// Best effort permissions before rename (especially relevant on Unix).
-	_ = tmp.Chmod(perm)
-
-	if _, err := tmp.WriteString(content); err != nil {
-		return cleanup(err)
-	}
-	if err := tmp.Sync(); err != nil {
-		return cleanup(err)
-	}
-	if err := tmp.Close(); err != nil {
-		return cleanup(err)
-	}
-
-	// Rename with small retries on Windows (AV/indexers can transiently lock files).
-	var renameErr error
-	for attempt := range 6 {
-		renameErr = os.Rename(tmpName, p)
-		if renameErr == nil {
-			break
-		}
-		if runtime.GOOS != toolutil.GOOSWindows {
-			break
-		}
-		time.Sleep(time.Duration(15*(attempt+1)) * time.Millisecond)
-	}
-	if renameErr != nil {
-		return cleanup(renameErr)
-	}
-
-	// Best-effort directory sync (Unix).
-	_ = syncDirBestEffort(parent)
-
-	return nil
-}
-
 func detectNewlineKind(s string) NewlineKind {
 	// If we see any CRLF, preserve CRLF; this matches most “Windows file” expectations.
 	if strings.Contains(s, "\r\n") {
@@ -225,20 +154,4 @@ func normalizeNewlines(s string, kind NewlineKind) (norm string, hasFinalNewline
 		s = strings.TrimSuffix(s, "\n")
 	}
 	return s, hasFinalNewline
-}
-
-func syncDirBestEffort(dir string) error {
-	if dir == "" || dir == "." {
-		return nil
-	}
-	if runtime.GOOS == toolutil.GOOSWindows {
-		// Directory Sync is not consistently supported on Windows.
-		return nil
-	}
-	f, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return f.Sync()
 }

@@ -16,12 +16,22 @@ import (
 // refusing to traverse symlink components.
 // "maxNewDirs: 0 => unlimited"; otherwise limits how many missing dirs it will create.
 func EnsureDirNoSymlink(dir string, maxNewDirs int) (created int, err error) {
+	return walkDirNoSymlink(dir, true, maxNewDirs)
+}
+
+// VerifyDirNoSymlink ensures dir exists and is a directory, and none of its
+// components are symlinks.
+func VerifyDirNoSymlink(dir string) error {
+	_, err := walkDirNoSymlink(dir, false, 0)
+	return err
+}
+
+func walkDirNoSymlink(dir string, createMissing bool, maxNewDirs int) (created int, err error) {
 	d, err := NormalizePath(dir)
 	if err != nil {
 		return 0, err
 	}
 	if d == "." {
-		// Current directory, nothing to create.
 		return 0, nil
 	}
 
@@ -78,14 +88,17 @@ func EnsureDirNoSymlink(dir string, maxNewDirs int) (created int, err error) {
 			}
 			continue
 		}
+
 		if !errors.Is(err, os.ErrNotExist) {
+			return created, err
+		}
+		if !createMissing {
 			return created, err
 		}
 
 		if maxNewDirs > 0 && created >= maxNewDirs {
 			return created, fmt.Errorf("too many parent directories to create (max %d)", maxNewDirs)
 		}
-
 		if err := os.Mkdir(cur, 0o755); err != nil {
 			return created, err
 		}
@@ -93,71 +106,6 @@ func EnsureDirNoSymlink(dir string, maxNewDirs int) (created int, err error) {
 	}
 
 	return created, nil
-}
-
-// VerifyDirNoSymlink ensures dir exists and is a directory, and none of its
-// components are symlinks.
-func VerifyDirNoSymlink(dir string) error {
-	d, err := NormalizePath(dir)
-	if err != nil {
-		return err
-	}
-	if d == "." {
-		return nil
-	}
-
-	vol := filepath.VolumeName(d)
-	rest := d[len(vol):]
-
-	sep := string(os.PathSeparator)
-	rest = strings.TrimLeft(rest, sep)
-
-	parts := []string{}
-	if rest != "" {
-		for p := range strings.SplitSeq(rest, sep) {
-			if p == "" || p == "." {
-				continue
-			}
-			parts = append(parts, p)
-		}
-	}
-
-	cur := ""
-	if vol != "" {
-		if filepath.IsAbs(d) {
-			cur = vol + sep
-		} else {
-			cur = vol
-		}
-	} else if filepath.IsAbs(d) {
-		cur = sep
-	}
-
-	for _, part := range parts {
-		if cur == "" {
-			cur = part
-		} else {
-			cur = filepath.Join(cur, part)
-		}
-		st, err := os.Lstat(cur)
-		if err != nil {
-			return err
-		}
-		if (st.Mode() & os.ModeSymlink) != 0 {
-			if resolved, ok, aerr := allowDarwinSystemSymlink(cur); aerr != nil {
-				return aerr
-			} else if ok {
-				cur = resolved
-				continue
-			}
-			return fmt.Errorf("refusing to traverse symlink path component: %s", cur)
-		}
-		if !st.IsDir() {
-			return fmt.Errorf("path component is not a directory: %s", cur)
-		}
-	}
-
-	return nil
 }
 
 func UniquePathInDir(dir, base string) (string, error) {

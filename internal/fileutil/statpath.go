@@ -19,16 +19,17 @@ type PathInfo struct {
 // StatPath returns basic metadata for the supplied path without mutating the filesystem.
 // If the path does not exist, exists == false and err == nil.
 func StatPath(path string) (pathInfo *PathInfo, err error) {
-	if path == "" {
-		return nil, errors.New("path is required")
+	p, err := NormalizePath(path)
+	if err != nil {
+		return nil, err
 	}
-
 	pathInfo = &PathInfo{
-		Path:   path,
+		Path:   p,
 		Exists: false,
 	}
 
-	info, e := os.Stat(path)
+	info, e := os.Stat(p)
+
 	if e != nil {
 		if errors.Is(e, os.ErrNotExist) {
 			return pathInfo, nil
@@ -36,8 +37,8 @@ func StatPath(path string) (pathInfo *PathInfo, err error) {
 		return nil, e
 	}
 
-	p := getPathInfoFromFileInfo(path, info)
-	return &p, nil
+	pInfo := getPathInfoFromFileInfo(p, info)
+	return &pInfo, nil
 }
 
 func getPathInfoFromFileInfo(path string, info fs.FileInfo) PathInfo {

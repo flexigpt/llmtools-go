@@ -59,19 +59,23 @@ func rejectDangerousCommand(
 		blockedCommands = map[string]struct{}{}
 	}
 
+	dialect := dialectForShell(shellName)
+
 	// Cheap whole-input checks first.
 	if enableHeuristicChecks {
 		if looksLikeForkBomb(c) {
 			return errors.New("blocked dangerous command pattern (fork bomb)")
 		}
-		if hasBackgroundAmpersand(c) {
+		// '&' is backgrounding in sh; it is NOT backgrounding in cmd/powershell.
+		if dialect == dialectSh && hasBackgroundAmpersand(c) {
 			return errors.New("blocked backgrounding with '&' (leaks processes)")
 		}
 	}
 
 	// Scan each "command segment" separated by ";, &&, ||, |, &, newline, (, )".
-	return forEachSegment(c, func(seg string) error {
-		toks := shellFields(seg, runtime.GOOS == toolutil.GOOSWindows)
+	return forEachSegment(c, dialect, func(seg string) error {
+		toks := shellFields(seg, dialect)
+
 		if len(toks) == 0 {
 			return nil
 		}
@@ -143,10 +147,10 @@ func normalizeBlockedCommand(s string) (string, error) {
 		return "", errors.New("blocked command must be a single command name (no whitespace)")
 	}
 	// Allow passing "/bin/rm" etc; we only store the basename.
-	return strings.ToLower(filepath.Base(x)), nil
+	return strings.ToLower(baseAnySep(x)), nil
 }
 
-func forEachSegment(s string, fn func(seg string) error) error {
+func forEachSegment(s string, dialect shellDialect, fn func(seg string) error) error {
 	inS, inD := false, false
 	esc := false
 	start := 0
@@ -167,11 +171,30 @@ func forEachSegment(s string, fn func(seg string) error) error {
 			esc = false
 			continue
 		}
-		if !inS && ch == '\\' {
-			esc = true
-			continue
+
+		// Escape char depends on dialect.
+		switch dialect {
+		case dialectSh:
+			if !inS && ch == '\\' {
+				esc = true
+				continue
+			}
+		case dialectPowerShell:
+			// Backtick does not escape inside single quotes.
+			if !inS && ch == '`' {
+				esc = true
+				continue
+			}
+		case dialectCmd:
+			// Caret escapes metacharacters in cmd; handle best-effort.
+			if ch == '^' {
+				esc = true
+				continue
+			}
 		}
-		if !inD && ch == '\'' {
+
+		// Quoting rules.
+		if dialect != dialectCmd && !inD && ch == '\'' {
 			inS = !inS
 			continue
 		}
@@ -182,42 +205,71 @@ func forEachSegment(s string, fn func(seg string) error) error {
 		if inS || inD {
 			continue
 		}
-
-		// Comment start: " #...".
-		if ch == '#' && (i == 0 || unicode.IsSpace(rune(s[i-1]))) {
-			if err := emit(i); err != nil {
-				return err
+		// Comment start:
+		// - sh: '#' starts a comment when it begins a word (approx: preceded by whitespace/start)
+		// - powershell: '#' starts a comment anywhere (when not in quotes)
+		// - cmd: '#' is not a comment.
+		if dialect != dialectCmd && ch == '#' {
+			if dialect == dialectPowerShell || i == 0 || unicode.IsSpace(rune(s[i-1])) {
+				if err := emit(i); err != nil {
+					return err
+				}
+				return nil
 			}
-			return nil
 		}
 
 		// Separators.
-		if ch == ';' || ch == '\n' || ch == '(' || ch == ')' {
+		if dialect == dialectCmd {
+			// cmd: '&' and '|' chain commands; treat parens/newlines as boundaries too.
+			if ch == '\n' || ch == '(' || ch == ')' {
+				if err := emit(i); err != nil {
+					return err
+				}
+				start = i + 1
+				continue
+			}
+			if ch == '&' {
+				if err := emit(i); err != nil {
+					return err
+				}
+				if i+1 < len(s) && s[i+1] == '&' {
+					start = i + 2
+					i++
+				} else {
+					start = i + 1
+				}
+				continue
+			}
+			// Fall through to pipe handling below.
+		} else if ch == ';' || ch == '\n' || ch == '(' || ch == ')' {
+			// "sh/powershell": ';' and newline are separators.
 			if err := emit(i); err != nil {
 				return err
 			}
 			start = i + 1
 			continue
 		}
-
-		// "|| and |".
+		// "|", "||", "|&" are separators (pipeline / logical-or / pipe-stderr).
 		if ch == '|' {
 			if err := emit(i); err != nil {
 				return err
 			}
-			if i+1 < len(s) && s[i+1] == '|' { //nolint:gocritic // No switch here.
+			// Advance start past the operator.
+			//nolint:gocritic // No switch.
+			if i+1 < len(s) && s[i+1] == '|' { // "||"
 				start = i + 2
 				i++
-			} else if i+1 < len(s) && s[i+1] == '&' { // |&
+			} else if i+1 < len(s) && s[i+1] == '&' { // "|&"
 				start = i + 2
 				i++
-			} else {
+			} else { // "|"
 				start = i + 1
 			}
 			continue
 		}
 
-		// "&&"" (single & is handled by hasBackgroundAmpersand before we get here).
+		// "&&" (single & is handled as backgrounding only for sh; cmd splits it above).
+
 		if ch == '&' && i+1 < len(s) && s[i+1] == '&' {
 			if err := emit(i); err != nil {
 				return err
@@ -231,7 +283,7 @@ func forEachSegment(s string, fn func(seg string) error) error {
 	return emit(len(s))
 }
 
-func shellFields(s string, windowsMode bool) []string {
+func shellFields(s string, dialect shellDialect) []string {
 	var out []string
 	var b strings.Builder
 	inS, inD := false, false
@@ -253,11 +305,26 @@ func shellFields(s string, windowsMode bool) []string {
 			esc = false
 			continue
 		}
-		if !windowsMode && !inS && ch == '\\' {
-			esc = true
-			continue
+		switch dialect {
+		case dialectSh:
+			if !inS && ch == '\\' {
+				esc = true
+				continue
+			}
+		case dialectPowerShell:
+			if !inS && ch == '`' {
+				esc = true
+				continue
+			}
+		case dialectCmd:
+			if ch == '^' {
+				esc = true
+				continue
+			}
 		}
-		if !inD && ch == '\'' {
+
+		// "cmd" does not treat single quotes as quoting.
+		if dialect != dialectCmd && !inD && ch == '\'' {
 			inS = !inS
 			continue
 		}
@@ -290,6 +357,14 @@ func unwrapCommand(tokens []string) (name string, args []string) {
 
 	for {
 		switch cmd {
+		case "&":
+			// PowerShell call operator: & <command> <args...>.
+			if len(rest) == 0 {
+				return cmd, rest
+			}
+			cmd = canonicalCmd(rest[0])
+			rest = rest[1:]
+			continue
 		case "env":
 			j := 0
 			for j < len(rest) {
@@ -326,7 +401,7 @@ func unwrapCommand(tokens []string) (name string, args []string) {
 }
 
 func canonicalCmd(tok string) string {
-	return strings.ToLower(filepath.Base(strings.TrimSpace(tok)))
+	return strings.ToLower(baseAnySep(tok))
 }
 
 func isEnvAssignment(tok string) bool {
@@ -399,4 +474,37 @@ func hasBackgroundAmpersand(s string) bool {
 		return true
 	}
 	return false
+}
+
+type shellDialect int
+
+const (
+	dialectSh shellDialect = iota
+	dialectPowerShell
+	dialectCmd
+)
+
+func dialectForShell(shellName ShellName) shellDialect {
+	switch shellName {
+	case ShellNameCmd:
+		return dialectCmd
+	case ShellNamePwsh, ShellNamePowershell:
+		return dialectPowerShell
+	default:
+		return dialectSh
+	}
+}
+
+// baseAnySep returns the basename treating both '/' and '\' as separators.
+// This avoids path-encoding bypasses across platforms/shells.
+func baseAnySep(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimRight(s, `/\`)
+	if s == "" {
+		return ""
+	}
+	if i := strings.LastIndexAny(s, `/\`); i >= 0 {
+		return s[i+1:]
+	}
+	return s
 }

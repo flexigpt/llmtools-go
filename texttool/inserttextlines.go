@@ -160,7 +160,7 @@ func insertTextLines(ctx context.Context, args InsertTextLinesArgs) (*InsertText
 	tf.Lines = insertLines(tf.Lines, insertAt, linesToInsert)
 
 	outStr := tf.Render()
-	if err := fileutil.WriteTextFileAtomic(tf.Path, outStr, tf.Perm); err != nil {
+	if err := fileutil.WriteFileAtomicBytes(tf.Path, []byte(outStr), tf.Perm, true); err != nil {
 		return nil, err
 	}
 
@@ -181,8 +181,8 @@ func computeInsertIndex(lines []string, pos string, anchor []string) (insertAt i
 		if len(anchor) == 0 {
 			return 0, nil, errors.New(`position="beforeAnchor" requires anchorMatchLines`)
 		}
-		idxs := findBlockMatches(lines, anchor)
-		i, e := requireSingleMatch(idxs, "anchorMatchLines")
+		idxs := fileutil.FindTrimmedBlockMatches(lines, anchor)
+		i, e := fileutil.RequireSingleMatch(idxs, "anchorMatchLines")
 		if e != nil {
 			return 0, nil, e
 		}
@@ -192,8 +192,8 @@ func computeInsertIndex(lines []string, pos string, anchor []string) (insertAt i
 		if len(anchor) == 0 {
 			return 0, nil, errors.New(`position="afterAnchor" requires anchorMatchLines`)
 		}
-		idxs := findBlockMatches(lines, anchor)
-		i, err := requireSingleMatch(idxs, "anchorMatchLines")
+		idxs := fileutil.FindTrimmedBlockMatches(lines, anchor)
+		i, err := fileutil.RequireSingleMatch(idxs, "anchorMatchLines")
 		if err != nil {
 			return 0, nil, err
 		}
@@ -206,35 +206,6 @@ func computeInsertIndex(lines []string, pos string, anchor []string) (insertAt i
 		)
 
 	}
-}
-
-func findBlockMatches(lines, block []string) []int {
-	tLines := fileutil.GetTrimmedLines(lines)
-	tBlock := fileutil.GetTrimmedLines(block)
-	if len(tBlock) == 0 {
-		return nil
-	}
-	var idxs []int
-	for i := 0; i+len(tBlock) <= len(tLines); i++ {
-		if fileutil.IsBlockEqualsAt(tLines, tBlock, i) {
-			idxs = append(idxs, i)
-		}
-	}
-	return idxs
-}
-
-func requireSingleMatch(idxs []int, name string) (int, error) {
-	if len(idxs) == 0 {
-		return 0, fmt.Errorf("no match found for %s", name)
-	}
-	if len(idxs) > 1 {
-		return 0, fmt.Errorf(
-			"ambiguous match for %s: found %d occurrences; provide a more specific anchor",
-			name,
-			len(idxs),
-		)
-	}
-	return idxs[0], nil
 }
 
 func insertLines(lines []string, idx int, toInsert []string) []string {

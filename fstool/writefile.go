@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"unicode/utf8"
 
@@ -85,7 +84,7 @@ type WriteFileOut struct {
 
 // Max raw bytes written to disk (text bytes or decoded binary bytes).
 // This is a safety/abuse guard similar to ReadFile's cap.
-const maxWriteBytes int64 = 16 * 1024 * 1024 // 16MB
+const maxWriteBytes int64 = toolutil.MaxTextProcessingBytes // 16MB
 
 func WriteFile(ctx context.Context, args WriteFileArgs) (*WriteFileOut, error) {
 	return toolutil.WithRecoveryResp(func() (*WriteFileOut, error) {
@@ -176,130 +175,15 @@ func writeFile(ctx context.Context, args WriteFileArgs) (*WriteFileOut, error) {
 		return nil, err
 	}
 
-	// Atomic write: write temp file in same directory, then commit.
-	tmp, err := os.CreateTemp(parent, ".writefile-*")
-	if err != nil {
-		return nil, err
-	}
-	tmpName := tmp.Name()
-
-	cleanupTmp := func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-	}
-
-	// Best-effort; may be unsupported on some filesystems/platforms.
-	_ = tmp.Chmod(0o600)
-
-	if err := ctx.Err(); err != nil {
-		cleanupTmp()
-		return nil, err
-	}
-
-	n, err := tmp.Write(data)
-	if err != nil {
-		cleanupTmp()
-		return nil, err
-	}
-	if n != len(data) {
-		cleanupTmp()
-		return nil, ioErrShortWrite(n, len(data))
-	}
-
-	// Best-effort durability.
-	if err := tmp.Sync(); err != nil {
-		cleanupTmp()
-		return nil, err
-	}
-	if err := tmp.Close(); err != nil {
-		cleanupTmp()
-		return nil, err
-	}
-
-	// Allow cancellation before the commit step (rename/link).
-	if err := ctx.Err(); err != nil {
-		cleanupTmp()
-		return nil, err
-	}
-
-	// Commit temp file into place.
-	if !args.Overwrite {
-		// On unix, Rename would overwrite; Link is atomic and won't overwrite.
-		// On windows, Rename fails if destination exists, so it's fine to use Rename.
-		if runtime.GOOS != toolutil.GOOSWindows {
-			if err := os.Link(tmpName, p); err != nil {
-				// If it exists (race), treat as "overwrite=false" violation.
-				if errors.Is(err, os.ErrExist) {
-					cleanupTmp()
-					return nil, fmt.Errorf("file already exists and overwrite=false: %s", p)
-				}
-				// Some FS may not support hardlinks. Reserve the destination name
-				// with O_EXCL, then rename over the placeholder (prevents clobbering).
-				ph, perr := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-				if perr != nil {
-					cleanupTmp()
-					if errors.Is(perr, os.ErrExist) {
-						return nil, fmt.Errorf("file already exists and overwrite=false: %s", p)
-					}
-					return nil, perr
-				}
-				_ = ph.Close()
-				if err2 := os.Rename(tmpName, p); err2 != nil {
-					// If rename fails, remove placeholder and temp.
-					_ = os.Remove(p)
-					cleanupTmp()
-					return nil, err2
-				}
-			} else {
-				// Link succeeded: remove temp link-name, destination remains.
-				_ = os.Remove(tmpName)
-			}
-		} else {
-			if err := os.Rename(tmpName, p); err != nil {
-				cleanupTmp()
-				return nil, err
-			}
+	if err := fileutil.WriteFileAtomicBytes(p, data, 0o600, args.Overwrite); err != nil {
+		// Provide stable tool error message for the most common case.
+		if !args.Overwrite && errors.Is(err, os.ErrExist) {
+			return nil, fmt.Errorf("file already exists and overwrite=false: %s", p)
 		}
-	} else {
-		if runtime.GOOS == toolutil.GOOSWindows {
-			// Windows won't rename over an existing destination. Handle races by:
-			// rename -> if dest exists now, remove -> retry rename once.
-			if err := os.Rename(tmpName, p); err != nil {
-				if st, stErr := os.Lstat(p); stErr == nil {
-					if st.IsDir() {
-						cleanupTmp()
-						return nil, fmt.Errorf("path is a directory, not a file: %s", p)
-					}
-					if rmErr := os.Remove(p); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-						cleanupTmp()
-						return nil, rmErr
-					}
-					if err2 := os.Rename(tmpName, p); err2 != nil {
-						cleanupTmp()
-						return nil, err2
-					}
-				} else {
-					cleanupTmp()
-					return nil, err
-				}
-			}
-		} else {
-			if err := os.Rename(tmpName, p); err != nil {
-				cleanupTmp()
-				return nil, err
-			}
-		}
+		return nil, err
 	}
-
-	// Ensure final mode is 0600 (best-effort; Windows ignores).
-	_ = os.Chmod(p, 0o600)
-
 	return &WriteFileOut{
 		Path:         p,
 		BytesWritten: int64(len(data)),
 	}, nil
-}
-
-func ioErrShortWrite(got, want int) error {
-	return fmt.Errorf("short write: wrote %d bytes, expected %d", got, want)
 }

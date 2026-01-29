@@ -150,7 +150,7 @@ func deleteTextLines(ctx context.Context, args DeleteTextLinesArgs) (*DeleteText
 
 		// Preserve final newline behavior.
 		outStr := tf.Render()
-		if err := fileutil.WriteTextFileAtomic(tf.Path, outStr, tf.Perm); err != nil {
+		if err := fileutil.WriteFileAtomicBytes(tf.Path, []byte(outStr), tf.Perm, true); err != nil {
 			return nil, err
 		}
 	}

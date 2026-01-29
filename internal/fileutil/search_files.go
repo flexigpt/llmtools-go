@@ -28,7 +28,10 @@ func SearchFiles(
 	if root == "" {
 		root = "."
 	}
-
+	root, err = NormalizePath(root)
+	if err != nil {
+		return nil, reachedLimit, err
+	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, reachedLimit, err

@@ -136,33 +136,19 @@ func readTextRange(ctx context.Context, args ReadTextRangeArgs) (*ReadTextRangeO
 	var haveEndIdx bool
 
 	if len(startBlock) > 0 {
-		idxs := fileutil.FindTrimmedBlockMatches(tf.Lines, startBlock)
-		if len(idxs) == 0 {
-			return nil, errors.New("no match found for startMatchLines")
+		startIdx, err = fileutil.RequireSingleTrimmedBlockMatch(tf.Lines, startBlock, "startMatchLines")
+		if err != nil {
+			return nil, err
 		}
-		if len(idxs) > 1 {
-			return nil, fmt.Errorf(
-				"ambiguous startMatchLines: found %d occurrences; provide a more specific marker",
-				len(idxs),
-			)
-		}
-		startIdx = idxs[0]
 		haveStartIdx = true
 		selStart = startIdx
 	}
 
 	if len(endBlock) > 0 {
-		idxs := fileutil.FindTrimmedBlockMatches(tf.Lines, endBlock)
-		if len(idxs) == 0 {
-			return nil, errors.New("no match found for endMatchLines")
+		endIdx, err = fileutil.RequireSingleTrimmedBlockMatch(tf.Lines, endBlock, "endMatchLines")
+		if err != nil {
+			return nil, err
 		}
-		if len(idxs) > 1 {
-			return nil, fmt.Errorf(
-				"ambiguous endMatchLines: found %d occurrences; provide a more specific marker",
-				len(idxs),
-			)
-		}
-		endIdx = idxs[0]
 		haveEndIdx = true
 		selEnd = endIdx + len(endBlock) - 1
 		if selEnd >= total {

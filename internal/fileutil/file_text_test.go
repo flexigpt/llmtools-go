@@ -214,62 +214,6 @@ func TestRequireExistingRegularFileNoSymlink_SymlinkCases(t *testing.T) {
 	})
 }
 
-func TestWriteTextFileAtomic_BasicAndSymlinkParent(t *testing.T) {
-	dir := t.TempDir()
-
-	dst := filepath.Join(dir, "out.txt")
-	if err := WriteTextFileAtomic(dst, "hello\n", 0o640); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	b, err := os.ReadFile(dst)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if string(b) != "hello\n" {
-		t.Fatalf("content=%q want=%q", string(b), "hello\n")
-	}
-
-	// Overwrite.
-	if err := WriteTextFileAtomic(dst, "changed", 0o600); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	b, _ = os.ReadFile(dst)
-	if string(b) != "changed" {
-		t.Fatalf("content=%q want=%q", string(b), "changed")
-	}
-
-	if runtime.GOOS != toolutil.GOOSWindows {
-		st, err := os.Stat(dst)
-		if err != nil {
-			t.Fatalf("stat: %v", err)
-		}
-		// Best effort: we try to set perms on tmp before rename; should usually stick on Unix.
-		if st.Mode().Perm() != 0o600 {
-			t.Fatalf("perm=%o want=%o", st.Mode().Perm(), 0o600)
-		}
-	}
-
-	t.Run("symlink parent rejected (if supported)", func(t *testing.T) {
-		if runtime.GOOS == toolutil.GOOSWindows {
-			t.Skip("symlink tests skipped on Windows")
-		}
-		realParent := filepath.Join(dir, "realparent")
-		if err := os.Mkdir(realParent, 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-		linkParent := filepath.Join(dir, "linkparent")
-		mustSymlinkOrSkip(t, realParent, linkParent)
-
-		err := WriteTextFileAtomic(filepath.Join(linkParent, "x.txt"), "nope", 0o600)
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
-		if !strings.Contains(err.Error(), "symlink path component") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-}
-
 func equalStringSlices(a, b []string) bool {
 	if a == nil && b == nil {
 		return true

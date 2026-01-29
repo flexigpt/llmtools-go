@@ -39,7 +39,7 @@ func TestStatPath(t *testing.T) {
 			name:            "empty path",
 			path:            "",
 			wantErr:         true,
-			wantErrContains: "path is required",
+			wantErrContains: "invalid path",
 		},
 		{
 			name:       "non-existent path",

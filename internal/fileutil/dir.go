@@ -12,6 +12,11 @@ func ListDirectory(path, pattern string) ([]string, error) {
 	if dir == "" {
 		dir = "."
 	}
+	var err error
+	dir, err = NormalizePath(dir)
+	if err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err

@@ -184,7 +184,7 @@ func TestReadTextRange_ErrorCases(t *testing.T) {
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{Path: path, StartMatchLines: []string{"START"}}
 			},
-			wantErrSub: "ambiguous startMatchLines",
+			wantErrSub: "ambiguous match for startMatchLines",
 		},
 		{
 			name: "no_match_endMarker",
@@ -204,7 +204,7 @@ func TestReadTextRange_ErrorCases(t *testing.T) {
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{Path: path, EndMatchLines: []string{"END"}}
 			},
-			wantErrSub: "ambiguous endMatchLines",
+			wantErrSub: "ambiguous match for endMatchLines",
 		},
 		{
 			name: "end_before_or_overlaps_start_rejected",
