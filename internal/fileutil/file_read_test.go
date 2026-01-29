@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-)
 
-const maxReadBytes = 16 * 1024 * 1024 // 16MB safety limit
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
+)
 
 func TestReadFile(t *testing.T) {
 	dir := t.TempDir()
@@ -73,7 +73,7 @@ func TestReadFile(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ReadFile(tc.path, tc.encoding, maxReadBytes)
+			got, err := ReadFile(tc.path, tc.encoding, toolutil.MaxFileReadBytes)
 
 			if tc.wantErr {
 				if err == nil {

@@ -82,10 +82,6 @@ type WriteFileOut struct {
 	BytesWritten int64  `json:"bytesWritten"`
 }
 
-// Max raw bytes written to disk (text bytes or decoded binary bytes).
-// This is a safety/abuse guard similar to ReadFile's cap.
-const maxWriteBytes int64 = toolutil.MaxTextProcessingBytes // 16MB
-
 func WriteFile(ctx context.Context, args WriteFileArgs) (*WriteFileOut, error) {
 	return toolutil.WithRecoveryResp(func() (*WriteFileOut, error) {
 		return writeFile(ctx, args)
@@ -123,8 +119,8 @@ func writeFile(ctx context.Context, args WriteFileArgs) (*WriteFileOut, error) {
 	case fileutil.ReadEncodingBinary:
 		b64 := strings.TrimSpace(args.Content)
 		// Pre-check decoded size to avoid huge allocations.
-		if int64(base64.StdEncoding.DecodedLen(len(b64))) > maxWriteBytes {
-			return nil, fmt.Errorf("content too large (decoded > %d bytes)", maxWriteBytes)
+		if int64(base64.StdEncoding.DecodedLen(len(b64))) > toolutil.MaxFileWriteBytes {
+			return nil, fmt.Errorf("content too large (decoded > %d bytes)", toolutil.MaxFileWriteBytes)
 		}
 		decoded, derr := base64.StdEncoding.DecodeString(b64)
 		if derr != nil {
@@ -133,8 +129,8 @@ func writeFile(ctx context.Context, args WriteFileArgs) (*WriteFileOut, error) {
 		data = decoded
 	}
 
-	if int64(len(data)) > maxWriteBytes {
-		return nil, fmt.Errorf("content too large (%d bytes; max %d)", len(data), maxWriteBytes)
+	if int64(len(data)) > toolutil.MaxFileWriteBytes {
+		return nil, fmt.Errorf("content too large (%d bytes; max %d)", len(data), toolutil.MaxFileWriteBytes)
 	}
 
 	parent := filepath.Dir(p)

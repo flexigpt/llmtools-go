@@ -59,8 +59,6 @@ type ReadFileArgs struct {
 	Encoding string `json:"encoding,omitempty"` // "text" (default) | "binary"
 }
 
-const maxReadBytes = 16 * 1024 * 1024 // 16MB safety limit
-
 // ReadFile reads a file from disk and returns its contents.
 // If Encoding == "binary" the output is base64-encoded.
 func ReadFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUnion, error) {
@@ -98,10 +96,10 @@ func readFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUni
 	if pi.IsDir {
 		return nil, fmt.Errorf("path is a directory, not a file: %s", path)
 	}
-	if pi.Size > maxReadBytes {
+	if pi.Size > toolutil.MaxFileReadBytes {
 		return nil, fmt.Errorf(
 			"file %q is too large to read (%d bytes; max %d)",
-			path, pi.Size, maxReadBytes,
+			path, pi.Size, toolutil.MaxFileReadBytes,
 		)
 	}
 
@@ -123,8 +121,8 @@ func readFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUni
 
 		if isPDF {
 			// PDF: use the same extraction logic as attachments.
-			// Extraction itself is limited to maxReadBytes via LimitedReader.
-			text, err := pdfutil.ExtractPDFTextSafe(ctx, path, maxReadBytes)
+			// Extraction itself is limited to toolutil.MaxFileReadBytes via LimitedReader.
+			text, err := pdfutil.ExtractPDFTextSafe(ctx, path, toolutil.MaxFileReadBytes)
 			if err != nil {
 				return nil, err
 			}
@@ -148,7 +146,7 @@ func readFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUni
 		}
 
 		// Normal text file: read and validate UTF‑8.
-		data, err := fileutil.ReadFile(path, fileutil.ReadEncodingText, maxReadBytes)
+		data, err := fileutil.ReadFile(path, fileutil.ReadEncodingText, toolutil.MaxFileReadBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -170,7 +168,7 @@ func readFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUni
 	}
 
 	// Binary mode: base64-encode and return, like before.
-	data, err := fileutil.ReadFile(path, fileutil.ReadEncodingBinary, maxReadBytes)
+	data, err := fileutil.ReadFile(path, fileutil.ReadEncodingBinary, toolutil.MaxFileReadBytes)
 	if err != nil {
 		return nil, err
 	}
