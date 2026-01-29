@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 
 	"github.com/flexigpt/llmtools-go/internal/fileutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
@@ -99,13 +98,11 @@ func deleteTextLines(ctx context.Context, args DeleteTextLinesArgs) (*DeleteText
 		return nil, err
 	}
 
-	path, err := fileutil.NormalizePath(args.Path)
+	path, err := fileutil.NormalizeAbsPath(args.Path)
 	if err != nil {
 		return nil, err
 	}
-	if !filepath.IsAbs(path) {
-		return nil, errors.New("path must be absolute")
-	}
+
 	if len(args.MatchLines) == 0 {
 		return nil, errors.New("matchLines is required")
 	}

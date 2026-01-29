@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/flexigpt/llmtools-go/internal/fileutil"
@@ -113,12 +112,9 @@ func insertTextLines(ctx context.Context, args InsertTextLinesArgs) (*InsertText
 		return nil, err
 	}
 
-	path, err := fileutil.NormalizePath(args.Path)
+	path, err := fileutil.NormalizeAbsPath(args.Path)
 	if err != nil {
 		return nil, err
-	}
-	if !filepath.IsAbs(path) {
-		return nil, errors.New("path must be absolute")
 	}
 	if len(args.LinesToInsert) == 0 {
 		return nil, errors.New("linesToInsert is required")

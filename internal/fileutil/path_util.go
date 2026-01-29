@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+var errPathMustBeAbsolute = errors.New("path must be absolute")
+
 // EnsureDirNoSymlink creates missing directories one component at a time,
 // refusing to traverse symlink components.
 // "maxNewDirs: 0 => unlimited"; otherwise limits how many missing dirs it will create.
@@ -132,6 +134,22 @@ func UniquePathInDir(dir, base string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("could not allocate unique trash name for %q", base)
+}
+
+// NormalizeAbsPath normalizes the input path (trim, NUL reject, Clean) and
+// requires it to be absolute.
+//
+// Tools that require absolute paths should use this helper to keep behavior
+// consistent across the toolset.
+func NormalizeAbsPath(p string) (string, error) {
+	norm, err := NormalizePath(p)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(norm) {
+		return "", errPathMustBeAbsolute
+	}
+	return norm, nil
 }
 
 // NormalizePath:

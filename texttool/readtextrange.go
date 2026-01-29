@@ -2,9 +2,7 @@ package texttool
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"path/filepath"
 
 	"github.com/flexigpt/llmtools-go/internal/fileutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
@@ -102,12 +100,9 @@ func readTextRange(ctx context.Context, args ReadTextRangeArgs) (*ReadTextRangeO
 		return nil, err
 	}
 
-	path, err := fileutil.NormalizePath(args.Path)
+	path, err := fileutil.NormalizeAbsPath(args.Path)
 	if err != nil {
 		return nil, err
-	}
-	if !filepath.IsAbs(path) {
-		return nil, errors.New("path must be absolute")
 	}
 
 	startBlock := fileutil.NormalizeLineBlockInput(args.StartMatchLines)

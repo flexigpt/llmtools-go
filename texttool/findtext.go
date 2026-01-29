@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -154,13 +153,9 @@ func findText(ctx context.Context, args FindTextArgs) (*FindTextOut, error) {
 		return nil, err
 	}
 
-	path, err := fileutil.NormalizePath(args.Path)
+	path, err := fileutil.NormalizeAbsPath(args.Path)
 	if err != nil {
 		return nil, err
-	}
-
-	if !filepath.IsAbs(path) {
-		return nil, errors.New("path must be absolute")
 	}
 
 	qtype := strings.ToLower(strings.TrimSpace(args.QueryType))
