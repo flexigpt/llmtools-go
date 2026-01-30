@@ -32,6 +32,13 @@ LLM Tool implementations for Golang
   - Commands (`shelltool`):
     - Execute Shell commands (`shell`): Execute local shell commands (cross-platform) with timeouts, output caps, and session-like persistence for workdir/env. (Check notes below too).
 
+  - Text Processing (`texttool`):
+    - Delete text lines (`deletetextlines`): Delete one or more exact line-block occurrences from a UTF-8 text file. Use beforeLines/afterLines as immediate-adjacent context to disambiguate.
+    - Find text matches with context (`findtext`): Search a UTF-8 text file and return matching lines/blocks with surrounding context lines. Supported Modes: substring, RE2 regex (line-by-line), or exact line-block match.
+    - Insert text lines (`inserttextlines`): Insert lines into a UTF-8 text file at start/end or relative to a uniquely-matched anchor block.
+    - Read text range (`readtextrange`): Read a UTF-8 text file and return lines. Start and end marker lines can be provided to narrow the range.
+    - Replace text lines `replacetextlines`: Replace a block of lines in a UTF-8 text file; use beforeLines/afterLines to make the match more specific.
+
 - Tool registry for:
   - collecting and listing tool manifests (stable ordering)
   - invoking tools via JSON input/output with strict JSON input decoding
@@ -44,6 +51,7 @@ LLM Tool implementations for Golang
 - `fstool`: Filesystem tools.
 - `imagetool`: Image tools.
 - `shelltool`: Shell tools.
+- `texttool`: Text tools.
 
 ## Installation
 
