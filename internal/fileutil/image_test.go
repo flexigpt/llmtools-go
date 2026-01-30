@@ -3,11 +3,13 @@ package fileutil
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -31,10 +33,14 @@ func TestReadImage(t *testing.T) {
 	mustWriteBytes(t, imgPath, pngBytes)
 
 	tests := []struct {
-		name        string
-		path        string
-		includeB64  bool
-		wantErr     bool
+		name       string
+		path       string
+		includeB64 bool
+		maxBytes   int64
+
+		wantErr   bool
+		wantErrIs error
+
 		errContains string
 
 		wantExists bool
@@ -67,6 +73,8 @@ func TestReadImage(t *testing.T) {
 			name:       "png without base64",
 			path:       imgPath,
 			includeB64: false,
+			maxBytes:   0,
+
 			wantExists: true,
 			wantIsDir:  false,
 			wantW:      2,
@@ -79,6 +87,8 @@ func TestReadImage(t *testing.T) {
 			name:       "png with base64",
 			path:       imgPath,
 			includeB64: true,
+			maxBytes:   0,
+
 			wantExists: true,
 			wantIsDir:  false,
 			wantW:      2,
@@ -87,14 +97,68 @@ func TestReadImage(t *testing.T) {
 			wantMIME:   MIMEImagePNG,
 			wantB64:    true,
 		},
+		{
+			name:        "includeBase64=true enforces maxBytes via size precheck",
+			path:        imgPath,
+			includeB64:  true,
+			maxBytes:    int64(len(pngBytes) - 1),
+			wantErr:     true,
+			wantErrIs:   ErrFileExceedsMaxSize,
+			errContains: "exceeds maximum allowed size",
+		},
+		{
+			name:       "includeBase64=true accepts exact maxBytes",
+			path:       imgPath,
+			includeB64: true,
+			maxBytes:   int64(len(pngBytes)),
+			wantExists: true,
+			wantIsDir:  false,
+			wantW:      2,
+			wantH:      3,
+			wantFmt:    "png",
+			wantMIME:   MIMEImagePNG,
+			wantB64:    true,
+		},
+		{
+			name:       "corrupt image without base64 errors",
+			path:       filepath.Join(dir, "corrupt.bin"),
+			includeB64: false,
+			maxBytes:   0,
+			wantErr:    true,
+		},
+		{
+			name:       "corrupt image with base64 errors",
+			path:       filepath.Join(dir, "corrupt2.bin"),
+			includeB64: true,
+			maxBytes:   0,
+			wantErr:    true,
+		},
+		{
+			name:        "symlink file rejected (if supported)",
+			path:        filepath.Join(dir, "link.png"),
+			includeB64:  false,
+			maxBytes:    0,
+			wantErr:     true,
+			errContains: "refusing to operate on symlink file",
+		},
+	}
+
+	// Prepare corrupt files and symlink target (setup is outside the table to keep it table-driven).
+	mustWriteBytes(t, filepath.Join(dir, "corrupt.bin"), []byte("not an image"))
+	mustWriteBytes(t, filepath.Join(dir, "corrupt2.bin"), []byte("still not an image"))
+	if runtime.GOOS != toolutil.GOOSWindows {
+		mustSymlinkOrSkip(t, imgPath, filepath.Join(dir, "link.png"))
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			out, err := ReadImage(tc.path, tc.includeB64, toolutil.MaxFileReadBytes)
+			out, err := ReadImage(tc.path, tc.includeB64, tc.maxBytes)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil (out=%+v)", out)
+				}
+				if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+					t.Fatalf("error=%v; want errors.Is(_, %v)=true", err, tc.wantErrIs)
 				}
 				if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
 					t.Fatalf("error %q does not contain %q", err.Error(), tc.errContains)

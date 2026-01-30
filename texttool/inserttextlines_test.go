@@ -135,6 +135,19 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 				insertedLineCount: 1,
 			},
 		},
+		{
+			name:    "non_empty_file_without_final_newline_preserved",
+			initial: "A", // no trailing newline
+			args: InsertTextLinesArgs{
+				Position:      "end",
+				LinesToInsert: []string{"B"},
+			},
+			want: want{
+				content:           "A\nB", // still no final newline
+				insertedAtLine:    2,
+				insertedLineCount: 1,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -181,10 +194,13 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 	dir := newWorkDir(t)
 
 	tests := []struct {
-		name       string
-		setupFile  func() string
-		args       func(path string) InsertTextLinesArgs
-		wantErrSub string
+		name              string
+		setupFile         func() string
+		args              func(path string) InsertTextLinesArgs
+		wantErrSub        string
+		wantIsCtx         bool
+		checkContentAfter bool
+		wantContentAfter  string
 	}{
 		{
 			name: "path_must_be_absolute",
@@ -277,6 +293,23 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 			wantErrSub: "ambiguous match for anchorMatchLines",
 		},
 		{
+			name: "default_end_rejects_anchorMatchLines",
+			setupFile: func() string {
+				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
+			},
+			args: func(path string) InsertTextLinesArgs {
+				return InsertTextLinesArgs{
+					Path: path,
+					// Position omitted => default "end".
+					LinesToInsert:    []string{"X"},
+					AnchorMatchLines: []string{"A"},
+				}
+			},
+			wantErrSub:        `anchorMatchLines must be omitted`,
+			checkContentAfter: true,
+			wantContentAfter:  "A\n",
+		},
+		{
 			name: "context_canceled",
 			setupFile: func() string {
 				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
@@ -288,7 +321,8 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 					LinesToInsert: []string{"X"},
 				}
 			},
-			wantErrSub: contextCanceledSubstring(),
+
+			wantIsCtx: true,
 		},
 	}
 
@@ -298,7 +332,7 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 			args := tt.args(path)
 
 			ctx := t.Context()
-			if strings.Contains(tt.name, "context_canceled") {
+			if tt.wantIsCtx {
 				cctx, cancel := context.WithCancel(ctx)
 				cancel()
 				ctx = cctx
@@ -313,12 +347,13 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 			}
 
 			mustErrContains(t, err, tt.wantErrSub)
+
+			if tt.checkContentAfter {
+				got := readFileString(t, path)
+				if got != tt.wantContentAfter {
+					t.Fatalf("file changed on error\nwant:\n%q\ngot:\n%q", tt.wantContentAfter, got)
+				}
+			}
 		})
 	}
-}
-
-func contextCanceledSubstring() string {
-	// In case some platforms wrap differently, the main assertion uses errors.Is,
-	// but other tests may call this helper for contains() checks.
-	return "canceled"
 }

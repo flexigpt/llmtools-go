@@ -82,6 +82,37 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 			wantAtLines:  []int{2},
 			wantErrIsNil: true,
 		},
+		{
+			name:    "multiple_replacements_expected_2_reports_original_line_numbers",
+			initial: "A\nX\nB\nX\nC\n",
+			args: func(path string) ReplaceTextLinesArgs {
+				return ReplaceTextLinesArgs{
+					Path:                 path,
+					MatchLines:           []string{"X"},
+					ReplaceWithLines:     []string{"Y"},
+					ExpectedReplacements: ptrInt(2),
+				}
+			},
+			wantContent:  "A\nY\nB\nY\nC\n",
+			wantMade:     2,
+			wantAtLines:  []int{2, 4},
+			wantErrIsNil: true,
+		},
+		{
+			name:    "replaceWithLines_embedded_newlines_splits_into_multiple_lines",
+			initial: "A\nX\n",
+			args: func(path string) ReplaceTextLinesArgs {
+				return ReplaceTextLinesArgs{
+					Path:             path,
+					MatchLines:       []string{"X"},
+					ReplaceWithLines: []string{"Y\nZ"},
+				}
+			},
+			wantContent:  "A\nY\nZ\n",
+			wantMade:     1,
+			wantAtLines:  []int{2},
+			wantErrIsNil: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -91,6 +122,13 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 
 			out, err := ReplaceTextLines(t.Context(), args)
 			mustNoErr(t, err)
+			if out.ReplacementsMade != len(out.ReplacedAtLines) {
+				t.Fatalf(
+					"invariant failed: ReplacementsMade=%d but len(ReplacedAtLines)=%d",
+					out.ReplacementsMade,
+					len(out.ReplacedAtLines),
+				)
+			}
 
 			if out.ReplacementsMade != tt.wantMade {
 				t.Fatalf("ReplacementsMade: want %d, got %d", tt.wantMade, out.ReplacementsMade)
@@ -121,11 +159,13 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 	dir := newWorkDir(t)
 
 	tests := []struct {
-		name       string
-		setup      func() string
-		args       func(path string) ReplaceTextLinesArgs
-		wantErrSub string
-		wantIsCtx  bool
+		name              string
+		setup             func() string
+		args              func(path string) ReplaceTextLinesArgs
+		wantErrSub        string
+		wantIsCtx         bool
+		checkContentAfter bool
+		wantContentAfter  string
 	}{
 		{
 			name: "path_must_be_absolute",
@@ -199,6 +239,23 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 			wantErrSub: "replace match count mismatch",
 		},
 		{
+			name: "match_count_mismatch_does_not_modify_file",
+			setup: func() string {
+				return writeTempTextFile(t, dir, "x-*.txt", "A\nA\n")
+			},
+			args: func(path string) ReplaceTextLinesArgs {
+				return ReplaceTextLinesArgs{
+					Path:             path,
+					MatchLines:       []string{"A"},
+					ReplaceWithLines: []string{"X"},
+					// Default expected=1, but found=2.
+				}
+			},
+			wantErrSub:        "replace match count mismatch",
+			checkContentAfter: true,
+			wantContentAfter:  "A\nA\n",
+		},
+		{
 			name: "overlapping_matches_rejected",
 			setup: func() string {
 				return writeTempTextFile(t, dir, "x-*.txt", "X\nX\nX\n") //nolint:dupword // Test.
@@ -211,7 +268,9 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 					ExpectedReplacements: ptrInt(2),
 				}
 			},
-			wantErrSub: "overlapping matches detected",
+			wantErrSub:        "overlapping matches detected",
+			checkContentAfter: true,
+			wantContentAfter:  "X\nX\nX\n", //nolint:dupword // Test.
 		},
 		{
 			name: "context_canceled",
@@ -249,6 +308,12 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 				return
 			}
 			mustErrContains(t, err, tt.wantErrSub)
+			if tt.checkContentAfter {
+				got := readFileString(t, path)
+				if got != tt.wantContentAfter {
+					t.Fatalf("file changed on error\nwant:\n%q\ngot:\n%q", tt.wantContentAfter, got)
+				}
+			}
 		})
 	}
 }

@@ -87,6 +87,22 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 			wantErrIsNil: true,
 		},
 		{
+			name:    "multi_line_start_and_end_markers_select_including_full_blocks",
+			initial: "hdr\nSTART1\nSTART2\nx\nEND1\nEND2\ntail\n",
+			args: func(path string) ReadTextRangeArgs {
+				return ReadTextRangeArgs{
+					Path:            path,
+					StartMatchLines: []string{"START1", "START2"},
+					EndMatchLines:   []string{"END1", "END2"},
+				}
+			},
+			wantStart:    2,
+			wantEnd:      6,
+			wantCount:    5,
+			wantLine1:    &ReadTextRangeLine{LineNumber: 2, Text: "START1"},
+			wantErrIsNil: true,
+		},
+		{
 			name:    "empty_file_returns_empty_deterministically",
 			initial: "",
 			args: func(path string) ReadTextRangeArgs {
@@ -117,7 +133,9 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 
 			out, err := ReadTextRange(t.Context(), args)
 			mustNoErr(t, err)
-
+			if len(out.Lines) != out.LinesReturned {
+				t.Fatalf("invariant failed: len(Lines)=%d but LinesReturned=%d", len(out.Lines), out.LinesReturned)
+			}
 			if out.LinesReturned != tt.wantCount {
 				t.Fatalf("LinesReturned: want %d, got %d", tt.wantCount, out.LinesReturned)
 			}

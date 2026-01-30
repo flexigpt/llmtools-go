@@ -3,6 +3,7 @@ package fileutil
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -53,31 +54,62 @@ func TestCopyFileCtx(t *testing.T) {
 func TestCopyFileCtx_Errors(t *testing.T) {
 	dir := t.TempDir()
 
-	src := filepath.Join(dir, "src.txt")
-	mustWriteBytes(t, src, []byte("hello"))
-
+	srcFile := filepath.Join(dir, "src.txt")
+	mustWriteBytes(t, srcFile, []byte("hello"))
+	srcMissing := filepath.Join(dir, "src-missing.txt")
+	srcDir := filepath.Join(dir, "srcdir")
+	if err := os.Mkdir(srcDir, 0o755); err != nil {
+		t.Fatalf("mkdir srcdir: %v", err)
+	}
 	tests := []struct {
-		name     string
-		ctx      context.Context
-		dstSetup func(t *testing.T, dst string)
-		dst      string
-		wantErr  bool
+		name           string
+		ctx            context.Context
+		src            string
+		dstSetup       func(t *testing.T, dst string)
+		dst            string
+		wantErr        bool
+		wantErrIs      error
+		wantDstExists  *bool
+		wantDstContent []byte
 	}{
 		{
-			name:    "canceled before start",
-			ctx:     canceledContext(t.Context()),
-			dst:     filepath.Join(dir, "dst1.txt"),
-			wantErr: true,
+			name:          "canceled before start",
+			ctx:           canceledContext(t.Context()),
+			src:           srcFile,
+			dst:           filepath.Join(dir, "dst1.txt"),
+			wantErr:       true,
+			wantErrIs:     context.Canceled,
+			wantDstExists: ptrBool(false),
 		},
 		{
 			name: "dst exists => O_EXCL error",
 			ctx:  t.Context(),
+			src:  srcFile,
+
 			dstSetup: func(t *testing.T, dst string) {
 				t.Helper()
 				mustWriteBytes(t, dst, []byte("already"))
 			},
-			dst:     filepath.Join(dir, "dst2.txt"),
-			wantErr: true,
+			dst:            filepath.Join(dir, "dst2.txt"),
+			wantErr:        true,
+			wantDstExists:  ptrBool(true),
+			wantDstContent: []byte("already"),
+		},
+		{
+			name:          "src missing => error and dst not created",
+			ctx:           t.Context(),
+			src:           srcMissing,
+			dst:           filepath.Join(dir, "dst3.txt"),
+			wantErr:       true,
+			wantDstExists: ptrBool(false),
+		},
+		{
+			name:          "src is directory => error and dst is cleaned up",
+			ctx:           t.Context(),
+			src:           srcDir,
+			dst:           filepath.Join(dir, "dst4.txt"),
+			wantErr:       true,
+			wantDstExists: ptrBool(false),
 		},
 	}
 
@@ -86,27 +118,36 @@ func TestCopyFileCtx_Errors(t *testing.T) {
 			if tc.dstSetup != nil {
 				tc.dstSetup(t, tc.dst)
 			}
-			_, err := CopyFileCtx(tc.ctx, src, tc.dst, 0o600)
-			if tc.wantErr && err == nil {
-				t.Fatalf("expected error, got nil")
+			_, err := CopyFileCtx(tc.ctx, tc.src, tc.dst, 0o600)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+					t.Fatalf("error=%v; want errors.Is(_, %v)=true", err, tc.wantErrIs)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tc.wantDstExists != nil {
+				_, statErr := os.Lstat(tc.dst)
+				gotExists := statErr == nil
+				if gotExists != *tc.wantDstExists {
+					t.Fatalf("dst exists=%v want=%v (statErr=%v)", gotExists, *tc.wantDstExists, statErr)
+				}
+			}
+			if tc.wantDstContent != nil {
+				b, rerr := os.ReadFile(tc.dst)
+				if rerr != nil {
+					t.Fatalf("read dst: %v", rerr)
+				}
+				if !bytes.Equal(b, tc.wantDstContent) {
+					t.Fatalf("dst content=%q want=%q", string(b), string(tc.wantDstContent))
+				}
 			}
 		})
 	}
-	t.Run("src is directory => error and dst is cleaned up", func(t *testing.T) {
-		srcDir := filepath.Join(dir, "srcdir")
-		if err := os.Mkdir(srcDir, 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-		dst := filepath.Join(dir, "dst-from-dir.txt")
-
-		_, err := CopyFileCtx(t.Context(), srcDir, dst, 0o600)
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
-		if _, statErr := os.Lstat(dst); !os.IsNotExist(statErr) {
-			t.Fatalf("expected dst to be removed on error; statErr=%v", statErr)
-		}
-	})
 }
 
 func TestCopyFileToExistingCtx(t *testing.T) {
@@ -143,29 +184,63 @@ func TestCopyFileToExistingCtx_Errors(t *testing.T) {
 	tests := []struct {
 		name            string
 		ctx             context.Context
+		src             string
 		dst             string
 		dstSetup        func(t *testing.T, dst string)
 		wantErrContains string
+		wantErrIs       error
+		wantDstContent  []byte
 	}{
 		{
-			name: "canceled before start",
-			ctx:  canceledContext(t.Context()),
-			dst:  filepath.Join(dir, "dst1.txt"),
+			name:      "canceled before start",
+			ctx:       canceledContext(t.Context()),
+			src:       src,
+			dst:       filepath.Join(dir, "dst1.txt"),
+			wantErrIs: context.Canceled,
 		},
 		{
 			name: "dst missing => error",
 			ctx:  t.Context(),
+			src:  src,
 			dst:  filepath.Join(dir, "missing.txt"),
 		},
 		{
 			name: "dst is directory => not regular file",
 			ctx:  t.Context(),
+			src:  src,
 			dst:  filepath.Join(dir, "adir"),
 			dstSetup: func(t *testing.T, dst string) {
 				t.Helper()
 				if err := os.Mkdir(dst, 0o755); err != nil {
 					t.Fatalf("mkdir: %v", err)
 				}
+			},
+			wantErrContains: "not a regular file",
+		},
+		{
+			name: "src missing => error and dst not modified",
+			ctx:  t.Context(),
+			src:  filepath.Join(dir, "src-missing.txt"),
+			dst:  filepath.Join(dir, "dst-existing.txt"),
+			dstSetup: func(t *testing.T, dst string) {
+				t.Helper()
+				mustWriteBytes(t, dst, []byte("KEEP"))
+			},
+			wantDstContent: []byte("KEEP"),
+		},
+		{
+			name: "dst is symlink => not regular file",
+			ctx:  t.Context(),
+			src:  src,
+			dst:  filepath.Join(dir, "dstlink.txt"),
+			dstSetup: func(t *testing.T, dst string) {
+				t.Helper()
+				if runtime.GOOS == toolutil.GOOSWindows {
+					t.Skip("symlink tests skipped on Windows")
+				}
+				realDst := filepath.Join(dir, "real-dst.txt")
+				mustWriteBytes(t, realDst, []byte("x"))
+				mustSymlinkOrSkip(t, realDst, dst)
 			},
 			wantErrContains: "not a regular file",
 		},
@@ -176,12 +251,25 @@ func TestCopyFileToExistingCtx_Errors(t *testing.T) {
 			if tc.dstSetup != nil {
 				tc.dstSetup(t, tc.dst)
 			}
-			_, err := CopyFileToExistingCtx(tc.ctx, src, tc.dst)
+			_, err := CopyFileToExistingCtx(tc.ctx, tc.src, tc.dst)
+
 			if err == nil {
 				t.Fatalf("expected error, got nil")
 			}
+			if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+				t.Fatalf("error=%v; want errors.Is(_, %v)=true", err, tc.wantErrIs)
+			}
 			if tc.wantErrContains != "" && !strings.Contains(err.Error(), tc.wantErrContains) {
 				t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrContains)
+			}
+			if tc.wantDstContent != nil {
+				b, rerr := os.ReadFile(tc.dst)
+				if rerr != nil {
+					t.Fatalf("read dst: %v", rerr)
+				}
+				if !bytes.Equal(b, tc.wantDstContent) {
+					t.Fatalf("dst content=%q want=%q", string(b), string(tc.wantDstContent))
+				}
 			}
 		})
 	}

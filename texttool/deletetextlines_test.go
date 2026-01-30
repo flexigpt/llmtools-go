@@ -13,16 +13,12 @@ func TestDeleteTextLines_HappyPaths(t *testing.T) {
 	dir := newWorkDir(t)
 
 	tests := []struct {
-		name            string
-		initial         string
-		args            func(path string) DeleteTextLinesArgs
-		wantContent     string
-		wantDeletions   int
-		wantDeletedAt   []int
-		wantErrSub      string
-		wantErrIsNil    bool
-		skipOnWindows   bool
-		requiresSymlink bool
+		name          string
+		initial       string
+		args          func(path string) DeleteTextLinesArgs
+		wantContent   string
+		wantDeletions int
+		wantDeletedAt []int
 	}{
 		{
 			name:    "delete_single_line_default_expected_1",
@@ -36,7 +32,6 @@ func TestDeleteTextLines_HappyPaths(t *testing.T) {
 			wantContent:   "A\nC\n",
 			wantDeletions: 1,
 			wantDeletedAt: []int{2},
-			wantErrIsNil:  true,
 		},
 		{
 			name:    "delete_multiline_with_before_after_disambiguation",
@@ -53,7 +48,6 @@ func TestDeleteTextLines_HappyPaths(t *testing.T) {
 			wantContent:   "hdr\nctx1\nctx2\nctx1\nX\nY\nctx3\n",
 			wantDeletions: 1,
 			wantDeletedAt: []int{3},
-			wantErrIsNil:  true,
 		},
 		{
 			name:    "expectedDeletions_0_defaults_to_1",
@@ -68,7 +62,6 @@ func TestDeleteTextLines_HappyPaths(t *testing.T) {
 			wantContent:   "A\n",
 			wantDeletions: 1,
 			wantDeletedAt: []int{2},
-			wantErrIsNil:  true,
 		},
 		{
 			name:    "delete_all_lines_preserves_final_newline",
@@ -83,7 +76,6 @@ func TestDeleteTextLines_HappyPaths(t *testing.T) {
 			wantContent:   "\n",
 			wantDeletions: 1,
 			wantDeletedAt: []int{1},
-			wantErrIsNil:  true,
 		},
 		{
 			name:    "preserves_crlf_newlines",
@@ -97,7 +89,46 @@ func TestDeleteTextLines_HappyPaths(t *testing.T) {
 			wantContent:   "B\r\n",
 			wantDeletions: 1,
 			wantDeletedAt: []int{1},
-			wantErrIsNil:  true,
+		},
+		{
+			name:    "trimspace_matching_deletes_whitespace_padded_line",
+			initial: "A\n  B  \nC\n",
+			args: func(path string) DeleteTextLinesArgs {
+				return DeleteTextLinesArgs{
+					Path:       path,
+					MatchLines: []string{"B"},
+				}
+			},
+			wantContent:   "A\nC\n",
+			wantDeletions: 1,
+			wantDeletedAt: []int{2},
+		},
+		{
+			name:    "matchLines_embedded_newlines_deletes_multiline_block",
+			initial: "A\nX\nY\nB\n",
+			args: func(path string) DeleteTextLinesArgs {
+				return DeleteTextLinesArgs{
+					Path:       path,
+					MatchLines: []string{"X\nY"},
+				}
+			},
+			wantContent:   "A\nB\n",
+			wantDeletions: 1,
+			wantDeletedAt: []int{2},
+		},
+		{
+			name:    "multiple_deletions_expected_2_reports_original_line_numbers",
+			initial: "A\nX\nB\nX\nC\n",
+			args: func(path string) DeleteTextLinesArgs {
+				return DeleteTextLinesArgs{
+					Path:              path,
+					MatchLines:        []string{"X"},
+					ExpectedDeletions: 2,
+				}
+			},
+			wantContent:   "A\nB\nC\n",
+			wantDeletions: 2,
+			wantDeletedAt: []int{2, 4},
 		},
 	}
 
@@ -138,11 +169,13 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 	dir := newWorkDir(t)
 
 	tests := []struct {
-		name       string
-		setup      func() (path string)
-		args       func(path string) DeleteTextLinesArgs
-		wantErrSub string
-		wantIsCtx  bool
+		name              string
+		setup             func() (path string)
+		args              func(path string) DeleteTextLinesArgs
+		wantErrSub        string
+		wantIsCtx         bool
+		checkContentAfter bool
+		wantContentAfter  string
 	}{
 		{
 			name: "path_must_be_absolute",
@@ -188,7 +221,9 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 					ExpectedDeletions: 1,
 				}
 			},
-			wantErrSub: "delete match count mismatch",
+			wantErrSub:        "delete match count mismatch",
+			checkContentAfter: true,
+			wantContentAfter:  "A\nX\nA\nX\n",
 		},
 		{
 			name: "overlapping_matches_rejected",
@@ -202,7 +237,9 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 					ExpectedDeletions: 2, // won't be reached; overlap check happens first
 				}
 			},
-			wantErrSub: "overlapping matches detected",
+			wantErrSub:        "overlapping matches detected",
+			checkContentAfter: true,
+			wantContentAfter:  "X\nX\nX\n", //nolint:dupword // Test.
 		},
 		{
 			name: "invalid_utf8_rejected",
@@ -228,14 +265,17 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 			name: "symlink_file_rejected",
 			setup: func() string {
 				if runtime.GOOS == toolutil.GOOSWindows {
-					return ""
+					t.Skip("symlink behavior is platform/privilege-dependent on Windows")
 				}
 				target := writeTempTextFile(t, dir, "target-*.txt", "A\n")
 				link := dir + string(filepathSep()) + "link.txt"
 				if err := osSymlink(target, link); err != nil {
 					t.Skipf("os.Symlink not available: %v", err)
 				}
-				abs, _ := filepathAbs(link)
+				abs, err := filepathAbs(link)
+				if err != nil {
+					t.Fatalf("Abs(%q): %v", link, err)
+				}
 				return abs
 			},
 			args: func(path string) DeleteTextLinesArgs {
@@ -248,9 +288,7 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := tt.setup()
-			if path == "" {
-				return
-			}
+
 			args := tt.args(path)
 
 			ctx := t.Context()
@@ -274,6 +312,13 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 				return
 			}
 			mustErrContains(t, err, tt.wantErrSub)
+			if tt.checkContentAfter {
+				got := readFileString(t, path)
+				if got != tt.wantContentAfter {
+					t.Fatalf("file changed on error\nwant:\n%q\ngot:\n%q", tt.wantContentAfter, got)
+				}
+				return
+			}
 		})
 	}
 }
