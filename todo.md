@@ -2,8 +2,6 @@
 
 ## Laundary List
 
-- [ ] test enhancements if any.
-
 ## Done
 
 - [x] add base fstools
@@ -17,3 +15,4 @@
 - [x] race conditions review
 - [x] errors/bug fixes/repetitive things review
 - [x] full repo together review
+- [x] test enhancements if any.
