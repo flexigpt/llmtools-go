@@ -38,7 +38,7 @@ func ReadImage(
 	includeBase64Data bool,
 ) (*ImageData, error) {
 	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("path is required")
+		return nil, ErrInvalidPath
 	}
 
 	pathInfo, err := StatPath(path)

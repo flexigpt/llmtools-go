@@ -19,7 +19,7 @@ const (
 // If maxBytes > 0, it enforces a hard cap during reading.
 func ReadFile(path string, encoding ReadEncoding, maxBytes int64) (string, error) {
 	if path == "" {
-		return "", errors.New("path is required")
+		return "", ErrInvalidPath
 	}
 
 	if encoding != ReadEncodingText && encoding != ReadEncodingBinary {

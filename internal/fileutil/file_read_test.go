@@ -60,7 +60,7 @@ func TestReadFile(t *testing.T) {
 			path:            "",
 			encoding:        ReadEncodingText,
 			wantErr:         true,
-			wantErrContains: "path is required",
+			wantErrContains: ErrInvalidPath.Error(),
 		},
 		{
 			name:           "non-existent path",

@@ -47,7 +47,7 @@ func TestReadImage(t *testing.T) {
 			name:        "empty path error",
 			path:        "",
 			wantErr:     true,
-			errContains: "path is required",
+			errContains: ErrInvalidPath.Error(),
 		},
 		{
 			name:       "nonexistent returns Exists=false and no error",

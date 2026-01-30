@@ -82,7 +82,7 @@ func readFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUni
 
 	path := strings.TrimSpace(args.Path)
 	if path == "" {
-		return nil, errors.New("path is required")
+		return nil, fileutil.ErrInvalidPath
 	}
 
 	// Basic filesystem sanity checks.
