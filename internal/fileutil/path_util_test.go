@@ -207,7 +207,7 @@ func TestEnsureDirNoSymlink(t *testing.T) {
 }
 
 func TestVerifyDirNoSymlink_AllowsDarwinSystemSymlinks(t *testing.T) {
-	if runtime.GOOS != "darwin" {
+	if runtime.GOOS != toolutil.GOOSDarwin {
 		t.Skip("darwin-only")
 	}
 

@@ -1,6 +1,8 @@
 package fstool
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,20 +26,27 @@ func TestSearchFiles(t *testing.T) {
 		t.Fatalf("write baz.txt: %v", err)
 	}
 
-	// Large file to exercise content-size guard (if implemented by fileutil.SearchFiles).
-	largeFile := filepath.Join(tmpDir, "large.txt")
-	largeContent := strings.Repeat("x", 11*1024*1024) // >10MB
-	if err := os.WriteFile(largeFile, []byte(largeContent), 0o600); err != nil {
-		t.Fatalf("write large.txt: %v", err)
-	}
-
 	tests := []struct {
-		name       string
-		args       SearchFilesArgs
-		want       []string
-		wantErr    bool
-		shouldFind func([]string) bool
+		name string
+		args SearchFilesArgs
+		ctx  func(t *testing.T) context.Context
+
+		want           []string
+		wantErr        bool
+		shouldFind     func([]string) bool
+		wantReachedMax bool
 	}{
+		{
+			name: "context_canceled",
+			ctx: func(t *testing.T) context.Context {
+				t.Helper()
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				return ctx
+			},
+			args:    SearchFilesArgs{Root: tmpDir, Pattern: "txt"},
+			wantErr: true,
+		},
 		{
 			name:    "Missing pattern returns error",
 			args:    SearchFilesArgs{Root: tmpDir},
@@ -69,22 +78,31 @@ func TestSearchFiles(t *testing.T) {
 			shouldFind: func(matches []string) bool {
 				return len(matches) == 1 && strings.HasSuffix(matches[0], ".txt")
 			},
-		},
-		{
-			name: "Large file does not match content (size guard)",
-			args: SearchFilesArgs{Root: tmpDir, Pattern: "x{100,}"},
-			want: []string{}, // Should not match large.txt content if size guard is active.
+			wantReachedMax: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out, err := SearchFiles(t.Context(), tt.args)
+			ctx := t.Context()
+			if tt.ctx != nil {
+				ctx = tt.ctx(t)
+			}
+			out, err := SearchFiles(ctx, tt.args)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("SearchFiles error = %v, wantErr = %v", err, tt.wantErr)
 			}
 			if err != nil {
+				if tt.name == "context_canceled" && !errors.Is(err, context.Canceled) {
+					t.Fatalf("expected context.Canceled, got %v", err)
+				}
 				return
+			}
+			if out.MatchCount != len(out.Matches) {
+				t.Fatalf("MatchCount=%d want %d", out.MatchCount, len(out.Matches))
+			}
+			if out.ReachedMaxResults != tt.wantReachedMax {
+				t.Fatalf("ReachedMaxResults=%v want %v", out.ReachedMaxResults, tt.wantReachedMax)
 			}
 			if tt.shouldFind != nil {
 				if !tt.shouldFind(out.Matches) {

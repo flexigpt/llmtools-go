@@ -1,6 +1,15 @@
 package toolutil
 
-const GOOSWindows = "windows"
+const (
+	GOOSLinux   = "linux"
+	GOOSWindows = "windows"
+	GOOSDarwin  = "darwin"
+
+	GOOSFreebsd   = "freebsd"
+	GOOSOpenbsd   = "openbsd"
+	GOOSNetbsd    = "netbsd"
+	GOOSDragonfly = "dragonfly"
+)
 
 const maxToolBytes = 16 * 1024 * 1024 // 16MB
 

@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 var errPathMustBeAbsolute = errors.New("path must be absolute")
@@ -187,7 +189,7 @@ func randomHex(nBytes int) (string, error) {
 //
 // (You can extend this list if needed, but keep it small.)
 func allowDarwinSystemSymlink(cur string) (resolved string, ok bool, err error) {
-	if runtime.GOOS != "darwin" {
+	if runtime.GOOS != toolutil.GOOSDarwin {
 		return "", false, nil
 	}
 	// Only allow exact root-level paths.

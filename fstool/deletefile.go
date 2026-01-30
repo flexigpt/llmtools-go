@@ -177,9 +177,9 @@ func detectSystemTrashDir() (string, bool) {
 	}
 
 	switch runtime.GOOS {
-	case "darwin":
+	case toolutil.GOOSDarwin:
 		return filepath.Join(home, ".Trash"), true
-	case "linux", "freebsd", "openbsd", "netbsd", "dragonfly":
+	case toolutil.GOOSLinux, toolutil.GOOSFreebsd, toolutil.GOOSOpenbsd, toolutil.GOOSNetbsd, toolutil.GOOSDragonfly:
 		if xdg := strings.TrimSpace(os.Getenv("XDG_DATA_HOME")); xdg != "" {
 			return filepath.Join(xdg, "Trash", "files"), true
 		}
