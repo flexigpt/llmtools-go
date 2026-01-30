@@ -50,6 +50,8 @@ func TestReadImage(t *testing.T) {
 		wantFmt    string
 		wantMIME   MIMEType
 		wantB64    bool
+
+		SkipWin bool
 	}{
 		{
 			name:        "empty path error",
@@ -140,6 +142,7 @@ func TestReadImage(t *testing.T) {
 			maxBytes:    0,
 			wantErr:     true,
 			errContains: "refusing to operate on symlink file",
+			SkipWin:     true,
 		},
 	}
 
@@ -152,6 +155,9 @@ func TestReadImage(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.SkipWin && runtime.GOOS == toolutil.GOOSWindows {
+				t.Skip("not testing for windows")
+			}
 			out, err := ReadImage(tc.path, tc.includeB64, tc.maxBytes)
 			if tc.wantErr {
 				if err == nil {

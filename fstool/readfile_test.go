@@ -1,105 +1,236 @@
 package fstool
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/flexigpt/llmtools-go/spec"
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 // TestReadFile covers happy, error, and boundary cases for ReadFile.
 func TestReadFile(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
-
-	textFile := filepath.Join(tmpDir, "file.txt")
-	binaryFile := filepath.Join(tmpDir, "file.bin")
-	imageFile := filepath.Join(tmpDir, "image.png")
-
-	if err := os.WriteFile(textFile, []byte("hello world"), 0o600); err != nil {
-		t.Fatalf("write textFile: %v", err)
-	}
-	binData := []byte{0x00, 0x01, 0x02, 0x03}
-	if err := os.WriteFile(binaryFile, binData, 0o600); err != nil {
-		t.Fatalf("write binaryFile: %v", err)
-	}
-	imgData := []byte{0x11, 0x22, 0x33}
-	if err := os.WriteFile(imageFile, imgData, 0o600); err != nil {
-		t.Fatalf("write imageFile: %v", err)
+	writeFile := func(t *testing.T, p string, data []byte) {
+		t.Helper()
+		if err := os.WriteFile(p, data, 0o600); err != nil {
+			t.Fatalf("WriteFile(%q): %v", p, err)
+		}
 	}
 
-	type testCase struct {
+	type tc struct {
 		name          string
-		args          ReadFileArgs
+		ctx           func(t *testing.T) context.Context
+		args          func(t *testing.T) ReadFileArgs
 		wantErr       bool
-		wantKind      spec.ToolStoreOutputKind
+		wantCanceled  bool
+		wantErrSubstr string
+		wantKind      string // "text" | "file" | "image"
 		wantText      string
 		wantFileName  string
 		wantFileMIME  string
 		wantImageName string
 		wantMIMEPref  string
-		wantBinary    []byte // expected raw bytes after base64 decoding (for file/image)
+		wantBinary    []byte
 	}
-
-	tests := []testCase{
+	tests := []tc{
 		{
-			name:    "Missing path returns error",
-			args:    ReadFileArgs{},
+			name: "context_canceled",
+			ctx: func(t *testing.T) context.Context {
+				t.Helper()
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				return ctx
+			},
+			args: func(t *testing.T) ReadFileArgs {
+				t.Helper()
+				return ReadFileArgs{Path: "whatever.txt"}
+			},
+			wantErr:      true,
+			wantCanceled: true,
+		},
+		{
+			name: "missing_path_errors",
+			args: func(t *testing.T) ReadFileArgs {
+				t.Helper()
+				return ReadFileArgs{}
+			},
 			wantErr: true,
 		},
 		{
-			name:    "Nonexistent file returns error",
-			args:    ReadFileArgs{Path: filepath.Join(tmpDir, "nope.txt")},
-			wantErr: true,
+			name: "nonexistent_file_errors",
+			args: func(t *testing.T) ReadFileArgs {
+				t.Helper()
+				tmp := t.TempDir()
+				return ReadFileArgs{Path: filepath.Join(tmp, "nope.txt")}
+			},
+			wantErr:       true,
+			wantErrSubstr: "does not exist",
 		},
 		{
-			name:     "Read text file as text",
-			args:     ReadFileArgs{Path: textFile, Encoding: "text"},
-			wantKind: spec.ToolStoreOutputKindText,
+			name: "read_text_default_encoding",
+			args: func(t *testing.T) ReadFileArgs {
+				t.Helper()
+				tmp := t.TempDir()
+				p := filepath.Join(tmp, "file.txt")
+				writeFile(t, p, []byte("hello world"))
+				return ReadFileArgs{Path: p}
+			},
+			wantKind: "text",
 			wantText: "hello world",
 		},
 		{
-			name:     "Read text file with default encoding",
-			args:     ReadFileArgs{Path: textFile},
-			wantKind: spec.ToolStoreOutputKindText,
+			name: "read_text_encoding_is_trimmed_and_case_insensitive",
+			args: func(t *testing.T) ReadFileArgs {
+				t.Helper()
+				tmp := t.TempDir()
+				p := filepath.Join(tmp, "file.txt")
+				writeFile(t, p, []byte("hello world"))
+				return ReadFileArgs{Path: p, Encoding: "  TeXt "}
+			},
+			wantKind: "text",
 			wantText: "hello world",
 		},
 		{
-			name:         "Read binary file as binary -> file output",
-			args:         ReadFileArgs{Path: binaryFile, Encoding: "binary"},
-			wantKind:     spec.ToolStoreOutputKindFile,
+			name: "read_binary_file_as_binary_returns_file_union",
+			args: func(t *testing.T) ReadFileArgs {
+				t.Helper()
+				tmp := t.TempDir()
+				p := filepath.Join(tmp, "file.bin")
+				writeFile(t, p, []byte{0x00, 0x01, 0x02, 0x03})
+				return ReadFileArgs{Path: p, Encoding: "binary"}
+			},
+			wantKind:     "file",
 			wantFileName: "file.bin",
-			// Mime from ReadFile: ".bin" -> TypeByExtension("") => application/octet-stream.
 			wantFileMIME: "application/octet-stream",
-			wantBinary:   binData,
+			wantBinary:   []byte{0x00, 0x01, 0x02, 0x03},
 		},
 		{
-			name:          "Read image file as binary -> image output",
-			args:          ReadFileArgs{Path: imageFile, Encoding: "binary"},
-			wantKind:      spec.ToolStoreOutputKindImage,
+			name: "read_png_as_binary_returns_image_union",
+			args: func(t *testing.T) ReadFileArgs {
+				t.Helper()
+				tmp := t.TempDir()
+				p := filepath.Join(tmp, "image.png")
+				writeFile(t, p, []byte{0x11, 0x22, 0x33})
+				return ReadFileArgs{Path: p, Encoding: "binary"}
+			},
+			wantKind:      "image",
 			wantImageName: "image.png",
 			wantMIMEPref:  "image/",
-			wantBinary:    imgData,
+			wantBinary:    []byte{0x11, 0x22, 0x33},
 		},
 		{
-			name:    "Invalid encoding returns error",
-			args:    ReadFileArgs{Path: textFile, Encoding: "foo"},
+			name: "invalid_encoding_errors",
+			args: func(t *testing.T) ReadFileArgs {
+				t.Helper()
+				tmp := t.TempDir()
+				p := filepath.Join(tmp, "file.txt")
+				writeFile(t, p, []byte("x"))
+				return ReadFileArgs{Path: p, Encoding: "foo"}
+			},
+			wantErr:       true,
+			wantErrSubstr: `encoding must be "text" or "binary"`,
+		},
+		{
+			name: "read_non_text_as_text_errors",
+			args: func(t *testing.T) ReadFileArgs {
+				t.Helper()
+				tmp := t.TempDir()
+				p := filepath.Join(tmp, "file.bin")
+				writeFile(t, p, []byte{0x00, 0x01, 0x02})
+				return ReadFileArgs{Path: p, Encoding: "text"}
+			},
+			wantErr:       true,
+			wantErrSubstr: "cannot read non-text file",
+		},
+		{
+			name: "read_invalid_utf8_text_errors",
+			args: func(t *testing.T) ReadFileArgs {
+				t.Helper()
+				tmp := t.TempDir()
+				p := filepath.Join(tmp, "bad.txt")
+				writeFile(t, p, []byte{0xff, 0xfe})
+				return ReadFileArgs{Path: p, Encoding: "text"}
+			},
+			wantErr:       true,
+			wantErrSubstr: "not valid UTF-8",
+		},
+		{
+			name: "symlink_file_is_refused",
+			args: func(t *testing.T) ReadFileArgs {
+				t.Helper()
+				if runtime.GOOS == toolutil.GOOSWindows {
+					t.Skip("symlink often requires privileges on Windows")
+				}
+				tmp := t.TempDir()
+				target := filepath.Join(tmp, "target.txt")
+				writeFile(t, target, []byte("ok"))
+				link := filepath.Join(tmp, "link.txt")
+				if err := os.Symlink(target, link); err != nil {
+					t.Skipf("symlink not available: %v", err)
+				}
+				return ReadFileArgs{Path: link, Encoding: "text"}
+			},
 			wantErr: true,
 		},
+		{
+			name: "symlink_parent_component_is_refused",
+			args: func(t *testing.T) ReadFileArgs {
+				t.Helper()
+				if runtime.GOOS == toolutil.GOOSWindows {
+					t.Skip("symlink often requires privileges on Windows")
+				}
+				tmp := t.TempDir()
+				realDir := filepath.Join(tmp, "real")
+				if err := os.MkdirAll(realDir, 0o755); err != nil {
+					t.Fatalf("MkdirAll: %v", err)
+				}
+				target := filepath.Join(realDir, "file.txt")
+				writeFile(t, target, []byte("ok"))
+				linkDir := filepath.Join(tmp, "linkdir")
+				if err := os.Symlink(realDir, linkDir); err != nil {
+					t.Skipf("symlink not available: %v", err)
+				}
+				return ReadFileArgs{Path: filepath.Join(linkDir, "file.txt"), Encoding: "text"}
+			},
+			wantErr: true,
+		},
+	}
+
+	decode := func(t *testing.T, s string) []byte {
+		t.Helper()
+		b, err := base64.StdEncoding.DecodeString(s)
+		if err != nil {
+			t.Fatalf("invalid base64: %v", err)
+		}
+		return b
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-
-			outs, err := ReadFile(t.Context(), tt.args)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("ReadFile error = %v, wantErr = %v", err, tt.wantErr)
+			ctx := t.Context()
+			if tt.ctx != nil {
+				ctx = tt.ctx(t)
 			}
-			if tt.wantErr {
+			outs, err := ReadFile(ctx, tt.args(t))
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err=%v wantErr=%v", err, tt.wantErr)
+			}
+			if err != nil {
+				if tt.wantCanceled && !errors.Is(err, context.Canceled) {
+					t.Fatalf("expected context.Canceled, got %v", err)
+				}
+				if tt.wantErrSubstr != "" && !strings.Contains(err.Error(), tt.wantErrSubstr) {
+					t.Fatalf("err=%q does not contain %q", err.Error(), tt.wantErrSubstr)
+				}
 				if len(outs) != 0 {
 					t.Fatalf("expected no outputs on error, got %#v", outs)
 				}
@@ -110,81 +241,50 @@ func TestReadFile(t *testing.T) {
 				t.Fatalf("expected exactly 1 output, got %d: %#v", len(outs), outs)
 			}
 			out := outs[0]
-
-			if out.Kind != tt.wantKind {
-				t.Fatalf("Kind = %q, want %q", out.Kind, tt.wantKind)
+			if tt.wantKind != "" && string(out.Kind) != tt.wantKind {
+				t.Fatalf("Kind=%q want %q", string(out.Kind), tt.wantKind)
 			}
 
 			switch tt.wantKind {
-			case spec.ToolStoreOutputKindText:
-				if out.TextItem == nil {
-					t.Fatalf("TextItem is nil for text output")
-				}
-				if out.ImageItem != nil || out.FileItem != nil {
-					t.Fatalf("unexpected non-nil image/file items in text output: %#v", out)
+			case "text":
+				if out.TextItem == nil || out.ImageItem != nil || out.FileItem != nil {
+					t.Fatalf("unexpected union shape: %#v", out)
 				}
 				if out.TextItem.Text != tt.wantText {
-					t.Fatalf("Text = %q, want %q", out.TextItem.Text, tt.wantText)
+					t.Fatalf("Text=%q want %q", out.TextItem.Text, tt.wantText)
 				}
-
-			case spec.ToolStoreOutputKindFile:
-				if out.FileItem == nil {
-					t.Fatalf("FileItem is nil for file output")
-				}
-				if out.TextItem != nil || out.ImageItem != nil {
-					t.Fatalf("unexpected non-nil text/image items in file output: %#v", out)
+			case "file":
+				if out.FileItem == nil || out.TextItem != nil || out.ImageItem != nil {
+					t.Fatalf("unexpected union shape: %#v", out)
 				}
 				if tt.wantFileName != "" && out.FileItem.FileName != tt.wantFileName {
-					t.Fatalf("FileName = %q, want %q", out.FileItem.FileName, tt.wantFileName)
+					t.Fatalf("FileName=%q want %q", out.FileItem.FileName, tt.wantFileName)
 				}
 				if tt.wantFileMIME != "" && out.FileItem.FileMIME != tt.wantFileMIME {
-					t.Fatalf("FileMIME = %q, want %q", out.FileItem.FileMIME, tt.wantFileMIME)
+					t.Fatalf("FileMIME=%q want %q", out.FileItem.FileMIME, tt.wantFileMIME)
 				}
 				if tt.wantBinary != nil {
-					raw, err := base64.StdEncoding.DecodeString(out.FileItem.FileData)
-					if err != nil {
-						t.Fatalf("FileData not valid base64: %v", err)
-					}
-					if len(raw) != len(tt.wantBinary) {
-						t.Fatalf("decoded binary len=%d, want %d", len(raw), len(tt.wantBinary))
-					}
-					for i := range raw {
-						if raw[i] != tt.wantBinary[i] {
-							t.Fatalf("decoded[%d] = %d, want %d", i, raw[i], tt.wantBinary[i])
-						}
+					raw := decode(t, out.FileItem.FileData)
+					if !bytes.Equal(raw, tt.wantBinary) {
+						t.Fatalf("decoded bytes=%v want %v", raw, tt.wantBinary)
 					}
 				}
-
-			case spec.ToolStoreOutputKindImage:
-				if out.ImageItem == nil {
-					t.Fatalf("ImageItem is nil for image output")
-				}
-				if out.TextItem != nil || out.FileItem != nil {
-					t.Fatalf("unexpected non-nil text/file items in image output: %#v", out)
+			case "image":
+				if out.ImageItem == nil || out.TextItem != nil || out.FileItem != nil {
+					t.Fatalf("unexpected union shape: %#v", out)
 				}
 				if tt.wantImageName != "" && out.ImageItem.ImageName != tt.wantImageName {
-					t.Fatalf("ImageName = %q, want %q", out.ImageItem.ImageName, tt.wantImageName)
+					t.Fatalf("ImageName=%q want %q", out.ImageItem.ImageName, tt.wantImageName)
 				}
 				if tt.wantMIMEPref != "" && !strings.HasPrefix(out.ImageItem.ImageMIME, tt.wantMIMEPref) {
-					t.Fatalf("ImageMIME = %q, want prefix %q", out.ImageItem.ImageMIME, tt.wantMIMEPref)
+					t.Fatalf("ImageMIME=%q want prefix %q", out.ImageItem.ImageMIME, tt.wantMIMEPref)
 				}
 				if tt.wantBinary != nil {
-					raw, err := base64.StdEncoding.DecodeString(out.ImageItem.ImageData)
-					if err != nil {
-						t.Fatalf("ImageData not valid base64: %v", err)
-					}
-					if len(raw) != len(tt.wantBinary) {
-						t.Fatalf("decoded binary len=%d, want %d", len(raw), len(tt.wantBinary))
-					}
-					for i := range raw {
-						if raw[i] != tt.wantBinary[i] {
-							t.Fatalf("decoded[%d] = %d, want %d", i, raw[i], tt.wantBinary[i])
-						}
+					raw := decode(t, out.ImageItem.ImageData)
+					if !bytes.Equal(raw, tt.wantBinary) {
+						t.Fatalf("decoded bytes=%v want %v", raw, tt.wantBinary)
 					}
 				}
-
-			default:
-				t.Fatalf("unexpected output kind: %q", out.Kind)
 			}
 		})
 	}
