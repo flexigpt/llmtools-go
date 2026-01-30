@@ -52,14 +52,14 @@ func TestShellCommand_AutoSession_DoesNotLeakOnError(t *testing.T) {
 			name:       "command_contains_nul",
 			args:       ShellCommandArgs{Commands: []string{"echo hi\x00there"}},
 			needsShell: true, // NUL check happens after selectShell()
-			// Error text: "command contains NUL byte"
+
 			wantErrSubstr: "nul",
 		},
 		{
 			name: "workdir_outside_allowed_roots",
 			opts: []ShellToolOption{WithShellAllowedWorkdirRoots([]string{td})},
 			args: ShellCommandArgs{Commands: []string{"echo hi"}, Workdir: outside},
-			// Error text: "workdir ... is outside allowed roots"
+
 			wantErrSubstr: "outside allowed roots",
 		},
 	}
