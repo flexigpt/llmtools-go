@@ -85,7 +85,7 @@ func readImage(ctx context.Context, args ReadImageArgs) (*ReadImageOut, error) {
 		return nil, err
 	}
 
-	info, err := fileutil.ReadImage(args.Path, args.IncludeBase64Data)
+	info, err := fileutil.ReadImage(args.Path, args.IncludeBase64Data, toolutil.MaxFileReadBytes)
 	if err != nil {
 		return nil, err
 	}

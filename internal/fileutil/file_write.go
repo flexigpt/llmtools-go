@@ -3,6 +3,7 @@ package fileutil
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -100,20 +101,38 @@ func WriteFileAtomicBytes(path string, data []byte, perm fs.FileMode, overwrite 
 		} else if errors.Is(err, os.ErrExist) {
 			return cleanup(fmt.Errorf("file already exists: %w", os.ErrExist))
 		} else {
-			// Fallback: reserve destination with O_EXCL then rename over it.
-			ph, perr := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+			// Filesystem may not support hardlinks. Preserve overwrite=false semantics:
+			// create destination with O_EXCL and COPY contents from temp into it.
+			out, perr := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
 			if perr != nil {
 				if errors.Is(perr, os.ErrExist) {
 					return cleanup(fmt.Errorf("file already exists: %w", os.ErrExist))
 				}
 				return cleanup(perr)
 			}
-			_ = ph.Close()
-			if err2 := os.Rename(tmpName, p); err2 != nil {
+			defer out.Close()
+
+			in, ierr := os.Open(tmpName)
+			if ierr != nil {
 				_ = os.Remove(p)
-				return cleanup(err2)
+				return cleanup(ierr)
 			}
-			_ = os.Chmod(p, perm)
+			defer in.Close()
+
+			if _, cerr := io.Copy(out, in); cerr != nil {
+				_ = os.Remove(p)
+				return cleanup(cerr)
+			}
+			if serr := out.Sync(); serr != nil {
+				_ = os.Remove(p)
+				return cleanup(serr)
+			}
+			if cerr := out.Close(); cerr != nil {
+				_ = os.Remove(p)
+				return cleanup(cerr)
+			}
+
+			_ = os.Remove(tmpName)
 			_ = syncDirBestEffort(parent)
 			return nil
 		}

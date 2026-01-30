@@ -164,6 +164,7 @@ func NormalizePath(p string) (string, error) {
 	if strings.ContainsRune(p, 0) {
 		return "", ErrInvalidPath
 	}
+	p = filepath.FromSlash(p)
 	return filepath.Clean(p), nil
 }
 

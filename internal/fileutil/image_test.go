@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 func TestReadImage(t *testing.T) {
@@ -89,7 +91,7 @@ func TestReadImage(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			out, err := ReadImage(tc.path, tc.includeB64)
+			out, err := ReadImage(tc.path, tc.includeB64, toolutil.MaxFileReadBytes)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil (out=%+v)", out)

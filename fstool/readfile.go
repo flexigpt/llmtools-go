@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"mime"
+	"os"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -85,27 +86,29 @@ func readFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUni
 		return nil, fileutil.ErrInvalidPath
 	}
 
-	// Basic filesystem sanity checks.
-	pi, err := fileutil.StatPath(path)
+	p, err := fileutil.NormalizePath(path)
 	if err != nil {
 		return nil, err
 	}
-	if !pi.Exists {
-		return nil, fmt.Errorf("path does not exist: %s", path)
+
+	// Refuse symlink traversal (file and parent dirs), and require regular file.
+	st, err := fileutil.RequireExistingRegularFileNoSymlink(p)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("path does not exist: %s", p)
+		}
+		return nil, err
 	}
-	if pi.IsDir {
-		return nil, fmt.Errorf("path is a directory, not a file: %s", path)
-	}
-	if pi.Size > toolutil.MaxFileReadBytes {
+	if st.Size() > toolutil.MaxFileReadBytes {
 		return nil, fmt.Errorf(
 			"file %q is too large to read (%d bytes; max %d)",
-			path, pi.Size, toolutil.MaxFileReadBytes,
+			p, st.Size(), toolutil.MaxFileReadBytes,
 		)
 	}
 
 	// Detect MIME / extension where possible.
-	mimeType, extMode, _, mimeErr := fileutil.MIMEForLocalFile(path)
-	ext := strings.ToLower(filepath.Ext(path))
+	mimeType, extMode, _, mimeErr := fileutil.MIMEForLocalFile(p)
+	ext := strings.ToLower(filepath.Ext(p))
 
 	isPDFByExt := ext == string(fileutil.ExtPDF)
 	isPDFByMime := mimeErr == nil && mimeType == fileutil.MIMEApplicationPDF
@@ -116,13 +119,13 @@ func readFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUni
 		// For PDFs, allow text extraction even if MIME sniffing fails,
 		// as long as the extension is .pdf.
 		if !isPDF && mimeErr != nil {
-			return nil, fmt.Errorf("cannot read %q as text (MIME detection failed: %w)", path, mimeErr)
+			return nil, fmt.Errorf("cannot read %q as text (MIME detection failed: %w)", p, mimeErr)
 		}
 
 		if isPDF {
 			// PDF: use the same extraction logic as attachments.
 			// Extraction itself is limited to toolutil.MaxFileReadBytes via LimitedReader.
-			text, err := pdfutil.ExtractPDFTextSafe(ctx, path, toolutil.MaxFileReadBytes)
+			text, err := pdfutil.ExtractPDFTextSafe(ctx, p, toolutil.MaxFileReadBytes)
 			if err != nil {
 				return nil, err
 			}
@@ -141,19 +144,19 @@ func readFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUni
 		if extMode != fileutil.ExtensionModeText {
 			return nil, fmt.Errorf(
 				"cannot read non-text file %q as text; use encoding \"binary\" instead",
-				path,
+				p,
 			)
 		}
 
 		// Normal text file: read and validate UTF‑8.
-		data, err := fileutil.ReadFile(path, fileutil.ReadEncodingText, toolutil.MaxFileReadBytes)
+		data, err := fileutil.ReadFile(p, fileutil.ReadEncodingText, toolutil.MaxFileReadBytes)
 		if err != nil {
 			return nil, err
 		}
 		if !utf8.ValidString(data) {
 			return nil, fmt.Errorf(
 				"file %q is not valid UTF-8 text; use encoding \"binary\" instead",
-				path,
+				p,
 			)
 		}
 
@@ -168,12 +171,12 @@ func readFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUni
 	}
 
 	// Binary mode: base64-encode and return, like before.
-	data, err := fileutil.ReadFile(path, fileutil.ReadEncodingBinary, toolutil.MaxFileReadBytes)
+	data, err := fileutil.ReadFile(p, fileutil.ReadEncodingBinary, toolutil.MaxFileReadBytes)
 	if err != nil {
 		return nil, err
 	}
 
-	baseName := filepath.Base(path)
+	baseName := filepath.Base(p)
 	if baseName == "" {
 		baseName = "file"
 	}

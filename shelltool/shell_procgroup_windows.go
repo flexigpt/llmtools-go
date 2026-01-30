@@ -4,6 +4,7 @@ package shelltool
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strconv"
@@ -24,10 +25,24 @@ func killProcessGroup(cmd *exec.Cmd) {
 	}
 	// Best-effort: kill process tree. Taskkill is available on Windows.
 	pid := strconv.Itoa(cmd.Process.Pid)
+	runTaskkill := func(args ...string) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return exec.CommandContext(ctx, "taskkill", args...).Run()
+	}
+
 	// Try a soft termination first (no /F), then force.
-	_ = exec.CommandContext(context.Background(), "taskkill", "/T", "/PID", pid).Run()
+	if err := runTaskkill("/T", "/PID", pid); err != nil {
+		// If taskkill is missing or fails, at least kill the direct process.
+		if errors.Is(err, exec.ErrNotFound) {
+			_ = cmd.Process.Kill()
+			return
+		}
+	}
 	time.Sleep(250 * time.Millisecond)
-	_ = exec.CommandContext(context.Background(), "taskkill", "/T", "/F", "/PID", pid).Run()
+	if err := runTaskkill("/T", "/F", "/PID", pid); err != nil {
+		_ = cmd.Process.Kill()
+	}
 }
 
 func exitCodeFromProcessState(ps *os.ProcessState) int {

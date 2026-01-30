@@ -3,6 +3,7 @@ package fileutil
 import (
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // ListDirectory lists files/dirs in path (default "."), pattern is an optional
@@ -36,5 +37,7 @@ func ListDirectory(path, pattern string) ([]string, error) {
 		}
 		out = append(out, name)
 	}
+	sort.Strings(out)
+
 	return out, nil
 }
