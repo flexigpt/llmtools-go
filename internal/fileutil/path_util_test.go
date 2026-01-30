@@ -12,6 +12,53 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
+func TestNormalizeAbsPath(t *testing.T) {
+	absBase := filepath.Join(t.TempDir(), "x", "..", "y")
+	tests := []struct {
+		name      string
+		in        string
+		want      string
+		wantErrIs error
+	}{
+		{
+			name: "absolute path is cleaned",
+			in:   "  " + absBase + "  ",
+			want: filepath.Clean(absBase),
+		},
+		{
+			name:      "relative path rejected",
+			in:        "a/../b",
+			wantErrIs: errPathMustBeAbsolute,
+		},
+		{
+			name:      "empty path rejected",
+			in:        "",
+			wantErrIs: ErrInvalidPath,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := NormalizeAbsPath(tc.in)
+			if tc.wantErrIs != nil {
+				if err == nil {
+					t.Fatalf("expected error, got nil (got=%q)", got)
+				}
+				if !errors.Is(err, tc.wantErrIs) {
+					t.Fatalf("error=%v; want errors.Is(_, %v)=true", err, tc.wantErrIs)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got=%q want=%q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNormalizePath(t *testing.T) {
 	sep := string(os.PathSeparator)
 	tests := []struct {

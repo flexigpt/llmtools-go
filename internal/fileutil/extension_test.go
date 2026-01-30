@@ -1,6 +1,7 @@
 package fileutil
 
 import (
+	"errors"
 	"mime"
 	"os"
 	"path/filepath"
@@ -82,56 +83,50 @@ func TestMIMEFromExtensionString_InternalAndStdlibFallback(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		ext         string
-		want        MIMEType
-		wantErr     bool
-		errContains string
+		name      string
+		ext       string
+		want      MIMEType
+		wantErrIs error
 	}{
 		{
-			name:        "empty ext invalid",
-			ext:         "",
-			want:        MIMEEmpty,
-			wantErr:     true,
-			errContains: "invalid path",
+			name:      "empty ext invalid",
+			ext:       "",
+			want:      MIMEEmpty,
+			wantErrIs: ErrInvalidPath,
 		},
 		{
-			name:        "blank ext invalid",
-			ext:         "   ",
-			want:        MIMEEmpty,
-			wantErr:     true,
-			errContains: "invalid path",
+			name:      "blank ext invalid",
+			ext:       "   ",
+			want:      MIMEEmpty,
+			wantErrIs: ErrInvalidPath,
 		},
 		{
-			name:    "known internal mapping (no dot, mixed case)",
-			ext:     "PnG",
-			want:    MIMEImagePNG,
-			wantErr: false,
+			name: "known internal mapping (no dot, mixed case)",
+			ext:  "PnG",
+			want: MIMEImagePNG,
 		},
 		{
-			name:    "stdlib fallback mapping used",
-			ext:     "llmtestmime",
-			want:    MIMEType(mt),
-			wantErr: false,
+			name: "stdlib fallback mapping used",
+			ext:  "llmtestmime",
+			want: MIMEType(mt),
 		},
 		{
-			name:        "unknown extension returns octet-stream + ErrUnknownExtension",
-			ext:         ".definitelynotreal",
-			want:        MIMEApplicationOctetStream,
-			wantErr:     true,
-			errContains: "unknown extension",
+			name:      "unknown extension returns octet-stream + ErrUnknownExtension",
+			ext:       ".definitelynotreal",
+			want:      MIMEApplicationOctetStream,
+			wantErrIs: ErrUnknownExtension,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := MIMEFromExtensionString(tc.ext)
-			if tc.wantErr {
+			if tc.wantErrIs != nil {
 				if err == nil {
 					t.Fatalf("expected error, got nil (got=%q)", got)
 				}
-				if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
-					t.Fatalf("error %q does not contain %q", err.Error(), tc.errContains)
+				if !errors.Is(err, tc.wantErrIs) {
+					t.Fatalf("error=%v; want errors.Is(_, %v)=true", err, tc.wantErrIs)
 				}
 			} else if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -168,12 +163,13 @@ func TestMIMEForLocalFile_ExtensionVsSniff(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		path       string
-		wantMethod MIMEDetectMethod
-		wantMode   ExtensionMode
-		wantMIME   MIMEType
-		wantErr    bool
+		name         string
+		path         string
+		wantMethod   MIMEDetectMethod
+		wantMode     ExtensionMode
+		wantMIME     MIMEType
+		wantErr      bool
+		wantNotExist bool
 	}{
 		{
 			name:    "invalid path",
@@ -208,6 +204,19 @@ func TestMIMEForLocalFile_ExtensionVsSniff(t *testing.T) {
 			wantMode:   ExtensionModeText,
 			wantMIME:   MIMETextPlain,
 		},
+		{
+			name:       "missing file with known extension still returns extension-based result (no IO)",
+			path:       filepath.Join(dir, "does-not-exist.md"),
+			wantMethod: MIMEDetectMethodExtension,
+			wantMode:   ExtensionModeText,
+			wantMIME:   MIMETextMarkdown,
+		},
+		{
+			name:         "missing file with unknown extension tries sniff and returns not-exist",
+			path:         filepath.Join(dir, "does-not-exist.unknownext"),
+			wantErr:      true,
+			wantNotExist: true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -221,6 +230,9 @@ func TestMIMEForLocalFile_ExtensionVsSniff(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.wantNotExist && !os.IsNotExist(err) {
+				t.Fatalf("expected not-exist error, got: %v", err)
 			}
 			if method != tc.wantMethod {
 				t.Fatalf("method=%q want=%q", method, tc.wantMethod)

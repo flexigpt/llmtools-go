@@ -79,7 +79,7 @@ func WriteFileAtomicBytes(path string, data []byte, perm fs.FileMode, overwrite 
 	// Commit.
 	if !overwrite {
 		// Windows: rename won't overwrite, so it's sufficient.
-		if runtime.GOOS == "windows" {
+		if runtime.GOOS == toolutil.GOOSWindows {
 			if err := os.Rename(tmpName, p); err != nil {
 				// If destination exists (race), return ErrExist-ish.
 				if _, stErr := os.Lstat(p); stErr == nil {
@@ -139,7 +139,7 @@ func WriteFileAtomicBytes(path string, data []byte, perm fs.FileMode, overwrite 
 	}
 
 	// "overwrite=true".
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		var renameErr error
 		for attempt := range 6 {
 			renameErr = os.Rename(tmpName, p)

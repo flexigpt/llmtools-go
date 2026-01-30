@@ -2,59 +2,99 @@ package fileutil
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
 	"testing"
 )
 
-func TestListDirectory_BasicAndPattern(t *testing.T) {
+func TestListDirectory(t *testing.T) {
 	root := t.TempDir()
-	mustWriteFile(t, root, "a.txt", 1)
 	mustWriteFile(t, root, "b.log", 1)
+	mustWriteFile(t, root, "a.txt", 1)
 	if err := os.Mkdir(filepath.Join(root, "subdir"), 0o755); err != nil {
 		t.Fatalf("failed to mkdir subdir: %v", err)
 	}
 
-	type testCase struct {
-		name    string
-		dir     string
-		pattern string
-		want    []string
-	}
-
-	tests := []testCase{
+	tests := []struct {
+		name           string
+		setup          func(t *testing.T)
+		dir            string
+		pattern        string
+		want           []string
+		wantErrIs      error
+		wantIsNotExist bool
+	}{
 		{
-			name:    "NoPattern_AllEntries",
+			name:    "no pattern returns all entries (already sorted by function)",
 			dir:     root,
 			pattern: "",
 			want:    []string{"a.txt", "b.log", "subdir"},
 		},
 		{
-			name:    "Pattern_TxtOnly",
+			name:    "pattern filters entries",
 			dir:     root,
 			pattern: "*.txt",
 			want:    []string{"a.txt"},
 		},
+		{
+			name:      "invalid glob returns filepath.ErrBadPattern",
+			dir:       root,
+			pattern:   "[",
+			wantErrIs: filepath.ErrBadPattern,
+		},
+		{
+			name:           "non-existent directory returns not-exist",
+			dir:            filepath.Join(root, "nope"),
+			pattern:        "",
+			wantIsNotExist: true,
+		},
+		{
+			name:      "invalid path returns ErrInvalidPath",
+			dir:       "a\x00b",
+			pattern:   "",
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name: "empty dir means dot (CWD)",
+			setup: func(t *testing.T) {
+				t.Helper()
+				// Ensure deterministic: chdir into our temp dir for this subtest.
+				t.Chdir(root)
+			},
+			dir:     "",
+			pattern: "",
+			want:    []string{"a.txt", "b.log", "subdir"},
+		},
 	}
-
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.setup != nil {
+				tc.setup(t)
+			}
 			got, err := ListDirectory(tc.dir, tc.pattern)
-			if err != nil {
-				t.Fatalf("expected nil error, got %v", err)
-			}
-			sort.Strings(got)
-			sort.Strings(tc.want)
-			if len(got) != len(tc.want) {
-				t.Fatalf("expected %d entries, got %d (%v)", len(tc.want), len(got), got)
-			}
-			for i := range tc.want {
-				if got[i] != tc.want[i] {
-					t.Errorf("expected got[%d]=%q, got %q", i, tc.want[i], got[i])
+
+			if tc.wantErrIs != nil || tc.wantIsNotExist {
+				if err == nil {
+					t.Fatalf("expected error, got nil (got=%v)", got)
 				}
+				if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+					t.Fatalf("error=%v; want errors.Is(_, %v)=true", err, tc.wantErrIs)
+				}
+				if tc.wantIsNotExist && !os.IsNotExist(err) {
+					t.Fatalf("error=%v; want os.IsNotExist=true", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got=%#v want=%#v", got, tc.want)
 			}
 		})
 	}

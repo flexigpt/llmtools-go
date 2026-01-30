@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
@@ -274,79 +273,105 @@ func TestSearchFilesConcurrency(t *testing.T) {
 	}
 }
 
-func TestSearchFiles_ContextCanceled(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "a.txt"), "hello")
+func TestSearchFiles_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T) (ctx context.Context, root, pattern string, want []string)
+		wantErr bool
+	}{
+		{
+			name: "context canceled stops walk",
+			setup: func(t *testing.T) (context.Context, string, string, []string) {
+				t.Helper()
+				root := t.TempDir()
+				writeFile(t, filepath.Join(root, "a.txt"), "hello")
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				return ctx, root, "hello", nil
+			},
+			wantErr: true,
+		},
+		{
+			name: "skips binary and non-utf8 content matches",
+			setup: func(t *testing.T) (context.Context, string, string, []string) {
+				t.Helper()
+				root := t.TempDir()
+				mustWriteBytes(
+					t,
+					filepath.Join(root, "bin.dat"),
+					[]byte{0x00, 'B', 'A', 'D', 'P', 'A', 'T', 'T', 'E', 'R', 'N'},
+				)
+				mustWriteBytes(
+					t,
+					filepath.Join(root, "badutf8.txt"),
+					[]byte{0xff, 0xfe, 'B', 'A', 'D', 'P', 'A', 'T', 'T', 'E', 'R', 'N'},
+				)
+				return t.Context(), root, "BADPATTERN", []string{}
+			},
+		},
+		{
+			name: "path match still works for binary files",
+			setup: func(t *testing.T) (context.Context, string, string, []string) {
+				t.Helper()
+				root := t.TempDir()
+				p := filepath.Join(root, "match-by-path.bin")
+				mustWriteBytes(t, p, []byte{0x00, 0x01, 0x02})
+				return t.Context(), root, "match-by-path", []string{p}
+			},
+		},
+		{
+			name: "directory path matches are not returned (files only)",
+			setup: func(t *testing.T) (context.Context, string, string, []string) {
+				t.Helper()
+				root := t.TempDir()
+				if err := os.Mkdir(filepath.Join(root, "matchdir"), 0o755); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+				return t.Context(), root, "matchdir", []string{}
+			},
+		},
+		{
+			name: "unreadable file content is ignored",
+			setup: func(t *testing.T) (context.Context, string, string, []string) {
+				t.Helper()
+				if runtime.GOOS == toolutil.GOOSWindows {
+					t.Skip("chmod semantics differ on Windows")
+				}
+				root := t.TempDir()
+				p := filepath.Join(root, "secret.txt")
+				writeFile(t, p, "SOMEPATTERN")
 
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
+				if err := os.Chmod(p, 0); err != nil {
+					t.Fatalf("chmod: %v", err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(p, 0o600) })
 
-	_, _, err := SearchFiles(ctx, root, "hello", 0)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
+				// If the environment still allows reads (root/ACLs), skip to avoid flakes.
+				if _, err := os.ReadFile(p); err == nil {
+					t.Skip("file remained readable after chmod 0 (likely privileged user / ACLs); skipping")
+				}
+				return t.Context(), root, "SOMEPATTERN", []string{}
+			},
+		},
 	}
-}
 
-func TestSearchFiles_SkipsBinaryAndNonUTF8Content(t *testing.T) {
-	root := t.TempDir()
-
-	// Binary file containing pattern in bytes but should be skipped by content check.
-	mustWriteBytes(t, filepath.Join(root, "bin.dat"), []byte{0x00, 'B', 'A', 'D', 'P', 'A', 'T', 'T', 'E', 'R', 'N'})
-
-	// Invalid UTF-8 file containing the pattern as bytes.
-	mustWriteBytes(
-		t,
-		filepath.Join(root, "badutf8.txt"),
-		[]byte{0xff, 0xfe, 'B', 'A', 'D', 'P', 'A', 'T', 'T', 'E', 'R', 'N'},
-	)
-
-	got, _, err := SearchFiles(t.Context(), root, "BADPATTERN", 0)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("expected no matches, got %v", got)
-	}
-}
-
-func TestSearchFiles_PathMatchStillWorksForBinary(t *testing.T) {
-	root := t.TempDir()
-
-	p := filepath.Join(root, "match-by-path.bin")
-	mustWriteBytes(t, p, []byte{0x00, 0x01, 0x02})
-
-	got, _, err := SearchFiles(t.Context(), root, "match-by-path", 0)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 1 || got[0] != p {
-		t.Fatalf("got=%v want=[%v]", got, p)
-	}
-}
-
-func TestSearchFiles_UnreadableFileIsIgnored(t *testing.T) {
-	if runtime.GOOS == toolutil.GOOSWindows {
-		t.Skip("chmod semantics differ on Windows")
-	}
-
-	root := t.TempDir()
-	p := filepath.Join(root, "secret.txt")
-	writeFile(t, p, "SOMEPATTERN")
-
-	if err := os.Chmod(p, 0); err != nil {
-		t.Fatalf("chmod: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(p, 0o600) })
-
-	// Give filesystem a moment (some FS/CI can be weird).
-	time.Sleep(10 * time.Millisecond)
-
-	got, _, err := SearchFiles(t.Context(), root, "SOMEPATTERN", 0)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("expected 0 matches (unreadable content ignored), got %v", got)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, root, pattern, want := tc.setup(t)
+			got, _, err := SearchFiles(ctx, root, pattern, 0)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !equalStringSets(got, want) {
+				t.Fatalf("got=%#v want=%#v (order-independent)", got, want)
+			}
+		})
 	}
 }
 
