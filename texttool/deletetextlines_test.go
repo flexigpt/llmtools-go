@@ -170,7 +170,7 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 
 	tests := []struct {
 		name              string
-		setup             func() (path string)
+		setup             func(t *testing.T) (path string)
 		args              func(path string) DeleteTextLinesArgs
 		wantErrSub        string
 		wantIsCtx         bool
@@ -179,7 +179,8 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 	}{
 		{
 			name: "path_must_be_absolute",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				_ = writeTempTextFile(t, dir, "x-*.txt", "A\n")
 				return relativeTxt
 			},
@@ -190,7 +191,8 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 		},
 		{
 			name: "matchLines_required",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) DeleteTextLinesArgs {
@@ -200,7 +202,8 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 		},
 		{
 			name: "file_not_found",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				// Create an absolute-but-nonexistent path inside work dir.
 				return dir + string(filepathSep()) + "nope-does-not-exist.txt"
 			},
@@ -211,7 +214,8 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 		},
 		{
 			name: "expected_deletions_mismatch",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "A\nX\nA\nX\n")
 			},
 			args: func(path string) DeleteTextLinesArgs {
@@ -227,7 +231,8 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 		},
 		{
 			name: "overlapping_matches_rejected",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "X\nX\nX\n") //nolint:dupword // Test.
 			},
 			args: func(path string) DeleteTextLinesArgs {
@@ -243,7 +248,8 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 		},
 		{
 			name: "invalid_utf8_rejected",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempBytesFile(t, dir, "x-*.txt", []byte{0xff, 0xfe, 0xfd})
 			},
 			args: func(path string) DeleteTextLinesArgs {
@@ -253,7 +259,8 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 		},
 		{
 			name: "context_canceled",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) DeleteTextLinesArgs {
@@ -263,7 +270,8 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 		},
 		{
 			name: "symlink_file_rejected",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				if runtime.GOOS == toolutil.GOOSWindows {
 					t.Skip("symlink behavior is platform/privilege-dependent on Windows")
 				}
@@ -287,7 +295,7 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path := tt.setup()
+			path := tt.setup(t)
 
 			args := tt.args(path)
 

@@ -740,7 +740,7 @@ func canonicalizeAllowedRoots(roots []string) ([]string, error) {
 func ensureDirExists(p string) error {
 	st, err := os.Stat(p)
 	if err != nil {
-		return err
+		return errors.Join(err, errors.New("no such dir"))
 	}
 	if !st.IsDir() {
 		return fmt.Errorf("workdir is not a directory: %s", p)

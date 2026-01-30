@@ -249,14 +249,15 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		setup      func() string
+		setup      func(t *testing.T) string
 		args       func(path string) FindTextArgs
 		wantErrSub string
 		wantIsCtx  bool
 	}{
 		{
 			name: "path_must_be_absolute",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				_ = writeTempTextFile(t, dir, "x-*.txt", "A\n")
 				return relativeTxt
 			},
@@ -267,7 +268,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "invalid_queryType",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
@@ -277,7 +279,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "substring_requires_query",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
@@ -287,7 +290,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "regex_requires_query",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
@@ -297,7 +301,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "regex_compile_error",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
@@ -307,7 +312,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "matchLines_must_be_omitted_for_substring",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
@@ -322,7 +328,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "matchLines_must_be_omitted_for_regex",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
@@ -337,7 +344,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "lineBlock_requires_matchLines",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
@@ -351,7 +359,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "lineBlock_disallows_query",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
@@ -366,7 +375,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "contextLines_too_large",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
@@ -381,7 +391,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "maxMatches_too_large",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
@@ -396,7 +407,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "lineBlock_overlapping_matches_rejected",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "X\nX\nX\n") //nolint:dupword // Test.
 			},
 			args: func(path string) FindTextArgs {
@@ -412,7 +424,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "response_too_large_guard",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				// 5000 short lines, one hit in the middle.
 				content := makeNLines(5000, func(i int) string {
 					if i == 2500 {
@@ -435,7 +448,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "file_not_found",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return dir + string(filepathSep()) + "nope-does-not-exist.txt"
 			},
 			args: func(path string) FindTextArgs {
@@ -449,7 +463,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "invalid_utf8_rejected",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempBytesFile(t, dir, "bad-*.txt", []byte{0xff, 0xfe, 0xfd})
 			},
 			args: func(path string) FindTextArgs {
@@ -463,7 +478,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "symlink_file_rejected",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				if runtime.GOOS == toolutil.GOOSWindows {
 					t.Skip("symlink behavior is platform/privilege-dependent on Windows")
 				}
@@ -489,7 +505,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		},
 		{
 			name: "context_canceled",
-			setup: func() string {
+			setup: func(t *testing.T) string {
+				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
@@ -501,7 +518,7 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path := tt.setup()
+			path := tt.setup(t)
 			args := tt.args(path)
 
 			ctx := t.Context()
