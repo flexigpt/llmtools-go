@@ -54,23 +54,6 @@ var insertTextLinesTool = spec.Tool{
 	}
 },
 "required": ["path", "linesToInsert"],
-"oneOf": [
-  {
-    "title": "start-or-end",
-    "properties": { "position": { "enum": ["start", "end"] } },
-	"required": ["position"],
-    "not": { "required": ["anchorMatchLines"] }
-  },
-  {
-    "title": "default-end",
-    "not": { "anyOf": [ { "required": ["position"] }, { "required": ["anchorMatchLines"] } ] }
-  },
-  {
-    "title": "anchor-relative",
-    "properties": { "position": { "enum": ["beforeAnchor", "afterAnchor"] } },
-    "required": ["position", "anchorMatchLines"]
-  }
-],
 "additionalProperties": false
 }`),
 

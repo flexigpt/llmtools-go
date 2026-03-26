@@ -62,25 +62,6 @@ var findTextTool = spec.Tool{
 	}
 },
 "required": ["path"],
-"oneOf": [
-  {
-	"title": "substring-or-regex",
-	"properties": {
-		"queryType": { "enum": ["substring", "regex"], "default": "substring" },
-		"query": { "type": "string", "minLength": 1 }
-	},
-	"required": ["query"],
-	"not": { "required": ["matchLines"] }
-  },
-  {
-	"title": "line-block",
-	"properties": {
-		"queryType": { "const": "lineBlock" },
-		"query": { "type": "string", "maxLength": 0 }
-	},
-	"required": ["queryType", "matchLines"]
-  }
-],
 "additionalProperties": false
 }`),
 
