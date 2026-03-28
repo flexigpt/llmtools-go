@@ -99,7 +99,7 @@ func TestListDirectory(t *testing.T) {
 				}
 				return
 			}
-			got, err := ListDirectoryNormalized(dir, tc.pattern)
+			got, err := listDirectoryNormalized(dir, tc.pattern)
 
 			if tc.wantErrIs != nil || tc.wantIsNotExist {
 				if err == nil {
@@ -143,7 +143,7 @@ func TestListDirectory_DefaultPathDot(t *testing.T) {
 		t.Fatalf("got normalize err (got=%v)", err)
 	}
 
-	got, err := ListDirectoryNormalized(dir, "")
+	got, err := listDirectoryNormalized(dir, "")
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -224,7 +224,7 @@ func TestListDirectory_Additional(t *testing.T) {
 				t.Fatalf("got normalization error (got=%v)", err)
 			}
 
-			got, err := ListDirectoryNormalized(dir, tc.pattern)
+			got, err := listDirectoryNormalized(dir, tc.pattern)
 
 			if tc.wantErr {
 				if err == nil {
@@ -287,7 +287,7 @@ func TestListDirectoryNormalized_SortsAndFiltersAndErrors(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ListDirectoryNormalized(tc.dir, tc.pattern)
+			got, err := listDirectoryNormalized(tc.dir, tc.pattern)
 			if tc.wantErrSubstr != "" {
 				if err == nil {
 					t.Fatalf("expected error")
@@ -408,4 +408,22 @@ func TestUniquePathInDir(t *testing.T) {
 			}
 		})
 	}
+}
+
+func listDirectoryNormalized(dir, pattern string) ([]string, error) {
+	entries, _, err := ListDirectoryDetailedNormalized(dir, ListDirectoryOptions{
+		NameGlob:          pattern,
+		IncludeDotEntries: true,
+		Kind:              ListDirectoryKindAll,
+		MaxEntries:        0,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]string, len(entries))
+	for i, entry := range entries {
+		out[i] = entry.Name
+	}
+	return out, nil
 }

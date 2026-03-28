@@ -66,16 +66,17 @@ func TestE2E_FS_MIME_Delete_And_ImageFlows(t *testing.T) {
 	})
 
 	ls := callJSON[fstool.ListDirectoryOut](t, h.r, "listdirectory", fstool.ListDirectoryArgs{
-		Path:    ".",
-		Pattern: "*.txt",
+		Path:     ".",
+		NameGlob: "*.txt",
 	})
-	if len(ls.Entries) < 2 {
+	if len(ls.Items) < 2 {
 		t.Fatalf("expected txt entries, got: %s", debugJSON(t, ls))
 	}
 
 	sf := callJSON[fstool.SearchFilesOut](t, h.r, "searchfiles", fstool.SearchFilesArgs{
 		Root:       ".",
-		Pattern:    "TODO: (one|two)",
+		Query:      "TODO: (one|two)",
+		Regexp:     true,
 		MaxResults: 100,
 	})
 	if sf.MatchCount < 2 {

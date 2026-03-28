@@ -3,10 +3,12 @@ package ioutil
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
@@ -14,29 +16,68 @@ import (
 
 var errSearchLimitReached = errors.New("search limit reached")
 
-// SearchFiles walks root (default ".") recursively and returns up to maxResults files
-// whose *path* or UTF-8 text content match the regexp pattern.
-// If maxResults <= 0, it is treated as "no limit".
-//
-// FSPolicy enforcement:
-//   - root is resolved via policy (base dir + allowed roots)
-//   - if policy.BlockSymlinks == true: symlink entries are skipped
-//
-// - if allowedRoots is set: each file considered is policy-checked (ResolvePath) to avoid symlink/junction sandbox
-// escapes.
-func SearchFiles(
+const maxSearchContentBytes = 1 * 1024 * 1024
+
+type SearchFilesSearchIn string
+
+const (
+	SearchFilesSearchInPath          SearchFilesSearchIn = "path"
+	SearchFilesSearchInContent       SearchFilesSearchIn = "content"
+	SearchFilesSearchInPathOrContent SearchFilesSearchIn = "pathOrContent"
+)
+
+type SearchFileMatchKind string
+
+const (
+	SearchFileMatchKindPath           SearchFileMatchKind = "path"
+	SearchFileMatchKindContent        SearchFileMatchKind = "content"
+	SearchFileMatchKindPathAndContent SearchFileMatchKind = "pathAndContent"
+)
+
+type SearchFilesOptions struct {
+	Root              string
+	Query             string
+	Regexp            bool
+	SearchIn          SearchFilesSearchIn
+	MaxResults        int
+	IncludeDotEntries bool
+	NameGlob          string
+	CaseSensitive     bool
+}
+
+type SearchFileMatch struct {
+	Path      string              `json:"path"`
+	MatchKind SearchFileMatchKind `json:"matchKind"`
+}
+
+// SearchFilesDetailed walks root recursively and returns up to MaxResults file matches.
+func SearchFilesDetailed(
 	ctx context.Context,
 	p fspolicy.FSPolicy,
-	root, pattern string,
-	maxResults int,
-) (matchedFiles []string, reachedLimit bool, err error) {
+	opts SearchFilesOptions,
+) (matchedFiles []SearchFileMatch, reachedLimit bool, err error) {
 	reachedLimit = false
 
-	if pattern == "" {
-		return nil, reachedLimit, errors.New("pattern is required")
+	if opts.Query == "" {
+		return nil, reachedLimit, errors.New("query is required")
 	}
+
+	searchIn := opts.SearchIn
+	if searchIn == "" {
+		searchIn = SearchFilesSearchInPathOrContent
+	}
+	if !isValidSearchFilesSearchIn(searchIn) {
+		return nil, reachedLimit, fmt.Errorf("invalid searchIn %q", searchIn)
+	}
+
+	if opts.NameGlob != "" {
+		if _, err := filepath.Match(opts.NameGlob, "x"); err != nil {
+			return nil, reachedLimit, err
+		}
+	}
+
 	// Still walk an absolute, policy-resolved root for hardening.
-	rootArg := root
+	rootArg := opts.Root
 	if rootArg == "" {
 		rootArg = "."
 	}
@@ -45,14 +86,10 @@ func SearchFiles(
 	if err != nil {
 		return nil, reachedLimit, err
 	}
-	// Enforce BlockSymlinks semantics for the root itself (and ensure it exists/is a dir).
 	if err := p.VerifyDirResolved(rootAbs); err != nil {
 		return nil, reachedLimit, err
 	}
 
-	// If symlinks are allowed and the root itself is a symlink-to-dir, WalkDir won't recurse
-	// (because it Lstats the root). Walk the resolved target instead, while preserving
-	// returned path formatting based on rootArg/rootReturn.
 	walkRoot := rootAbs
 	if !p.BlockSymlinks() {
 		if st, lerr := os.Lstat(rootAbs); lerr == nil && (st.Mode()&os.ModeSymlink) != 0 {
@@ -61,22 +98,28 @@ func SearchFiles(
 			}
 		}
 	}
+	if p.HasAllowedRoots() {
+		if _, rerr := p.ResolvePath(walkRoot, ""); rerr != nil {
+			return nil, reachedLimit, rerr
+		}
+	}
 
-	// This is the "old-style" root prefix as it would have been passed to WalkDir.
-	// Used only to format/match returned paths, not for IO.
 	rootReturn := filepath.Clean(rootArg)
+	if rootReturn == "" {
+		rootReturn = "."
+	}
 
-	re, err := regexp.Compile(pattern)
+	matchString, err := newSearchStringMatcher(opts.Query, opts.Regexp, opts.CaseSensitive)
 	if err != nil {
 		return nil, reachedLimit, err
 	}
 
-	limit := maxResults
+	limit := opts.MaxResults
 	if limit <= 0 {
-		limit = int(^uint(0) >> 1) // effectively “infinite”
+		limit = int(^uint(0) >> 1)
 	}
 
-	var matches []string
+	matches := make([]SearchFileMatch, 0, min(limit, 64))
 
 	walkFn := func(path string, d fs.DirEntry, walkErr error) error {
 		if err := ctx.Err(); err != nil {
@@ -91,32 +134,43 @@ func SearchFiles(
 			return errSearchLimitReached
 		}
 
-		// Symlink hardening: skip symlink entries entirely.
-		if p.BlockSymlinks() {
-			if (d.Type() & os.ModeSymlink) != 0 {
-				if d.IsDir() {
+		if p.HasAllowedRoots() {
+			if _, rerr := p.ResolvePath(path, ""); rerr != nil {
+				if d != nil && d.IsDir() {
 					return fs.SkipDir
 				}
 				return nil
 			}
 		}
 
-		// Defense-in-depth: if sandbox roots are set, policy-check each file path
-		// (this catches symlink/junction escapes even when BlockSymlinks==false).
-		if p.HasAllowedRoots() && !d.IsDir() {
-			if _, rerr := p.ResolvePath(path, ""); rerr != nil {
-				return nil //nolint:nilerr // Skip out-of-policy entries.
+		if p.BlockSymlinks() && d != nil && (d.Type()&os.ModeSymlink) != 0 {
+			if d.IsDir() {
+				return fs.SkipDir
 			}
-		}
-
-		if d.IsDir() {
 			return nil
 		}
 
-		// Match/return using the older path shape:
-		// - if caller used "" or ".", return paths like "a/b.txt"
-		// - if caller used "some/root", return "some/root/a/b.txt"
-		// - if caller used an absolute root, return absolute paths (as WalkDir would).
+		if path != walkRoot && d != nil && !opts.IncludeDotEntries && isSearchHiddenName(d.Name()) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
+		if d == nil || d.IsDir() {
+			return nil
+		}
+
+		if opts.NameGlob != "" {
+			matched, matchErr := filepath.Match(opts.NameGlob, d.Name())
+			if matchErr != nil {
+				return matchErr
+			}
+			if !matched {
+				return nil
+			}
+		}
+
 		displayPath := path
 		if rel, rerr := filepath.Rel(walkRoot, path); rerr == nil {
 			if rootReturn == "." {
@@ -126,23 +180,27 @@ func SearchFiles(
 			}
 		}
 
-		// Path match first.
-		if re.MatchString(displayPath) {
-			matches = append(matches, displayPath)
-		} else {
-			// Check file content only for reasonably small files.
-			if info, _ := d.Info(); info != nil && info.Size() < 1*1024*1024 { // 1 MB guard
-				if data, rerr := os.ReadFile(path); rerr == nil {
-					sample := data[:min(len(data), 4096)]
-					if !isProbablyTextSample(sample) || !utf8.Valid(data) {
-						return nil
-					}
-					if re.Match(data) {
-						matches = append(matches, displayPath)
-					}
-				}
-			}
+		pathMatched := false
+		contentMatched := false
+
+		switch searchIn {
+		case SearchFilesSearchInPath:
+			pathMatched = matchString(displayPath)
+		case SearchFilesSearchInContent:
+			contentMatched = searchFileContent(path, matchString)
+		case SearchFilesSearchInPathOrContent:
+			pathMatched = matchString(displayPath)
+			contentMatched = searchFileContent(path, matchString)
 		}
+
+		if !pathMatched && !contentMatched {
+			return nil
+		}
+
+		matches = append(matches, SearchFileMatch{
+			Path:      displayPath,
+			MatchKind: combineSearchFileMatchKind(pathMatched, contentMatched),
+		})
 
 		if len(matches) >= limit {
 			reachedLimit = true
@@ -160,4 +218,74 @@ func SearchFiles(
 		matches = matches[:limit]
 	}
 	return matches, reachedLimit, nil
+}
+
+func newSearchStringMatcher(query string, useRegexp, caseSensitive bool) (func(string) bool, error) {
+	if useRegexp {
+		pattern := query
+		if !caseSensitive {
+			pattern = "(?i)" + pattern
+		}
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, err
+		}
+		return re.MatchString, nil
+	}
+
+	needle := query
+	if !caseSensitive {
+		needle = strings.ToLower(needle)
+	}
+	return func(s string) bool {
+		if !caseSensitive {
+			s = strings.ToLower(s)
+		}
+		return strings.Contains(s, needle)
+	}, nil
+}
+
+func searchFileContent(path string, matchString func(string) bool) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() || info.Size() < 0 || info.Size() >= maxSearchContentBytes {
+		return false
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	if len(data) == 0 {
+		return matchString("")
+	}
+
+	sample := data[:min(len(data), 4096)]
+	if !isProbablyTextSample(sample) || !utf8.Valid(data) {
+		return false
+	}
+	return matchString(string(data))
+}
+
+func isSearchHiddenName(name string) bool {
+	return strings.HasPrefix(name, ".") && name != "." && name != ".."
+}
+
+func isValidSearchFilesSearchIn(searchIn SearchFilesSearchIn) bool {
+	switch searchIn {
+	case SearchFilesSearchInPath, SearchFilesSearchInContent, SearchFilesSearchInPathOrContent:
+		return true
+	default:
+		return false
+	}
+}
+
+func combineSearchFileMatchKind(pathMatched, contentMatched bool) SearchFileMatchKind {
+	switch {
+	case pathMatched && contentMatched:
+		return SearchFileMatchKindPathAndContent
+	case pathMatched:
+		return SearchFileMatchKindPath
+	default:
+		return SearchFileMatchKindContent
+	}
 }

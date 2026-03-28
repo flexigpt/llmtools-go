@@ -80,7 +80,7 @@ func TestListDirectory(t *testing.T) {
 			},
 			args: func(t *testing.T, cfg policyCfg) ListDirectoryArgs {
 				t.Helper()
-				return ListDirectoryArgs{Path: cfg.workBaseDir, Pattern: "*.md"}
+				return ListDirectoryArgs{Path: cfg.workBaseDir, NameGlob: "*.md"}
 			},
 			want:    []string{"b.md"},
 			wantErr: wantErrNone,
@@ -95,7 +95,7 @@ func TestListDirectory(t *testing.T) {
 			},
 			args: func(t *testing.T, cfg policyCfg) ListDirectoryArgs {
 				t.Helper()
-				return ListDirectoryArgs{Path: cfg.workBaseDir, Pattern: "["}
+				return ListDirectoryArgs{Path: cfg.workBaseDir, NameGlob: "["}
 			},
 			wantErr: wantErrAny,
 		},
@@ -236,8 +236,12 @@ func TestListDirectory(t *testing.T) {
 			}
 
 			if tt.want != nil {
-				if !equalStringMultisets(out.Entries, tt.want) {
-					t.Fatalf("Entries=%v want=%v", out.Entries, tt.want)
+				entries := make([]string, 0, len(out.Items))
+				for _, item := range out.Items {
+					entries = append(entries, item.Name)
+				}
+				if !equalStringMultisets(entries, tt.want) {
+					t.Fatalf("Entries=%v want=%v", entries, tt.want)
 				}
 			}
 		})

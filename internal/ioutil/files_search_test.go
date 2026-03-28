@@ -2,6 +2,7 @@ package ioutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,7 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
-// Structure describing the tree used in SearchFiles tests.
+// Structure describing the tree used in searchFiles tests.
 type searchTestTree struct {
 	root        string
 	helloPath   string
@@ -133,7 +134,7 @@ func TestSearchFilesBasic(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error %v", err)
 			}
-			got, reachedLimit, err := SearchFiles(t.Context(), policy, tc.root, tc.pattern, tc.maxResults)
+			got, reachedLimit, err := searchFiles(t.Context(), policy, tc.root, tc.pattern, tc.maxResults)
 
 			if tc.wantErr {
 				if err == nil {
@@ -206,7 +207,7 @@ func TestSearchFilesRootDefaultUsesCWD(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error %v", err)
 			}
-			got, _, err := SearchFiles(t.Context(), policy, "", tc.pattern, tc.maxResults)
+			got, _, err := searchFiles(t.Context(), policy, "", tc.pattern, tc.maxResults)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -252,7 +253,7 @@ func TestSearchFilesConcurrency(t *testing.T) {
 					defer wg.Done()
 					for j := 0; j < tc.iterations; j++ {
 
-						got, _, err := SearchFiles(t.Context(), policy, tc.searchRoot, tc.searchPat, 0)
+						got, _, err := searchFiles(t.Context(), policy, tc.searchRoot, tc.searchPat, 0)
 						if err != nil {
 							errCh <- fmt.Errorf("goroutine %d: unexpected error: %w", id, err)
 							return
@@ -271,7 +272,7 @@ func TestSearchFilesConcurrency(t *testing.T) {
 
 			for err := range errCh {
 				if err != nil {
-					t.Fatalf("concurrent SearchFiles error: %v", err)
+					t.Fatalf("concurrent searchFiles error: %v", err)
 				}
 			}
 		})
@@ -367,7 +368,7 @@ func TestSearchFiles_EdgeCases(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error %v", err)
 			}
-			got, _, err := SearchFiles(ctx, policy, root, pattern, 0)
+			got, _, err := searchFiles(ctx, policy, root, pattern, 0)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil")
@@ -405,9 +406,9 @@ func TestSearchFiles_AllowedRoots_SkipsSymlinkFileThatResolvesOutside(t *testing
 		t.Fatalf("New policy: %v", err)
 	}
 
-	got, _, err := SearchFiles(t.Context(), p, root, "link\\.txt", 0)
+	got, _, err := searchFiles(t.Context(), p, root, "link\\.txt", 0)
 	if err != nil {
-		t.Fatalf("SearchFiles error: %v", err)
+		t.Fatalf("searchFiles error: %v", err)
 	}
 	if len(got) != 0 {
 		t.Fatalf("expected no results (symlink resolves outside allowed roots), got=%v", got)
@@ -430,16 +431,46 @@ func TestSearchFiles_RelativeRoot_ReturnsPathsPrefixedWithOriginalRootArg(t *tes
 		t.Fatalf("New policy: %v", err)
 	}
 
-	got, _, err := SearchFiles(t.Context(), p, "sub", "a\\.txt", 0)
+	got, _, err := searchFiles(t.Context(), p, "sub", "a\\.txt", 0)
 	if err != nil {
-		t.Fatalf("SearchFiles error: %v", err)
+		t.Fatalf("searchFiles error: %v", err)
 	}
 	if len(got) != 1 || got[0] != filepath.Join("sub", "a.txt") {
 		t.Fatalf("got=%v; want=%q", got, filepath.Join("sub", "a.txt"))
 	}
 }
 
-// Build a deterministic directory tree for SearchFiles tests.
+func searchFiles(
+	ctx context.Context,
+	p fspolicy.FSPolicy,
+	root, pattern string,
+	maxResults int,
+) (matchedFiles []string, reachedLimit bool, err error) {
+	if pattern == "" {
+		return nil, false, errors.New("pattern is required")
+	}
+
+	matches, reachedLimit, err := SearchFilesDetailed(ctx, p, SearchFilesOptions{
+		Root:              root,
+		Query:             pattern,
+		Regexp:            true,
+		SearchIn:          SearchFilesSearchInPathOrContent,
+		MaxResults:        maxResults,
+		IncludeDotEntries: true,
+		CaseSensitive:     true,
+	})
+	if err != nil {
+		return nil, reachedLimit, err
+	}
+
+	matchedFiles = make([]string, len(matches))
+	for i, match := range matches {
+		matchedFiles[i] = match.Path
+	}
+	return matchedFiles, reachedLimit, nil
+}
+
+// Build a deterministic directory tree for searchFiles tests.
 func createSearchTestTree(t *testing.T) searchTestTree {
 	t.Helper()
 
@@ -463,7 +494,7 @@ func createSearchTestTree(t *testing.T) searchTestTree {
 	writeFile(t, nestedPath, "nested CONTENTPATTERN plus more text.")
 
 	// Big file (>10MB) whose content contains BIGPATTERN but should not be read
-	// by SearchFiles because of the size guard.
+	// by searchFiles because of the size guard.
 	bigPath := filepath.Join(subdir, "bigfile.bin")
 	f, err := os.Create(bigPath)
 	if err != nil {

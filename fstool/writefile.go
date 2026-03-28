@@ -23,7 +23,7 @@ var writeFileTool = spec.Tool{
 	Slug:          "writefile",
 	Version:       "v1.0.0",
 	DisplayName:   "Write file",
-	Description:   "Write a file to disk. encoding=text writes UTF-8; binary expects base64 string as input and writes raw bytes.",
+	Description:   "Write a file to disk. Text mode writes UTF-8 text. Binary mode expects base64 input and writes raw bytes.",
 	Tags:          []string{"fs"},
 
 	ArgSchema: spec.JSONSchema(`{
@@ -46,7 +46,7 @@ var writeFileTool = spec.Tool{
 	},
 	"overwrite": {
 		"type": "boolean",
-		"description": "If false and the file exists, return an error.",
+		"description": "If false and the file exists, return an error. If true, create the file if needed or replace the existing file.",
 		"default": false
 	},
 	"createParents": {
@@ -73,9 +73,17 @@ type WriteFileArgs struct {
 	CreateParents bool   `json:"createParents,omitempty"`
 }
 
+type WriteFileAction string
+
+const (
+	WriteFileActionCreated     WriteFileAction = "created"
+	WriteFileActionOverwritten WriteFileAction = "overwritten"
+)
+
 type WriteFileOut struct {
-	Path         string `json:"path"`
-	BytesWritten int64  `json:"bytesWritten"`
+	Path         string          `json:"path"`
+	BytesWritten int64           `json:"bytesWritten"`
+	Action       WriteFileAction `json:"action"`
 }
 
 func writeFile(
@@ -120,6 +128,15 @@ func writeFile(
 		return nil, fmt.Errorf("content too large (%d bytes; max %d)", len(data), toolutil.MaxFileWriteBytes)
 	}
 
+	action := WriteFileActionCreated
+	if resolvedDst, err := p.ResolvePath(args.Path, ""); err != nil {
+		return nil, err
+	} else if _, statErr := os.Lstat(resolvedDst); statErr == nil {
+		action = WriteFileActionOverwritten
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return nil, statErr
+	}
+
 	dst, err := ioutil.WriteFileAtomicBytesWithParents(
 		p,
 		args.Path,
@@ -141,5 +158,6 @@ func writeFile(
 	return &WriteFileOut{
 		Path:         dst,
 		BytesWritten: int64(len(data)),
+		Action:       action,
 	}, nil
 }

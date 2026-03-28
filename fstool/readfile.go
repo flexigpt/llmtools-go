@@ -25,7 +25,7 @@ var readFileTool = spec.Tool{
 	Slug:          "readfile",
 	Version:       "v1.0.0",
 	DisplayName:   "Read file",
-	Description:   "Read a local file from disk and return its contents (text or base64).",
+	Description:   "Read a local file. Text mode is for UTF-8 text-like files and PDFs (extracted content). Binary mode returns file or image output with base64 data instead of plain text.",
 	Tags:          []string{"fs", "read"},
 
 	ArgSchema: spec.JSONSchema(`{
@@ -39,7 +39,7 @@ var readFileTool = spec.Tool{
 	"encoding": {
 		"type": "string",
 		"enum": ["text", "binary"],
-		"description": "Return mode: \"text\" reads file as UTF-8, \"binary\" returns base64 string.",
+		"description": "Return mode. Use \"text\" for UTF-8 text-like files and PDFs (extracted text is returned). Use \"binary\" for non-text files; binary mode returns file/image output with base64 data, not plain text.",
 		"default": "text"
 	}
 },

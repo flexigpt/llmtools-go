@@ -2,6 +2,7 @@ package fstool
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/ioutil"
@@ -10,13 +11,18 @@ import (
 
 const listDirectoryFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/fstool/listdirectory.ListDirectory"
 
+const (
+	defaultListDirectoryMaxEntries = 200
+	maxListDirectoryMaxEntries     = 5000
+)
+
 var listDirectoryTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "018fe0f4-b8cd-7e55-82d5-9df0bd70e4bb",
 	Slug:          "listdirectory",
 	Version:       "v1.0.0",
 	DisplayName:   "List directory",
-	Description:   "Return the names of files/directories at the given path (optionally filtered by glob).",
+	Description:   "List immediate entries in a directory. Dot-prefixed files and directories are excluded by default. You can optionally filter by basename glob and entry kind.",
 	Tags:          []string{"fs", "list"},
 
 	ArgSchema: spec.JSONSchema(`{
@@ -25,12 +31,30 @@ var listDirectoryTool = spec.Tool{
 "properties": {
 	"path": {
 		"type": "string",
-		"description": "Directory path to list.",
+		"description": "Directory to list.",
 		"default": "."
 	},
-	"pattern": {
+	"nameGlob": {
 		"type": "string",
-		"description": "Optional glob pattern (e.g. \"*.txt\") to filter results."
+		"description": "Optional glob applied to immediate entry names, like \"*.txt\". Not a regex."
+	},
+	"includeDotEntries": {
+		"type": "boolean",
+		"description": "Include entries whose names start with '.'.",
+		"default": false
+	},
+	"kind": {
+		"type": "string",
+		"enum": ["all", "file", "directory", "other"],
+		"description": "Optional entry-kind filter.",
+		"default": "all"
+	},
+	"maxEntries": {
+		"type": "integer",
+		"description": "Maximum entries to return after filtering.",
+		"default": 200,
+		"minimum": 1,
+		"maximum": 5000
 	}
 },
 "required": [],
@@ -42,16 +66,35 @@ var listDirectoryTool = spec.Tool{
 	ModifiedAt: spec.SchemaStartTime,
 }
 
+type ListDirectoryEntryKind string
+
+const (
+	ListDirectoryEntryKindAll       ListDirectoryEntryKind = "all"
+	ListDirectoryEntryKindFile      ListDirectoryEntryKind = "file"
+	ListDirectoryEntryKindDirectory ListDirectoryEntryKind = "directory"
+	ListDirectoryEntryKindOther     ListDirectoryEntryKind = "other"
+)
+
 type ListDirectoryArgs struct {
-	Path    string `json:"path,omitempty"`    // default "."
-	Pattern string `json:"pattern,omitempty"` // Optional glob
-}
-type ListDirectoryOut struct {
-	Entries []string `json:"entries"`
+	Path              string                 `json:"path,omitempty"`
+	NameGlob          string                 `json:"nameGlob,omitempty"`
+	IncludeDotEntries bool                   `json:"includeDotEntries,omitempty"`
+	Kind              ListDirectoryEntryKind `json:"kind,omitempty"`
+	MaxEntries        int                    `json:"maxEntries,omitempty"`
 }
 
-// listDirectory lists files / dirs in Path. If Pattern is supplied, the
-// results are filtered via filepath.Match.
+type ListDirectoryEntry struct {
+	Name string                 `json:"name"`
+	Kind ListDirectoryEntryKind `json:"kind"`
+}
+
+type ListDirectoryOut struct {
+	Path              string               `json:"path"`
+	ReachedMaxEntries bool                 `json:"reachedMaxEntries"`
+	Items             []ListDirectoryEntry `json:"items,omitempty"`
+}
+
+// listDirectory lists immediate entries in Path, with optional glob and kind filtering.
 func listDirectory(
 	ctx context.Context,
 	args ListDirectoryArgs,
@@ -69,9 +112,39 @@ func listDirectory(
 		return nil, err
 	}
 
-	entries, err := ioutil.ListDirectoryNormalized(dir, args.Pattern)
+	nameGlob := args.NameGlob
+
+	maxEntries := args.MaxEntries
+	if maxEntries <= 0 {
+		maxEntries = defaultListDirectoryMaxEntries
+	}
+	if maxEntries > maxListDirectoryMaxEntries {
+		return nil, fmt.Errorf("maxEntries must be between 1 and %d", maxListDirectoryMaxEntries)
+	}
+
+	items, reachedMaxEntries, err := ioutil.ListDirectoryDetailedNormalized(dir, ioutil.ListDirectoryOptions{
+		NameGlob:          nameGlob,
+		IncludeDotEntries: args.IncludeDotEntries,
+		Kind:              ioutil.ListDirectoryKind(args.Kind),
+		MaxEntries:        maxEntries,
+	})
 	if err != nil {
 		return nil, err
 	}
-	return &ListDirectoryOut{Entries: entries}, nil
+
+	entryNames := make([]string, len(items))
+	outItems := make([]ListDirectoryEntry, len(items))
+	for i, item := range items {
+		entryNames[i] = item.Name
+		outItems[i] = ListDirectoryEntry{
+			Name: item.Name,
+			Kind: ListDirectoryEntryKind(item.Kind),
+		}
+	}
+
+	return &ListDirectoryOut{
+		Path:              dir,
+		ReachedMaxEntries: reachedMaxEntries,
+		Items:             outItems,
+	}, nil
 }

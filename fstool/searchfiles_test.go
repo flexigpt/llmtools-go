@@ -55,12 +55,12 @@ func TestSearchFiles(t *testing.T) {
 			ctx: canceledContext,
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Pattern: "txt"}
+				return SearchFilesArgs{Root: ".", Query: "txt"}
 			},
 			wantErr: wantErrIs(context.Canceled),
 		},
 		{
-			name: "missing_pattern_errors",
+			name: "missing_query_errors",
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
@@ -71,7 +71,7 @@ func TestSearchFiles(t *testing.T) {
 				t.Helper()
 				return SearchFilesArgs{Root: "."}
 			},
-			wantErr: wantErrContains("pattern is required"),
+			wantErr: wantErrContains("query is required"),
 		},
 		{
 			name: "invalid_regexp_errors",
@@ -83,7 +83,7 @@ func TestSearchFiles(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Pattern: "["}
+				return SearchFilesArgs{Root: ".", Query: "[", Regexp: true}
 			},
 			wantErr: wantErrAny,
 		},
@@ -97,7 +97,7 @@ func TestSearchFiles(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Pattern: `foo\.txt`}
+				return SearchFilesArgs{Root: ".", Query: `foo\.txt`, Regexp: true}
 			},
 			wantErr:           wantErrNone,
 			wantMatches:       []string{"foo.txt"},
@@ -113,7 +113,7 @@ func TestSearchFiles(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Pattern: `goodbye`}
+				return SearchFilesArgs{Root: ".", Query: "goodbye"}
 			},
 			wantErr:           wantErrNone,
 			wantMatches:       []string{"bar.md"},
@@ -129,7 +129,7 @@ func TestSearchFiles(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Pattern: `baz`}
+				return SearchFilesArgs{Root: ".", Query: "baz"}
 			},
 			wantErr:           wantErrNone,
 			wantMatches:       []string{filepath.Join("sub", "baz.txt")},
@@ -145,7 +145,7 @@ func TestSearchFiles(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Pattern: `txt`, MaxResults: 1}
+				return SearchFilesArgs{Root: ".", Query: "txt", MaxResults: 1}
 			},
 			wantErr:           wantErrNone,
 			wantReachedMax:    true,
@@ -169,7 +169,7 @@ func TestSearchFiles(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Pattern: `link\.txt`}
+				return SearchFilesArgs{Root: ".", Query: `link\.txt`, Regexp: true}
 			},
 			wantErr:           wantErrNone,
 			wantMatches:       []string{}, // should skip symlink
@@ -196,7 +196,7 @@ func TestSearchFiles(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Pattern: `needle`}
+				return SearchFilesArgs{Root: ".", Query: "needle"}
 			},
 			wantErr:           wantErrNone,
 			wantMatches:       []string{}, // escaped symlink should be skipped by per-file ResolvePath check
@@ -213,7 +213,7 @@ func TestSearchFiles(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: "notadir", Pattern: "x"}
+				return SearchFilesArgs{Root: "notadir", Query: "x"}
 			},
 			wantErr: wantErrAny,
 		},
@@ -229,7 +229,7 @@ func TestSearchFiles(t *testing.T) {
 				t.Helper()
 				outside := t.TempDir()
 				seedTree(t, outside)
-				return SearchFilesArgs{Root: outside, Pattern: "txt"}
+				return SearchFilesArgs{Root: outside, Query: "txt"}
 			},
 			wantErr: wantErrContains("outside allowed roots"),
 		},
@@ -259,16 +259,24 @@ func TestSearchFiles(t *testing.T) {
 				t.Fatalf("expected non-nil out")
 			}
 
-			if tt.wantMatchCountLen && out.MatchCount != len(out.Matches) {
-				t.Fatalf("MatchCount=%d want %d", out.MatchCount, len(out.Matches))
+			if tt.wantMatchCountLen && out.MatchCount != len(out.Items) {
+				t.Fatalf(
+					"MatchCount=%d want %d",
+					out.MatchCount,
+					len(out.Items),
+				)
 			}
 			if out.ReachedMaxResults != tt.wantReachedMax {
 				t.Fatalf("ReachedMaxResults=%v want=%v", out.ReachedMaxResults, tt.wantReachedMax)
 			}
 
 			if tt.wantMatches != nil {
-				if !equalStringMultisets(out.Matches, tt.wantMatches) {
-					t.Fatalf("Matches=%v want=%v", out.Matches, tt.wantMatches)
+				matches := make([]string, 0, len(out.Items))
+				for _, item := range out.Items {
+					matches = append(matches, item.Path)
+				}
+				if !equalStringMultisets(matches, tt.wantMatches) {
+					t.Fatalf("Matches=%v want=%v", out.Items, tt.wantMatches)
 				}
 			}
 		})

@@ -12,33 +12,114 @@ import (
 	"time"
 )
 
-// ListDirectoryNormalized lists entries in a directory that is assumed to be already normalized.
-// It does not normalize or resolve relative paths; callers must do that.
-func ListDirectoryNormalized(dir, pattern string) ([]string, error) {
+type ListDirectoryKind string
+
+const (
+	ListDirectoryKindAll       ListDirectoryKind = "all"
+	ListDirectoryKindFile      ListDirectoryKind = "file"
+	ListDirectoryKindDirectory ListDirectoryKind = "directory"
+	ListDirectoryKindOther     ListDirectoryKind = "other"
+)
+
+type ListDirectoryOptions struct {
+	NameGlob          string
+	IncludeDotEntries bool
+	Kind              ListDirectoryKind
+	MaxEntries        int
+}
+
+type ListDirectoryEntry struct {
+	Name string            `json:"name"`
+	Kind ListDirectoryKind `json:"kind"`
+}
+
+// ListDirectoryDetailedNormalized lists and filters immediate directory entries in a directory that is
+// assumed to already be normalized.
+func ListDirectoryDetailedNormalized(dir string, opts ListDirectoryOptions) ([]ListDirectoryEntry, bool, error) {
 	if strings.TrimSpace(dir) == "" {
-		return nil, ErrInvalidPath
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("read dir error %w", err)
+		return nil, false, ErrInvalidPath
 	}
 
-	out := make([]string, 0, len(entries))
+	kind := opts.Kind
+	if kind == "" {
+		kind = ListDirectoryKindAll
+	}
+	if !isValidListDirectoryKind(kind) {
+		return nil, false, fmt.Errorf("invalid kind %q", kind)
+	}
+	if opts.MaxEntries < 0 {
+		return nil, false, errors.New("maxEntries must be >= 0")
+	}
+	if opts.NameGlob != "" {
+		if _, err := filepath.Match(opts.NameGlob, "x"); err != nil {
+			return nil, false, err
+		}
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, false, fmt.Errorf("read dir error %w", err)
+	}
+
+	out := make([]ListDirectoryEntry, 0, len(entries))
 	for _, e := range entries {
 		name := e.Name()
-		if pattern != "" {
-			matched, matchErr := filepath.Match(pattern, name)
+		if !opts.IncludeDotEntries && strings.HasPrefix(name, ".") {
+			continue
+		}
+
+		if opts.NameGlob != "" {
+			matched, matchErr := filepath.Match(opts.NameGlob, name)
 			if matchErr != nil {
-				return nil, matchErr
+				return nil, false, matchErr
 			}
 			if !matched {
 				continue
 			}
 		}
-		out = append(out, name)
+
+		entryKind := classifyListDirectoryEntryKind(e)
+		if kind != ListDirectoryKindAll && entryKind != kind {
+			continue
+		}
+
+		out = append(out, ListDirectoryEntry{
+			Name: name,
+			Kind: entryKind,
+		})
 	}
-	sort.Strings(out)
-	return out, nil
+
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+
+	reachedMaxEntries := false
+	if opts.MaxEntries > 0 && len(out) > opts.MaxEntries {
+		reachedMaxEntries = true
+		out = out[:opts.MaxEntries]
+	}
+
+	return out, reachedMaxEntries, nil
+}
+
+func classifyListDirectoryEntryKind(e os.DirEntry) ListDirectoryKind {
+	switch {
+	case e.IsDir():
+		return ListDirectoryKindDirectory
+	case e.Type().IsRegular():
+		return ListDirectoryKindFile
+	default:
+		return ListDirectoryKindOther
+	}
+}
+
+func isValidListDirectoryKind(kind ListDirectoryKind) bool {
+	switch kind {
+	case ListDirectoryKindAll, ListDirectoryKindFile, ListDirectoryKindDirectory, ListDirectoryKindOther:
+		return true
+	default:
+		return false
+	}
 }
 
 func UniquePathInDir(dir, base string) (string, error) {
