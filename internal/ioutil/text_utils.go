@@ -38,7 +38,22 @@ func NormalizeLineBlockInput(in []string) []string {
 }
 
 func RequireSingleTrimmedBlockMatch(lines, block []string, name string) (int, error) {
-	return RequireSingleMatch(FindTrimmedBlockMatches(lines, block), name)
+	idxs := FindTrimmedBlockMatches(lines, block)
+	if len(idxs) == 0 {
+		return 0, fmt.Errorf(
+			"no match found for %s; suggestion=copy a longer distinctive block from the file or read nearby lines first",
+			name,
+		)
+	}
+	if len(idxs) > 1 {
+		return 0, fmt.Errorf(
+			"ambiguous match for %s: found %d occurrences. diagnostics=%s suggestion=copy a longer distinctive block from the file",
+			name,
+			len(idxs),
+			BuildBlockMatchDiagnosticJSON(lines, idxs, len(block), nil, 5, 1),
+		)
+	}
+	return idxs[0], nil
 }
 
 func RequireSingleMatch(idxs []int, name string) (int, error) {
@@ -47,9 +62,10 @@ func RequireSingleMatch(idxs []int, name string) (int, error) {
 	}
 	if len(idxs) > 1 {
 		return 0, fmt.Errorf(
-			"ambiguous match for %s: found %d occurrences; provide a more specific match",
+			"ambiguous match for %s: found %d occurrences at start lines %v; provide a more specific match",
 			name,
 			len(idxs),
+			OneBasedLineNumbers(idxs),
 		)
 	}
 	return idxs[0], nil
@@ -120,9 +136,9 @@ func EnsureNonOverlappingFixedWidth(matchIdxs []int, width int) error {
 	for i := 0; i < len(matchIdxs)-1; i++ {
 		if matchIdxs[i]+width > matchIdxs[i+1] {
 			return fmt.Errorf(
-				"overlapping matches detected at line indices %d and %d; provide tighter beforeLines/afterLines to disambiguate",
-				matchIdxs[i],
-				matchIdxs[i+1],
+				"overlapping matches detected at start lines %d and %d; provide tighter surrounding context to disambiguate",
+				matchIdxs[i]+1,
+				matchIdxs[i+1]+1,
 			)
 		}
 	}

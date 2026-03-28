@@ -19,8 +19,10 @@ var deleteTextLinesTool = spec.Tool{
 	Slug:          "deletetextlines",
 	Version:       "v1.0.0",
 	DisplayName:   "Delete text lines",
-	Description:   "Delete one or more exact line-block occurrences from a UTF-8 text file. Matching compares TrimSpace(line). Use beforeLines/afterLines as immediate-adjacent context to disambiguate.",
-	Tags:          []string{"text"},
+	Description: "Delete one or more exact line-block occurrences from a UTF-8 text file. Matching compares TrimSpace(line). " +
+		"For reliable calls, prefer editing > 2 consecutive lines and use immediate beforeLines/afterLines to reduce ambiguity. " +
+		"maybeStartLine can softly prefer a nearby occurrence, but the tool still fails unless the final deletion count equals expectedDeletions.",
+	Tags: []string{"text"},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",
@@ -34,25 +36,30 @@ var deleteTextLinesTool = spec.Tool{
 		"type": "array",
 		"items": { "type": "string" },
 		"minItems": 1,
-		"description": "Block of lines to delete. Newline characters inside items are allowed and are treated as line breaks."
+		"description": "Distinctive block of lines to delete. Prefer editing > 2 consecutive lines. Avoid generic single lines such as blank lines, braces, or repeated return statements. Newline characters inside items are allowed and treated as line breaks."
 	},
 	"beforeLines": {
 		"type": "array",
 		"items": { "type": "string" },
 		"minItems": 1,
-		"description": "Optional block that must appear immediately before matchLines."
+		"description": "Optional immediate-adjacent lines that must appear directly before matchLines. Use 2-5 neighboring lines to disambiguate."
 	},
 	"afterLines": {
 		"type": "array",
 		"items": { "type": "string" },
 		"minItems": 1,
-		"description": "Optional block that must appear immediately after matchLines."
+		"description": "Optional immediate-adjacent lines that must appear directly after matchLines. Use 2-5 neighboring lines to disambiguate."
+	},
+	"maybeStartLine": {
+		"type": "integer",
+		"minimum": 1,
+		"description": "Optional 1-based approximate start line hint. Best used when you expect one deletion. If several matches exist, the tool will prefer a uniquely closest nearby match within a small built-in tolerance; otherwise it still fails and reports candidates."
 	},
 	"expectedDeletions": {
 		"type": "integer",
 		"minimum": 1,
 		"default": 1,
-		"description": "Fail if the number of matched blocks deleted != this value."
+		"description": "Fail unless the number of deleted blocks equals this value. Leave at 1 for the common case of a single intended deletion."
 	}
 },
 "required": ["path", "matchLines"],
@@ -70,6 +77,7 @@ type DeleteTextLinesArgs struct {
 	MatchLines        []string `json:"matchLines"`
 	BeforeLines       []string `json:"beforeLines,omitempty"`
 	AfterLines        []string `json:"afterLines,omitempty"`
+	MaybeStartLine    *int     `json:"maybeStartLine,omitempty"`
 	ExpectedDeletions int      `json:"expectedDeletions,omitempty"` // default 1
 }
 
@@ -100,6 +108,9 @@ func deleteTextLines(
 	matchLines := ioutil.NormalizeLineBlockInput(args.MatchLines)
 	beforeLines := ioutil.NormalizeLineBlockInput(args.BeforeLines)
 	afterLines := ioutil.NormalizeLineBlockInput(args.AfterLines)
+	if args.MaybeStartLine != nil && *args.MaybeStartLine < 1 {
+		args.MaybeStartLine = nil
+	}
 	expected := args.ExpectedDeletions
 	if expected <= 0 {
 		expected = 1
@@ -114,11 +125,32 @@ func deleteTextLines(
 	if err := ioutil.EnsureNonOverlappingFixedWidth(matchIdxs, len(matchLines)); err != nil {
 		return nil, err
 	}
+	var hintDiag *ioutil.MaybeStartLineDiagnostic
+	if expected == 1 {
+		matchIdxs, hintDiag = ioutil.NarrowMatchIndicesByMaybeStartLine(
+			matchIdxs,
+			args.MaybeStartLine,
+			maybeStartLineTolerance,
+		)
+	}
 	if len(matchIdxs) != expected {
+		suggestion := "copy a longer unique matchLines block from the file and add immediate beforeLines/afterLines"
+		if expected == 1 {
+			suggestion += "; if you know roughly where the block is, set maybeStartLine near the intended start line"
+		}
 		return nil, fmt.Errorf(
-			"delete match count mismatch: expected %d, found %d (provide tighter beforeLines/afterLines to disambiguate)",
+			"delete match count mismatch: expected %d, found %d. diagnostics=%s suggestion=%s",
 			expected,
 			len(matchIdxs),
+			ioutil.BuildBlockMatchDiagnosticJSON(
+				tf.Lines,
+				matchIdxs,
+				len(matchLines),
+				hintDiag,
+				maxAmbiguityDiagnosticCandidates,
+				ambiguityDiagnosticContextLines,
+			),
+			suggestion,
 		)
 	}
 

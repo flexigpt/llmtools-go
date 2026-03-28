@@ -19,8 +19,9 @@ var replaceTextLinesTool = spec.Tool{
 	Slug:          "replacetextlines",
 	Version:       "v1.0.0",
 	DisplayName:   "Replace text lines",
-	Description: "Replace a block of lines in a UTF-8 text file; use beforeLines/afterLines to make the match more specific.\n" +
-		"Matching uses trimmed space comparisons. Fails unless the number of replacements equals expectedReplacements.",
+	Description: "Replace a block of lines in a UTF-8 text file. Matching uses TrimSpace(line). " +
+		"For reliable calls, copy a distinctive > 2 line block, avoid generic one-line snippets, and use immediate beforeLines/afterLines when the block may repeat. " +
+		"maybeStartLine can softly prefer a nearby occurrence, but the tool still fails unless the final match count equals expectedReplacements.",
 	Tags: []string{"text"},
 
 	ArgSchema: spec.JSONSchema(`{
@@ -35,29 +36,34 @@ var replaceTextLinesTool = spec.Tool{
 		"type": "array",
 		"items": { "type": "string" },
 		"minItems": 1,
-		"description": "The exact block of lines to find."
+		"description": "Distinctive block of lines to find. Prefer > 2 consecutive lines. Avoid generic single lines such as blank lines, braces, or repeated return statements."
 	},
 	"replaceWithLines": {
 		"type": "array",
 		"items": { "type": "string" },
 		"minItems": 1,
-		"description": "Replacement block of lines."
+		"description": "Replacement block of lines. These lines are written exactly as provided."
 	},
 	"beforeLines": {
 		"type": "array",
 		"items": { "type": "string" },
-		"description": "Optional block of lines that must appear immediately before matchLines."
+		"description": "Optional immediate-adjacent lines that must appear directly before matchLines. Use 2-5 neighboring lines to disambiguate."
 	},
 	"afterLines": {
 		"type": "array",
 		"items": { "type": "string" },
-		"description": "Optional block of lines that must appear immediately after matchLines."
+		"description": "Optional immediate-adjacent lines that must appear directly after matchLines. Use 2-5 neighboring lines to disambiguate."
+	},
+	"maybeStartLine": {
+		"type": "integer",
+		"minimum": 1,
+		"description": "Optional 1-based approximate start line hint. Best used when you expect one replacement. If several matches exist, the tool will prefer a uniquely closest nearby match within a small built-in tolerance; otherwise it still fails and reports candidates."
 	},
 	"expectedReplacements": {
 		"type": "integer",
 		"minimum": 1,
 		"default": 1,
-		"description": "Fail if replacements made != this value."
+		"description": "Fail if replacements made != this value. Leave at 1 for the common case of a single intended replacement."
 	}
 },
 "required": ["path", "matchLines", "replaceWithLines"],
@@ -79,8 +85,9 @@ type ReplaceTextLinesArgs struct {
 	// This tool does NOT support deletion (use deletetextlines).
 	ReplaceWithLines []string `json:"replaceWithLines"`
 
-	BeforeLines []string `json:"beforeLines,omitempty"`
-	AfterLines  []string `json:"afterLines,omitempty"`
+	BeforeLines    []string `json:"beforeLines,omitempty"`
+	AfterLines     []string `json:"afterLines,omitempty"`
+	MaybeStartLine *int     `json:"maybeStartLine,omitempty"`
 
 	// Pointer is used so we can distinguish "omitted" (default to 1) from "explicit 0" (error).
 	ExpectedReplacements *int `json:"expectedReplacements,omitempty"` // default 1; minimum 1
@@ -111,6 +118,9 @@ func replaceTextLines(
 	matchLines := ioutil.NormalizeLineBlockInput(args.MatchLines)
 	beforeLines := ioutil.NormalizeLineBlockInput(args.BeforeLines)
 	afterLines := ioutil.NormalizeLineBlockInput(args.AfterLines)
+	if args.MaybeStartLine != nil && *args.MaybeStartLine < 1 {
+		return nil, fmt.Errorf("maybeStartLine must be >= 1 (got %d)", *args.MaybeStartLine)
+	}
 
 	if len(matchLines) == 0 {
 		return nil, errors.New("matchLines is required")
@@ -144,12 +154,33 @@ func replaceTextLines(
 	if err := ioutil.EnsureNonOverlappingFixedWidth(matchIdxs, len(matchLines)); err != nil {
 		return nil, err
 	}
+	var hintDiag *ioutil.MaybeStartLineDiagnostic
+	if expected == 1 {
+		matchIdxs, hintDiag = ioutil.NarrowMatchIndicesByMaybeStartLine(
+			matchIdxs,
+			args.MaybeStartLine,
+			maybeStartLineTolerance,
+		)
+	}
 
 	if len(matchIdxs) != expected {
+		suggestion := "copy a longer unique matchLines block from the file and add immediate beforeLines/afterLines"
+		if expected == 1 {
+			suggestion += "; if you know roughly where the block is, set maybeStartLine near the intended start line"
+		}
 		return nil, fmt.Errorf(
-			"replace match count mismatch: expected %d, found %d (provide tighter beforeLines/afterLines to disambiguate)",
+			"replace match count mismatch: expected %d, found %d. diagnostics=%s suggestion=%s",
 			expected,
 			len(matchIdxs),
+			ioutil.BuildBlockMatchDiagnosticJSON(
+				tf.Lines,
+				matchIdxs,
+				len(matchLines),
+				hintDiag,
+				maxAmbiguityDiagnosticCandidates,
+				ambiguityDiagnosticContextLines,
+			),
+			suggestion,
 		)
 	}
 

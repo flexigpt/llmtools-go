@@ -21,8 +21,11 @@ var findTextTool = spec.Tool{
 	Slug:          "findtext",
 	Version:       "v1.0.0",
 	DisplayName:   "Find text matches with context",
-	Description:   "Search a UTF-8 text file and return matching lines/blocks with surrounding context lines. Modes: substring, RE2 regex (line-by-line), or exact line-block match. Matching compares TrimSpace(line).",
-	Tags:          []string{"text"},
+	Description: "Search a UTF-8 text file and return matching lines or line-blocks with surrounding context. " +
+		"Use this tool before edit tools to gather exact lines and line numbers. " +
+		"substring and regex are best for discovery; lineBlock is best for validating an edit locator. " +
+		"For lineBlock mode, matching compares TrimSpace(line). Prefer a distinctive multi-line block, and add beforeLines/afterLines when the block may repeat.",
+	Tags: []string{"text"},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",
@@ -36,29 +39,41 @@ var findTextTool = spec.Tool{
 		"type": "string",
 		"enum": ["substring", "regex", "lineBlock"],
 		"default": "substring",
-		  "description": "Search mode."
+		"description": "Search mode. Use substring or regex to discover candidate areas; use lineBlock when you want to validate a specific block before editing."
 	},
 	"query": {
 		"type": "string",
-		"description": "Query string for queryType=substring or regex (Go/RE2 regex), else omit."
+		"description": "Query string for queryType=substring or regex (Go/RE2 regex). Omit for queryType=lineBlock."
 	},
 	"matchLines": {
 		"type": "array",
 		"items": { "type": "string" },
 		"minItems": 1,
-		"description": "For queryType=lineBlock: block of lines to match. Newline characters in items are allowed and treated as line breaks."
+		"description": "For queryType=lineBlock only: distinctive block of lines to match. Prefer > 2 consecutive lines. Avoid generic single lines such as blank lines, braces, or repeated return statements. Newline characters in items are allowed and treated as line breaks."
+	},
+	"beforeLines": {
+		"type": "array",
+		"items": { "type": "string" },
+		"minItems": 1,
+		"description": "For queryType=lineBlock only: optional immediate-adjacent lines that must appear directly before matchLines. Use 2-5 neighboring lines to disambiguate."
+	},
+	"afterLines": {
+		"type": "array",
+		"items": { "type": "string" },
+		"minItems": 1,
+		"description": "For queryType=lineBlock only: optional immediate-adjacent lines that must appear directly after matchLines. Use 2-5 neighboring lines to disambiguate."
 	},
 	"contextLines": {
 		"type": "integer",
 		"minimum": 0,
 		"default": 5,
-		"description": "Number of lines to include before and after each match (for lineBlock matches, around the entire block)."
+		"description": "Number of lines to include before and after each returned match. Small values such as 2-8 are usually best for building follow-up edit calls."
 	},
 	"maxMatches": {
 		"type": "integer",
 		"minimum": 1,
 		"default": 10,
-		"description": "Stop after this many matches."
+		"description": "Maximum number of matches to return."
 	}
 },
 "required": ["path"],
@@ -92,7 +107,9 @@ type FindTextArgs struct {
 	QueryType string `json:"queryType,omitempty"` // substring (default) | regex | lineBlock
 	Query     string `json:"query,omitempty"`     // required for substring/regex
 
-	MatchLines []string `json:"matchLines,omitempty"` // required for lineBlock
+	MatchLines  []string `json:"matchLines,omitempty"` // required for lineBlock
+	BeforeLines []string `json:"beforeLines,omitempty"`
+	AfterLines  []string `json:"afterLines,omitempty"`
 
 	ContextLines int `json:"contextLines,omitempty"` // default 5
 	MaxMatches   int `json:"maxMatches,omitempty"`   // default 10
@@ -104,15 +121,19 @@ type FindTextLine struct {
 }
 
 type FindTextMatch struct {
-	MatchStartLine          int            `json:"matchStartLine"`          // 1-based
-	MatchEndLine            int            `json:"matchEndLine"`            // 1-based
+	MatchStartLine          int            `json:"matchStartLine"` // 1-based
+	MatchEndLine            int            `json:"matchEndLine"`   // 1-based
+	BeforeContextLines      []FindTextLine `json:"beforeContextLines,omitempty"`
+	MatchedLines            []FindTextLine `json:"matchedLines"`
+	AfterContextLines       []FindTextLine `json:"afterContextLines,omitempty"`
 	MatchedLinesWithContext []FindTextLine `json:"matchedLinesWithContext"` // includes matched lines as well (window around match)
 }
 
 type FindTextOut struct {
-	ReachedMaxMatches bool            `json:"reachedMaxMatches"`
-	MatchesReturned   int             `json:"matchesReturned"`
-	Matches           []FindTextMatch `json:"matches"`
+	ReachedMaxMatches        bool            `json:"reachedMaxMatches"`
+	AdditionalMatchesOmitted int             `json:"additionalMatchesOmitted,omitempty"`
+	MatchesReturned          int             `json:"matchesReturned"`
+	Matches                  []FindTextMatch `json:"matches"`
 }
 
 // findText finds occurrences and returns matches with context.
@@ -165,6 +186,8 @@ func findText(ctx context.Context, args FindTextArgs, p fspolicy.FSPolicy) (*Fin
 		re          *regexp.Regexp
 		substrQuery string
 		block       []string
+		beforeBlock []string
+		afterBlock  []string
 	)
 
 	if qtype == findTypeRegex {
@@ -188,10 +211,15 @@ func findText(ctx context.Context, args FindTextArgs, p fspolicy.FSPolicy) (*Fin
 	if qtype != findTypeLineBlock && len(args.MatchLines) > 0 {
 		return nil, errors.New(`matchLines must be omitted when queryType is "substring" or "regex"`)
 	}
+	if qtype != findTypeLineBlock && (len(args.BeforeLines) > 0 || len(args.AfterLines) > 0) {
+		return nil, errors.New(`beforeLines/afterLines must be omitted when queryType is "substring" or "regex"`)
+	}
 
 	if qtype == findTypeLineBlock {
 		// Normalize input block so accidental embedded newlines in JSON strings behave sensibly.
 		block = ioutil.NormalizeLineBlockInput(args.MatchLines)
+		beforeBlock = ioutil.NormalizeLineBlockInput(args.BeforeLines)
+		afterBlock = ioutil.NormalizeLineBlockInput(args.AfterLines)
 
 		if len(block) == 0 {
 			return nil, errors.New("matchLines is required for queryType=lineBlock")
@@ -226,17 +254,32 @@ func findText(ctx context.Context, args FindTextArgs, p fspolicy.FSPolicy) (*Fin
 			)
 		}
 
+		beforeContext := make([]FindTextLine, 0, max(0, startIdx-ctxStart))
+		matched := make([]FindTextLine, 0, endIdx-startIdx+1)
+		afterContext := make([]FindTextLine, 0, max(0, ctxEnd-endIdx))
 		context := make([]FindTextLine, 0, nCtx)
 		for i := ctxStart; i <= ctxEnd; i++ {
-			context = append(context, FindTextLine{
+			line := FindTextLine{
 				LineNumber: i + 1,
 				Text:       tf.Lines[i],
-			})
+			}
+			context = append(context, line)
+			switch {
+			case i < startIdx:
+				beforeContext = append(beforeContext, line)
+			case i <= endIdx:
+				matched = append(matched, line)
+			default:
+				afterContext = append(afterContext, line)
+			}
 		}
 
 		out.Matches = append(out.Matches, FindTextMatch{
 			MatchStartLine:          startIdx + 1,
 			MatchEndLine:            endIdx + 1,
+			BeforeContextLines:      beforeContext,
+			MatchedLines:            matched,
+			AfterContextLines:       afterContext,
 			MatchedLinesWithContext: context,
 		})
 		return nil
@@ -262,18 +305,18 @@ func findText(ctx context.Context, args FindTextArgs, p fspolicy.FSPolicy) (*Fin
 				continue
 			}
 
-			if err := addMatch(i, i); err != nil {
-				return nil, err
-			}
-			if len(out.Matches) >= maxMatches {
-				out.ReachedMaxMatches = true
-				break
+			if len(out.Matches) < maxMatches {
+				if err := addMatch(i, i); err != nil {
+					return nil, err
+				}
+			} else {
+				out.AdditionalMatchesOmitted++
 			}
 		}
 
 	case findTypeLineBlock:
-		// Find all occurrences of the trimmed-equal block.
-		idxs := ioutil.FindTrimmedBlockMatches(tf.Lines, block)
+		// Find all occurrences of the trimmed-equal block with optional immediate context.
+		idxs := ioutil.FindTrimmedAdjacentBlockMatches(tf.Lines, beforeBlock, block, afterBlock)
 
 		// Overlap guard: overlapping matches for blocks are confusing, fail fast.
 		if err := ioutil.EnsureNonOverlappingFixedWidth(idxs, len(block)); err != nil {
@@ -286,16 +329,17 @@ func findText(ctx context.Context, args FindTextArgs, p fspolicy.FSPolicy) (*Fin
 			}
 
 			end := start + len(block) - 1
-			if err := addMatch(start, end); err != nil {
-				return nil, err
-			}
-			if len(out.Matches) >= maxMatches {
-				out.ReachedMaxMatches = true
-				break
+			if len(out.Matches) < maxMatches {
+				if err := addMatch(start, end); err != nil {
+					return nil, err
+				}
+			} else {
+				out.AdditionalMatchesOmitted++
 			}
 		}
 	}
 
+	out.ReachedMaxMatches = out.AdditionalMatchesOmitted > 0
 	out.MatchesReturned = len(out.Matches)
 	return out, nil
 }

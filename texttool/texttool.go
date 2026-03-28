@@ -9,6 +9,12 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
+const (
+	maybeStartLineTolerance          = 3
+	maxAmbiguityDiagnosticCandidates = 5
+	ambiguityDiagnosticContextLines  = 1
+)
+
 type textToolConfig struct {
 	allowedRoots  []string
 	workBaseDir   string

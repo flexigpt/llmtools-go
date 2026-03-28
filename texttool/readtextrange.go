@@ -19,9 +19,9 @@ var readTextRangeTool = spec.Tool{
 	Version:       "v1.0.0",
 	DisplayName:   "Read text range",
 
-	Description: "Read a UTF-8 text file and return lines. Start and end marker lines can be provided to narrow the range.\n" +
-		"Matching uses trimmed-space line comparisons.\n" +
-		"Returned lines are not trimmed and have an associated line number.",
+	Description: "Read a UTF-8 text file and return lines. Optional start and end marker blocks can narrow the range. " +
+		"Marker matching uses TrimSpace(line). For reliable marker selection, copy distinctive lines and avoid short generic markers. " +
+		"Returned lines preserve original text and line numbers so they can be reused in follow-up edit calls.",
 	Tags: []string{"text"},
 
 	ArgSchema: spec.JSONSchema(`{
@@ -36,13 +36,13 @@ var readTextRangeTool = spec.Tool{
 	"type": "array",
 	"items": { "type": "string" },
 	"minItems": 1,
-	"description": "Optional start marker block. Must match exactly once."
+	"description": "Optional start marker block. Must match exactly once. Prefer a distinctive multi-line block; avoid short generic markers."
 },
 "endMatchLines": {
 	"type": "array",
 	"items": { "type": "string" },
 	"minItems": 1,
-	"description": "Optional end marker block. Must match exactly once."
+	"description": "Optional end marker block. Must match exactly once. Prefer a distinctive multi-line block; avoid short generic markers."
 }
 },
 "required": ["path"],
@@ -167,7 +167,7 @@ func readTextRange(
 	nOut := selEnd - selStart + 1
 	if nOut > maxReadTextRangeOutputLines {
 		return nil, fmt.Errorf(
-			"selected range too large: %d lines (max %d). Provide startMatchLines/endMatchLines to narrow the range",
+			"selected range too large: %d lines (max %d). Provide startMatchLines/endMatchLines with distinctive marker blocks to narrow the range",
 			nOut,
 			maxReadTextRangeOutputLines,
 		)
