@@ -42,7 +42,7 @@ var runScriptToolSpec = spec.Tool{
 	"env": {
 		"type": "object",
 		"additionalProperties": { "type": "string" },
-		"description": "Environment variable overrides (merged into the process env)."
+		"description": "Environment variable overrides (merged into the process env + tool base env)."
 	},
 	"workDir": {
 		"type": "string",
@@ -337,7 +337,7 @@ func runScript(
 	}
 
 	// Select wrapper shell (concrete shell needed for quoting + execution).
-	sel, err := selectShell(interp.Shell)
+	sel, err := selectShell(ctx, interp.Shell)
 	if err != nil {
 		return nil, err
 	}
@@ -412,8 +412,8 @@ func runScript(
 		)
 	}
 
-	// Merge env like shellcommand does (process env + overrides), but no session.
-	env, err := executil.EffectiveEnv(args.Env)
+	// Merge env like shellcommand does (process env + tool base env + overrides), but no session.
+	env, err := executil.EffectiveEnvWithBase(tp.baseEnv, args.Env)
 	if err != nil {
 		return nil, err
 	}

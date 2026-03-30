@@ -1,0 +1,267 @@
+package exectool
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os/exec"
+	"runtime"
+	"strings"
+
+	"github.com/flexigpt/llmtools-go/internal/executil"
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
+)
+
+// BootstrapDefaults best-effort detects the preferred host shell and a narrow,
+// tool-useful base environment suitable for command/script execution.
+func BootstrapDefaults(ctx context.Context) (*BootstrappedDefaults, error) {
+	ctx, cancel := withBootstrapTimeout(ctx)
+	defer cancel()
+
+	sel, err := selectShell(ctx, ShellNameAuto)
+	if err != nil {
+		return nil, err
+	}
+
+	out := &BootstrappedDefaults{DefaultShell: sel.Name}
+	env, envErr := bootstrapBaseEnv(ctx, sel)
+	if envErr != nil {
+		return out, envErr
+	}
+	out.BaseEnv = env
+	return out, nil
+}
+
+func normalizeShellName(shell ShellName) (ShellName, error) {
+	s := ShellName(strings.ToLower(strings.TrimSpace(string(shell))))
+	switch s {
+	case ShellNameAuto,
+		ShellNameBash,
+		ShellNameZsh,
+		ShellNameSh,
+		ShellNameDash,
+		ShellNameKsh,
+		ShellNameFish,
+		ShellNamePwsh,
+		ShellNamePowershell,
+		ShellNameCmd:
+		return s, nil
+	default:
+		return "", fmt.Errorf("invalid shell: %q", shell)
+	}
+}
+
+func withBootstrapTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok := ctx.Deadline(); ok {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, defaultBootstrapTimeout)
+}
+
+func bootstrapBaseEnv(ctx context.Context, sel executil.SelectedShell) (map[string]string, error) {
+	args, err := bootstrapCommandArgs(sel)
+	if err != nil {
+		return nil, err
+	}
+	if len(args) == 0 {
+		return nil, errors.New("invalid bootstrap command")
+	}
+
+	//nolint:gosec // Bootstrap hand crafted.
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap env via %s failed: %w", sel.Name, err)
+	}
+
+	raw, err := parseBootstrappedEnv(string(out))
+	if err != nil {
+		return nil, err
+	}
+	filtered := filterBootstrappedEnv(raw)
+	if len(filtered) == 0 {
+		return nil, errors.New("bootstrap env produced no usable variables")
+	}
+	if err := executil.ValidateEnvMap(filtered); err != nil {
+		return nil, err
+	}
+	return filtered, nil
+}
+
+func bootstrapCommandArgs(sel executil.SelectedShell) ([]string, error) {
+	switch sel.Name {
+	case ShellNameBash, ShellNameZsh:
+		cmd := fmt.Sprintf(
+			"printf '%%s\\n' '%s'; env; printf '%%s\\n' '%s'",
+			bootstrapEnvBeginMarker,
+			bootstrapEnvEndMarker,
+		)
+		return []string{sel.Path, "-lic", cmd}, nil
+	case ShellNameFish:
+		cmd := fmt.Sprintf(
+			"printf '%%s\\n' '%s'; env; printf '%%s\\n' '%s'",
+			bootstrapEnvBeginMarker,
+			bootstrapEnvEndMarker,
+		)
+		return []string{sel.Path, "-l", "-i", "-c", cmd}, nil
+	case ShellNameSh, ShellNameDash, ShellNameKsh:
+		cmd := fmt.Sprintf(
+			"printf '%%s\\n' '%s'; env; printf '%%s\\n' '%s'",
+			bootstrapEnvBeginMarker,
+			bootstrapEnvEndMarker,
+		)
+		return []string{sel.Path, "-lc", cmd}, nil
+	case ShellNamePwsh, ShellNamePowershell:
+		cmd := fmt.Sprintf(
+			"Write-Output '%s'; Get-ChildItem Env: | ForEach-Object { '{0}={1}' -f $_.Name, $_.Value }; Write-Output '%s'",
+			bootstrapEnvBeginMarker,
+			bootstrapEnvEndMarker,
+		)
+		return []string{sel.Path, "-NoLogo", "-Command", cmd}, nil
+	case ShellNameCmd:
+		cmd := fmt.Sprintf("echo %s & set & echo %s", bootstrapEnvBeginMarker, bootstrapEnvEndMarker)
+		return []string{sel.Path, "/d", "/s", "/c", cmd}, nil
+	default:
+		return nil, fmt.Errorf("unsupported shell for bootstrap: %s", sel.Name)
+	}
+}
+
+func parseBootstrappedEnv(out string) (map[string]string, error) {
+	text := strings.ReplaceAll(out, "\r\n", "\n")
+	lines := strings.Split(text, "\n")
+	begin := -1
+	end := -1
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == bootstrapEnvBeginMarker && begin < 0 {
+			begin = i
+			continue
+		}
+		if trimmed == bootstrapEnvEndMarker && begin >= 0 {
+			end = i
+			break
+		}
+	}
+	if begin < 0 || end <= begin {
+		return nil, errors.New("could not parse bootstrapped env output")
+	}
+
+	outMap := map[string]string{}
+	for _, line := range lines[begin+1 : end] {
+		if line == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		kk := strings.TrimSpace(k)
+		if kk == "" {
+			continue
+		}
+		outMap[kk] = v
+	}
+	return outMap, nil
+}
+
+func filterBootstrappedEnv(raw map[string]string) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	out := make(map[string]string)
+	if runtime.GOOS == toolutil.GOOSWindows {
+		exact := map[string]struct{}{
+			"PATH":                    {},
+			"PATHEXT":                 {},
+			"SYSTEMROOT":              {},
+			"COMSPEC":                 {},
+			"USERPROFILE":             {},
+			"HOMEDRIVE":               {},
+			"HOMEPATH":                {},
+			"HOME":                    {},
+			"APPDATA":                 {},
+			"LOCALAPPDATA":            {},
+			"PROGRAMDATA":             {},
+			"PROGRAMFILES":            {},
+			"PROGRAMFILES(X86)":       {},
+			"COMMONPROGRAMFILES":      {},
+			"COMMONPROGRAMFILES(X86)": {},
+			"TMP":                     {},
+			"TEMP":                    {},
+			"ONEDRIVE":                {},
+			"CHOCOLATEYINSTALL":       {},
+			"JAVA_HOME":               {},
+			"GOBIN":                   {},
+			"GOPATH":                  {},
+			"GOROOT":                  {},
+			"PNPM_HOME":               {},
+			"BUN_INSTALL":             {},
+			"CARGO_HOME":              {},
+			"RUSTUP_HOME":             {},
+			"VIRTUAL_ENV":             {},
+			"CONDA_PREFIX":            {},
+			"CONDA_DEFAULT_ENV":       {},
+			"CONDA_EXE":               {},
+		}
+		prefixes := []string{"ASDF_", "PYENV_", "RBENV_", "NVM_", "VOLTA_", "SDKMAN_", "CONDA_"}
+		for k, v := range raw {
+			ck := strings.ToUpper(strings.TrimSpace(k))
+			if _, ok := exact[ck]; ok || hasAnyPrefix(ck, prefixes) {
+				out[k] = v
+			}
+		}
+		return out
+	}
+
+	exact := map[string]struct{}{
+		"PATH":              {},
+		"HOME":              {},
+		"USER":              {},
+		"LOGNAME":           {},
+		"SHELL":             {},
+		"TMPDIR":            {},
+		"TMP":               {},
+		"TEMP":              {},
+		"LANG":              {},
+		"LC_ALL":            {},
+		"LC_CTYPE":          {},
+		"TERM":              {},
+		"COLORTERM":         {},
+		"XDG_CONFIG_HOME":   {},
+		"XDG_CACHE_HOME":    {},
+		"XDG_DATA_HOME":     {},
+		"GOBIN":             {},
+		"GOPATH":            {},
+		"GOROOT":            {},
+		"JAVA_HOME":         {},
+		"PNPM_HOME":         {},
+		"BUN_INSTALL":       {},
+		"CARGO_HOME":        {},
+		"RUSTUP_HOME":       {},
+		"VIRTUAL_ENV":       {},
+		"CONDA_PREFIX":      {},
+		"CONDA_DEFAULT_ENV": {},
+		"CONDA_EXE":         {},
+	}
+	prefixes := []string{"ASDF_", "PYENV_", "RBENV_", "NVM_", "VOLTA_", "SDKMAN_", "LC_", "CONDA_"}
+	for k, v := range raw {
+		ck := strings.TrimSpace(k)
+		if _, ok := exact[ck]; ok || hasAnyPrefix(ck, prefixes) {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func hasAnyPrefix(s string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
+}

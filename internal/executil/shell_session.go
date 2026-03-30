@@ -29,8 +29,13 @@ type ShellSession struct {
 // EffectiveEnv returns the current process environment merged with overrides.
 // It is equivalent to session-less ShellSession.GetEffectiveEnv.
 func EffectiveEnv(overrides map[string]string) ([]string, error) {
-	// Nil receiver is safe: ShellSession.GetEffectiveEnv checks sess != nil before reading session state.
-	return (*ShellSession)(nil).GetEffectiveEnv(overrides)
+	return EffectiveEnvWithBase(nil, overrides)
+}
+
+// EffectiveEnvWithBase returns the current process environment merged with base env and overrides.
+func EffectiveEnvWithBase(baseEnv, overrides map[string]string) ([]string, error) {
+	// Nil receiver is safe: ShellSession.GetEffectiveEnvWithBase checks sess != nil before reading session state.
+	return (*ShellSession)(nil).GetEffectiveEnvWithBase(baseEnv, overrides)
 }
 
 func (sess *ShellSession) GetID() string {
@@ -88,6 +93,10 @@ func (sess *ShellSession) AddToEnv(additionalEnv map[string]string) error {
 }
 
 func (sess *ShellSession) GetEffectiveEnv(overrides map[string]string) ([]string, error) {
+	return sess.GetEffectiveEnvWithBase(nil, overrides)
+}
+
+func (sess *ShellSession) GetEffectiveEnvWithBase(baseEnv, overrides map[string]string) ([]string, error) {
 	// Start with current process env.
 	envMap := map[string]envEntry{}
 
@@ -104,6 +113,30 @@ func (sess *ShellSession) GetEffectiveEnv(overrides map[string]string) ([]string
 		}
 	}
 
+	applyEnv := func(m map[string]string, validate bool, label string) error {
+		for k, v := range m {
+			if validate {
+				if err := validateEnvKV(k, v); err != nil {
+					return fmt.Errorf("invalid %s env %q: %w", label, k, err)
+				}
+			}
+			kk := strings.TrimSpace(k)
+			if kk == "" {
+				continue
+			}
+			ck := canonicalEnvKey(kk)
+			envMap[ck] = envEntry{key: kk, val: v}
+		}
+		return nil
+	}
+
+	// Then tool base env.
+	if len(baseEnv) != 0 {
+		if err := applyEnv(baseEnv, true, "base"); err != nil {
+			return nil, err
+		}
+	}
+
 	// Then session env.
 	if sess != nil {
 		sess.mu.RLock()
@@ -113,26 +146,15 @@ func (sess *ShellSession) GetEffectiveEnv(overrides map[string]string) ([]string
 		if closed {
 			return nil, errors.New("session is closed")
 		}
-		for k, v := range snap {
-			if err := validateEnvKV(k, v); err != nil {
-				return nil, fmt.Errorf("invalid session env %q: %w", k, err)
-			}
-			kk := strings.TrimSpace(k)
-			ck := canonicalEnvKey(kk)
-			envMap[ck] = envEntry{key: kk, val: v}
+		if err := applyEnv(snap, true, "session"); err != nil {
+			return nil, err
 		}
 	}
 
 	// Then per-call overrides.
 	if len(overrides) != 0 {
-		for k, v := range overrides {
-			// Overrides are validated by validateEnvMap in ShellCommand; still normalize key.
-			kk := strings.TrimSpace(k)
-			if kk == "" {
-				continue
-			}
-			ck := canonicalEnvKey(kk)
-			envMap[ck] = envEntry{key: kk, val: v}
+		if err := applyEnv(overrides, false, "override"); err != nil {
+			return nil, err
 		}
 	}
 

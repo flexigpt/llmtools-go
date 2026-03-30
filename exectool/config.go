@@ -26,6 +26,11 @@ type execToolConfig struct {
 	blockSymlinks   bool
 	blockedCommands map[string]struct{}
 
+	defaultShell    ShellName
+	defaultShellSet bool
+	baseEnv         map[string]string
+	baseEnvSet      bool
+
 	executionPolicy ExecutionPolicy
 	runScriptPolicy RunScriptPolicy
 }
@@ -33,6 +38,9 @@ type execToolConfig struct {
 type execToolPolicy struct {
 	fsPolicy        fspolicy.FSPolicy
 	blockedCommands map[string]struct{}
+
+	defaultShell ShellName
+	baseEnv      map[string]string
 
 	executionPolicy ExecutionPolicy
 	runScriptPolicy RunScriptPolicy
@@ -53,6 +61,8 @@ func (p *execToolPolicy) Clone() *execToolPolicy {
 	} else {
 		cp.blockedCommands = nil
 	}
+
+	cp.baseEnv = maps.Clone(p.baseEnv)
 
 	if c := p.executionPolicy.Clone(); c != nil {
 		cp.executionPolicy = *c

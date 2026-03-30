@@ -179,7 +179,7 @@ func TestSelectShell_ResolveAndAuto(t *testing.T) {
 	shPath := mustLookPath(t, "sh")
 
 	// Explicit resolution.
-	sel, err := selectShell(ShellNameSh)
+	sel, err := selectShell(t.Context(), ShellNameSh)
 	if err != nil {
 		t.Fatalf("selectShell(sh) error: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestSelectShell_ResolveAndAuto(t *testing.T) {
 
 	// Auto via $SHELL should pick sh when basename is sh.
 	t.Setenv("SHELL", shPath)
-	sel, err = selectShell(ShellNameAuto)
+	sel, err = selectShell(t.Context(), ShellNameAuto)
 	if err != nil {
 		t.Fatalf("selectShell(auto) error: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestSelectShell_ResolveAndAuto(t *testing.T) {
 	}
 
 	// Invalid.
-	_, err = selectShell(ShellName("nope"))
+	_, err = selectShell(t.Context(), ShellName("nope"))
 	if err == nil || !strings.Contains(err.Error(), "invalid shell") {
 		t.Fatalf("expected invalid shell error, got: %v", err)
 	}
@@ -631,7 +631,7 @@ func newTestShellTool(t *testing.T, opts ...ExecToolOption) *ExecTool {
 
 func requireAnyShell(t *testing.T) {
 	t.Helper()
-	if _, err := selectShell(ShellNameAuto); err != nil {
+	if _, err := selectShell(t.Context(), ShellNameAuto); err != nil {
 		t.Skipf("no suitable shell found on PATH: %v", err)
 	}
 }

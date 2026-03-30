@@ -122,7 +122,7 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 	// Ensure we can pick some shell on this platform for cases that reach execution.
 	requireShell := func(t *testing.T) {
 		t.Helper()
-		if _, err := selectShell(ShellNameAuto); err != nil {
+		if _, err := selectShell(t.Context(), ShellNameAuto); err != nil {
 			t.Skipf("no suitable shell found: %v", err)
 		}
 	}

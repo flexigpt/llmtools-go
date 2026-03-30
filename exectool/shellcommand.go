@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -18,6 +19,11 @@ import (
 )
 
 const shellCommandFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/exectool/shellcommand.ShellCommand"
+
+const (
+	bootstrapEnvBeginMarker = "__EXECTOOL_ENV_BEGIN__"
+	bootstrapEnvEndMarker   = "__EXECTOOL_ENV_END__"
+)
 
 var shellCommandToolSpec = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
@@ -44,13 +50,13 @@ var shellCommandToolSpec = spec.Tool{
 	"env": {
 		"type": "object",
 		"additionalProperties": { "type": "string" },
-		"description": "Environment variable overrides (merged into the process env + session env)."
+		"description": "Environment variable overrides (merged into the process env + tool base env + session env)."
 	},
 	"shell": {
 		"type": "string",
 		"enum": ["auto", "bash", "zsh", "sh", "dash", "ksh", "fish", "pwsh", "powershell", "cmd"],
 		"default": "auto",
-		"description": "Which shell to run. 'auto' chooses a safe default per OS."
+		"description": "Which shell to run. Prefer 'auto' which a safe default per OS unless explicit per shell behavior is needed."
 	},
 	"executeParallel": {
 		"type": "boolean",
@@ -183,14 +189,14 @@ func shellCommand(
 		return nil, err
 	}
 
-	// Determine effective env (process env + session env + args env).
-	env, err := sess.GetEffectiveEnv(args.Env)
+	// Determine effective env (process env + tool base env + session env + args env).
+	env, err := sess.GetEffectiveEnvWithBase(tp.baseEnv, args.Env)
 	if err != nil {
 		return nil, err
 	}
 
 	// Choose shell + path.
-	sel, err := selectShell(args.Shell)
+	sel, err := selectShellWithDefault(ctx, args.Shell, tp.defaultShell)
 	if err != nil {
 		return nil, err
 	}
@@ -274,42 +280,58 @@ func normalizedCommandList(args ShellCommandArgs) []string {
 	return out
 }
 
-func selectShell(requested ShellName) (executil.SelectedShell, error) {
+func selectShell(ctx context.Context, requested ShellName) (executil.SelectedShell, error) {
+	return selectShellWithDefault(ctx, requested, "")
+}
+
+func selectShellWithDefault(ctx context.Context, requested, defaultShell ShellName) (executil.SelectedShell, error) {
 	r := strings.ToLower(strings.TrimSpace(string(requested)))
-	if r == "" {
-		r = "auto"
+	if r == "" || r == string(ShellNameAuto) {
+		d := strings.ToLower(strings.TrimSpace(string(defaultShell)))
+		if d != "" && d != string(ShellNameAuto) {
+			r = d
+		} else {
+			r = string(ShellNameAuto)
+		}
 	}
 
-	if r != "auto" {
+	if r != string(ShellNameAuto) {
 		return resolveShell(r)
 	}
+	return resolveAutoShell(ctx)
+}
 
-	// Auto.
+func resolveAutoShell(ctx context.Context) (executil.SelectedShell, error) {
 	if runtime.GOOS == toolutil.GOOSWindows {
-		// Prefer pwsh, then Windows PowerShell, then cmd.
-		if p, _ := exec.LookPath("pwsh"); p != "" {
-			return executil.SelectedShell{Name: ShellNamePwsh, Path: p}, nil
-		}
-		if p, _ := exec.LookPath("powershell"); p != "" {
-			return executil.SelectedShell{Name: ShellNamePowershell, Path: p}, nil
-		}
-		if p, _ := exec.LookPath("cmd"); p != "" {
-			return executil.SelectedShell{Name: ShellNameCmd, Path: p}, nil
-		}
-		return executil.SelectedShell{}, errors.New("no suitable shell found on windows (pwsh/powershell/cmd)")
+		return resolveWindowsAutoShell()
 	}
+	return resolveUnixAutoShell(ctx)
+}
 
-	// Unix-ish: prefer $SHELL if present, else bash/zsh/sh.
-	if sh := os.Getenv("SHELL"); sh != "" {
-		if p, err := exec.LookPath(sh); err == nil && p != "" {
-			base := ShellName(strings.ToLower(filepath.Base(p)))
-			switch base {
-			case ShellNameBash, ShellNameZsh, ShellNameSh, ShellNameDash, ShellNameKsh, ShellNameFish:
-				return executil.SelectedShell{Name: base, Path: p}, nil
-			}
-		}
+func resolveWindowsAutoShell() (executil.SelectedShell, error) {
+	// Prefer pwsh, then Windows PowerShell, then cmd.
+	if p, _ := exec.LookPath("pwsh"); p != "" {
+		return executil.SelectedShell{Name: ShellNamePwsh, Path: p}, nil
 	}
+	if p, _ := exec.LookPath("powershell"); p != "" {
+		return executil.SelectedShell{Name: ShellNamePowershell, Path: p}, nil
+	}
+	if p, _ := exec.LookPath("cmd"); p != "" {
+		return executil.SelectedShell{Name: ShellNameCmd, Path: p}, nil
+	}
+	return executil.SelectedShell{}, errors.New("no suitable shell found on windows (pwsh/powershell/cmd)")
+}
 
+func resolveUnixAutoShell(ctx context.Context) (executil.SelectedShell, error) {
+	// Prefer $SHELL if present.
+	if sel, ok := selectedShellFromCandidate(os.Getenv("SHELL")); ok {
+		return sel, nil
+	}
+	// Then try the user's configured login shell.
+	if sel, ok := lookupAccountLoginShell(ctx); ok {
+		return sel, nil
+	}
+	// Finally fall back by platform/tool availability.
 	if p, _ := exec.LookPath(string(ShellNameBash)); p != "" {
 		return executil.SelectedShell{Name: ShellNameBash, Path: p}, nil
 	}
@@ -329,6 +351,110 @@ func selectShell(requested ShellName) (executil.SelectedShell, error) {
 		return executil.SelectedShell{Name: ShellNameFish, Path: p}, nil
 	}
 	return executil.SelectedShell{}, errors.New("no suitable shell found (bash/zsh/sh)")
+}
+
+func lookupAccountLoginShell(ctx context.Context) (executil.SelectedShell, bool) {
+	u, err := user.Current()
+	if err != nil || u == nil {
+		return executil.SelectedShell{}, false
+	}
+	username := strings.TrimSpace(u.Username)
+	if username == "" {
+		return executil.SelectedShell{}, false
+	}
+
+	if runtime.GOOS == toolutil.GOOSDarwin {
+		if sel, ok := selectedShellFromCandidate(lookupDarwinUserShell(ctx, username)); ok {
+			return sel, true
+		}
+	}
+	if sel, ok := selectedShellFromCandidate(lookupGetentUserShell(ctx, username)); ok {
+		return sel, true
+	}
+	if sel, ok := selectedShellFromCandidate(lookupPasswdUserShell(username)); ok {
+		return sel, true
+	}
+	return executil.SelectedShell{}, false
+}
+
+func selectedShellFromCandidate(candidate string) (executil.SelectedShell, bool) {
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return executil.SelectedShell{}, false
+	}
+
+	p, err := exec.LookPath(candidate)
+	if err != nil || p == "" {
+		return executil.SelectedShell{}, false
+	}
+
+	base := strings.ToLower(filepath.Base(p))
+	if runtime.GOOS == toolutil.GOOSWindows {
+		switch ext := strings.ToLower(filepath.Ext(base)); ext {
+		case ".exe", ".com", ".bat", ".cmd":
+			base = strings.TrimSuffix(base, ext)
+		}
+	}
+
+	norm, err := normalizeShellName(ShellName(base))
+	if err != nil || norm == ShellNameAuto {
+		return executil.SelectedShell{}, false
+	}
+	return executil.SelectedShell{Name: norm, Path: p}, true
+}
+
+func lookupDarwinUserShell(ctx context.Context, username string) string {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	//nolint:gosec // Shell discovery hand crafted.
+	out, err := exec.CommandContext(ctx, "dscl", ".", "-read", "/Users/"+username, "UserShell").Output()
+	if err != nil {
+		return ""
+	}
+	for line := range strings.SplitSeq(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if v, ok := strings.CutPrefix(line, "UserShell:"); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func lookupGetentUserShell(ctx context.Context, username string) string {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "getent", "passwd", username).Output()
+	if err != nil {
+		return ""
+	}
+	line := strings.TrimSpace(string(out))
+	if line == "" {
+		return ""
+	}
+	parts := strings.Split(line, ":")
+	if len(parts) < 7 {
+		return ""
+	}
+	return strings.TrimSpace(parts[6])
+}
+
+func lookupPasswdUserShell(username string) string {
+	b, err := os.ReadFile("/etc/passwd")
+	if err != nil {
+		return ""
+	}
+	for line := range strings.SplitSeq(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.Split(line, ":")
+		if len(parts) < 7 || parts[0] != username {
+			continue
+		}
+		return strings.TrimSpace(parts[6])
+	}
+	return ""
 }
 
 func resolveShell(name string) (executil.SelectedShell, error) {

@@ -15,11 +15,20 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
+const defaultBootstrapTimeout = 10 * time.Second
+
+// BootstrappedDefaults contains best-effort host-derived defaults suitable for ExecTool setup.
+type BootstrappedDefaults struct {
+	DefaultShell ShellName
+	BaseEnv      map[string]string
+}
+
 // ExecTool is an instance-owned execution tool runner.
 // It centralizes:
 //   - path sandboxing (workBaseDir, allowedRoots, blockSymlinks)
 //   - execution policy (timeouts/output/limits)
 //   - command blocklist
+//   - default shell / bootstrapped base environment
 //   - session store for shellcommand
 //   - runscript policy (optional tool).
 type ExecTool struct {
@@ -56,6 +65,36 @@ func WithBlockSymlinks(block bool) ExecToolOption {
 func WithExecutionPolicy(p ExecutionPolicy) ExecToolOption {
 	return func(et *ExecTool) error {
 		et.cfg.executionPolicy = p
+		return nil
+	}
+}
+
+// WithDefaultShell configures the default shell used when ShellCommandArgs.Shell is omitted or "auto".
+func WithDefaultShell(shell ShellName) ExecToolOption {
+	return func(et *ExecTool) error {
+		norm, err := normalizeShellName(shell)
+		if err != nil {
+			return err
+		}
+		if norm != ShellNameAuto {
+			if _, err := selectShell(context.Background(), norm); err != nil {
+				return err
+			}
+		}
+		et.cfg.defaultShell = norm
+		et.cfg.defaultShellSet = true
+		return nil
+	}
+}
+
+// WithBaseEnv configures a stable base environment merged into executions after the process env.
+func WithBaseEnv(env map[string]string) ExecToolOption {
+	return func(et *ExecTool) error {
+		if err := executil.ValidateEnvMap(env); err != nil {
+			return err
+		}
+		et.cfg.baseEnv = maps.Clone(env)
+		et.cfg.baseEnvSet = true
 		return nil
 	}
 }
@@ -146,6 +185,8 @@ func NewExecTool(opts ...ExecToolOption) (*ExecTool, error) {
 		}
 	}
 
+	et.bootstrapUnsetDefaults()
+
 	// Canonicalize/initialize path policy (fspolicy is the single source of truth).
 	fsPol, err := fspolicy.New(et.cfg.workBaseDir, et.cfg.allowedRoots, et.cfg.blockSymlinks)
 	if err != nil {
@@ -161,6 +202,8 @@ func NewExecTool(opts ...ExecToolOption) (*ExecTool, error) {
 	et.toolPolicy = &execToolPolicy{
 		fsPolicy:        fsPol,
 		blockedCommands: maps.Clone(et.cfg.blockedCommands),
+		defaultShell:    et.cfg.defaultShell,
+		baseEnv:         maps.Clone(et.cfg.baseEnv),
 		executionPolicy: et.cfg.executionPolicy,
 		runScriptPolicy: rsPol,
 	}
@@ -193,6 +236,29 @@ func (et *ExecTool) snapshotPolicy() *execToolPolicy {
 		return nil
 	}
 	return p.Clone()
+}
+
+func (et *ExecTool) bootstrapUnsetDefaults() {
+	if et == nil {
+		return
+	}
+	if et.cfg.defaultShellSet && et.cfg.baseEnvSet {
+		return
+	}
+
+	defs, err := BootstrapDefaults(context.Background())
+	if err != nil && defs == nil {
+		return
+	}
+	if defs == nil {
+		return
+	}
+	if !et.cfg.defaultShellSet && defs.DefaultShell != "" {
+		et.cfg.defaultShell = defs.DefaultShell
+	}
+	if !et.cfg.baseEnvSet && len(defs.BaseEnv) != 0 {
+		et.cfg.baseEnv = maps.Clone(defs.BaseEnv)
+	}
 }
 
 func DefaultExecutionPolicy() ExecutionPolicy {

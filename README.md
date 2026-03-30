@@ -5,7 +5,7 @@
 [![lint](https://github.com/flexigpt/llmtools-go/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/flexigpt/llmtools-go/actions/workflows/lint.yml)
 [![test](https://github.com/flexigpt/llmtools-go/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/flexigpt/llmtools-go/actions/workflows/test.yml)
 
-Go-native and cross-platform "tool" implementations for common local tasks, plus a small registry that makes them easy to expose to LLM tool-calling systems.
+Go-native, cross-platform tools for common local tasks, plus a small registry that makes them easy to expose to LLM tool-calling systems.
 
 ## Table of contents <!-- omit in toc -->
 
@@ -17,90 +17,96 @@ Go-native and cross-platform "tool" implementations for common local tasks, plus
 - [Package overview](#package-overview)
 - [Registry](#registry)
 - [Tool outputs](#tool-outputs)
-- [Sandboxing and path policy](#sandboxing-and-path-policy)
+- [Path policy](#path-policy)
 - [Examples](#examples)
 - [Exec tool notes](#exec-tool-notes)
+  - [Quick model](#quick-model)
+  - [Shell selection and bootstrap defaults](#shell-selection-and-bootstrap-defaults)
+  - [Working directory behavior](#working-directory-behavior)
+  - [Environment behavior](#environment-behavior)
+  - [Shell sessions: what persists and what does not](#shell-sessions-what-persists-and-what-does-not)
+  - [Command lookup and login-shell behavior](#command-lookup-and-login-shell-behavior)
+  - [Run Script behavior](#run-script-behavior)
+  - [Execution limits and blocking](#execution-limits-and-blocking)
+  - [Important behavioral notes](#important-behavioral-notes)
 - [Development](#development)
 - [License](#license)
 
 ## Features at a glance
 
-- Sandboxed execution for all tools under a enforced allowed roots and work directory.
-- Symlinks are rejected throughout for safety.
-- All implementations are cross-platform supporting lin/win/mac systems.
-- Normalized tool spec to support text/image/binary output formats.
-- Fully modular code for any customizations needed.
+- Cross-platform implementations for Linux, macOS, and Windows.
+- Instance-owned tools with configurable path policy.
+- Deterministic text-editing tools for line-oriented workflows.
+- Shell command and script execution with timeouts, output caps, and command blocking.
+- Structured tool manifests and normalized outputs for text, files, and images.
 
 ### File system tools
 
-- Grouped under: `fstool`.
+Grouped under `fstool`.
 
-- `readfile`:
-  - `encoding=text`: reads UTF-8 text only (rejects non-text), with PDF text extraction support when the file is a PDF.
+- `readfile`
+  - `encoding=text`: reads UTF-8 text and supports extracted text for PDFs.
   - `encoding=binary`: returns base64, emitting `image` outputs for `image/*` MIME types and `file` outputs otherwise.
-  - Safety: size caps and symlink-traversal hardening.
+  - Safety: size caps and symlink hardening.
 
-- `writefile`:
-  - `encoding=text`: write UTF-8 content
-  - `encoding=binary`: write base64-decoded bytes
+- `writefile`
+  - `encoding=text`: write UTF-8 content.
+  - `encoding=binary`: write base64-decoded bytes.
   - Options: `overwrite`, `createParents` (bounded), atomic writes, size caps, symlink hardening.
 
-- `deletefile`:
-  - “Safe delete” by moving to trash.
-  - `trashDir=auto` tries system trash when possible; falls back to a local `.trash` directory.
-  - Uses unique naming, best-effort cross-device handling, and avoids destructive removal when possible.
+- `deletefile`
+  - Safe delete by moving to trash.
+  - `trashDir=auto` tries system trash when possible and otherwise falls back to a local `.trash` directory.
 
-- `searchfiles`: Recursively search file paths and UTF-8 text content using RE2 regex.
-
-- `listdirectory`: List entries under a directory, optionally filtered by glob.
-
-- `statpath`: Inspect a path (exists, size, timestamps, directory flag).
-- `mimeforpath`: Best-effort MIME type detection (extension + sniffing).
+- `searchfiles`: recursively search file paths and UTF-8 text content using RE2 regex.
+- `listdirectory`: list entries under a directory, optionally filtered by glob.
+- `statpath`: inspect a path.
+- `mimeforpath`: best-effort MIME type detection.
 - `mimeforextension`: MIME lookup for an extension.
 
 ### Execute tools
 
-- Grouped under: `exectool`
+Grouped under `exectool`.
 
-- `shellcommand`:
-  - Execute one or more commands via a selected shell (`auto`, `sh`, `bash`, `pwsh`, `powershell`, `cmd`, etc).
-  - Enforces timeouts/output caps/command caps.
-  - Supports session-like persistence for workdir and environment across calls (note: _not_ a persistent shell process).
+- `shellcommand`
+  - Execute one or more shell commands via a selected shell.
+  - Supports session-like persistence for `workDir` and `env` across calls.
+  - Sessions are not persistent shell processes.
 
-- `runscript`:
+- `runscript`
   - Run an existing script from disk with arguments and environment overrides.
-  - Extension-based interpreter selection via `RunScriptPolicy` (host-configurable).
+  - Uses extension-based interpreter selection via `RunScriptPolicy`.
 
 ### Text processing tools
 
-- Grouped under: `texttool`
+Grouped under `texttool`.
 
-- `readtextrange`: Read lines, optionally constrained by unique start/end marker blocks.
-- `findtext`: Find matches with context (modes: substring, regex (RE2/Go), exact line-block).
-- `inserttextlines`: Insert lines at start/end or relative to a uniquely matched anchor block.
-- `replacetextlines`: Replace exact line blocks; can disambiguate with immediate adjacent `beforeLines`/`afterLines`.
-- `deletetextlines`: Delete exact line blocks; can disambiguate with immediate adjacent `beforeLines`/`afterLines`.
+- `readtextrange`: read lines, optionally constrained by unique start/end marker blocks.
+- `findtext`: find matches with context.
+- `inserttextlines`: insert lines at start/end or relative to a uniquely matched anchor block.
+- `replacetextlines`: replace exact line blocks, with optional disambiguation using adjacent lines.
+- `deletetextlines`: delete exact line blocks, with optional disambiguation using adjacent lines.
 
 ### Image tools
 
-- Grouped under: `imagetool`
+Grouped under `imagetool`.
 
-- `readimage`: Read intrinsic metadata (width/height/format/MIME), optionally include base64 content.
+- `readimage`: read intrinsic metadata and optionally include base64 content.
 
 ## Package overview
 
-- `llmtools`: Registry + tool registration helpers.
-- `spec`: Tool manifests + output union types.
-- `fstool`: Filesystem tools.
-- `exectool`: Shell command execution and script execution.
-- `texttool`: Safe, deterministic line-based text editing tools.
-- `imagetool`: Image tools.
+- `llmtools`: registry and tool registration helpers.
+- `spec`: tool manifests and output union types.
+- `fstool`: filesystem tools.
+- `exectool`: shell command execution and script execution.
+- `texttool`: safe, deterministic line-based text editing tools.
+- `imagetool`: image tools.
 
 ## Registry
 
 The registry provides:
 
-- tool registration + lookup by `spec.FuncID`
+- tool registration and lookup by `spec.FuncID`
 - stable manifest ordering (`Tools()` sorted by slug + funcID)
 - per-registry default call timeout via `WithDefaultCallTimeout`
 - per-call timeout override via `llmtools.WithCallTimeout(...)`
@@ -109,59 +115,231 @@ The registry provides:
 ## Tool outputs
 
 - `Registry.Call` returns `[]spec.ToolOutputUnion`.
+- Most tools are registered via `RegisterTypedAsTextTool`, which wraps the Go result as JSON and returns it as a single `text` output item.
+- Tools that naturally return binary or image data can emit typed `image` or `file` outputs.
 
-- The call wrapper can modify the union to support two common patterns:
-  - Structured JSON-as-text (most tools)
-    - Most tools are registered via `RegisterTypedAsTextTool`, which wraps the tool’s Go output as JSON and returns it as a single `text` output item.
+## Path policy
 
-  - Typed content outputs
-    - `text` output for UTF-8 text / extracted PDF text
-    - `image` output for images when `encoding=binary`
-    - `file` output for all other binaries when `encoding=binary`
-    - E.g.: `readfile`: This output makes `readfile` suitable for LLM systems that support multi-modal/file outputs.
-
-## Sandboxing and path policy
-
-All `Tools` are are _instance-owned_ tools. Hosts can configure:
+All tools are instance-owned. Hosts can configure:
 
 - `workBaseDir`: base directory for resolving relative paths
-- `allowedRoots`: optional allowlist roots; when set, all resolved paths must stay within these roots
+- `allowedRoots`: optional allowlist roots; when set, resolved tool paths must stay within these roots
+- `blockSymlinks`: optional symlink hardening for supported operations
 
-This is the recommended way to run the tools safely inside a sandbox (for example, inside a temp workspace or per-user directory).
+This is path policy, not a general OS sandbox for child processes.
 
 ## Examples
 
 All examples are provided as end-to-end integration tests that:
 
 - start from a registry
-- register tools (sandboxed to a temp directory)
-- execute realistic sequences: read/modify loops, text edits, shell sessions, script execution, binary/image workflows
+- register tools scoped to a temp directory
+- execute realistic read/modify loops, text edits, shell sessions, script execution, and binary/image workflows
 
 Examples:
 
-- Text read/modify loop (find/replace/insert/delete + verification): [`text test`](internal/integration/text_test.go)
-- Filesystem + MIME + safe delete (trash) + binary/image flows: [`fs + image test`](internal/integration/fs_image_test.go)
-- Shell sessions + environment persistence + runscript: [`exec test`](internal/integration/exec_test.go)
+- Text read/modify loop: [`text test`](internal/integration/text_test.go)
+- Filesystem, MIME, safe delete, binary, and image flows: [`fs + image test`](internal/integration/fs_image_test.go)
+- Shell sessions, environment persistence, and `runscript`: [`exec test`](internal/integration/exec_test.go)
 
 ## Exec tool notes
 
-- OS support
-  - Cross-platform shell selection: `auto` chooses a safe default per OS.
-  - Windows prefers `pwsh`, then Windows PowerShell, then `cmd`.
+### Quick model
 
-- Timeouts
-  - The registry may enforce a call timeout (`WithDefaultCallTimeout`).
-  - `shellcommand` and `runscript` also enforce execution policy timeouts.
-  - Ensure the registry timeout is >= tool execution timeout (or set registry timeout to 0) to avoid premature cancellation.
+For `exectool`, the most useful mental model is:
 
-- Safety knobs
-  - `ExecutionPolicy` caps total commands, command length, output bytes, and timeout.
-  - “Hard blocked” commands are always blocked.
-  - Heuristic checks (fork-bomb/backgrounding patterns) can be toggled via `AllowDangerous`.
+- `workBaseDir` chooses the default base for relative paths.
+- `shellcommand.workDir` chooses the actual child-process working directory.
+- `shellcommand.env` and `runscript.env` add per-call environment overrides.
+- Shell sessions persist tool-managed `workDir` and `env`, not shell process state.
+- Commands are executed in fresh child processes, not in a long-lived interactive terminal.
 
-- RunScriptPolicy
-  - Interpreter selection is extension-based and host-configurable.
-  - Hosts can tighten allowed extensions and interpreter mappings.
+### Shell selection and bootstrap defaults
+
+`shellcommand` supports explicit shell selection with:
+
+- `auto`
+- `bash`, `zsh`, `sh`, `dash`, `ksh`, `fish`
+- `pwsh`, `powershell`, `cmd`
+
+`ExecTool` also supports tool-level defaults:
+
+- `WithDefaultShell(...)`
+- `WithBaseEnv(...)`
+
+If the caller does not provide them, `NewExecTool(...)` best-effort bootstraps defaults:
+
+- detects a preferred shell
+- captures a narrow, execution-oriented base environment
+
+Auto shell detection order is:
+
+- Unix/macOS:
+  1. `$SHELL`
+  2. account login shell from the host
+  3. fallback by platform/tool availability
+- Windows:
+  1. `pwsh`
+  2. `powershell`
+  3. `cmd`
+
+You can also call `BootstrapDefaults(ctx)` directly and pass the results yourself.
+
+```go
+ctx := context.Background()
+defs, _ := exectool.BootstrapDefaults(ctx)
+
+tool, err := exectool.NewExecTool(
+   exectool.WithWorkBaseDir(projectDir),
+   exectool.WithDefaultShell(defs.DefaultShell),
+   exectool.WithBaseEnv(defs.BaseEnv),
+)
+```
+
+### Working directory behavior
+
+`shellcommand` resolves working directory in this order:
+
+1. `args.workDir`
+2. session workdir
+3. tool `workBaseDir`
+
+Key points:
+
+- If `workDir` is omitted and there is no session workdir, execution starts in the tool `workBaseDir`.
+- If `workBaseDir` is omitted, the path policy falls back to the current process working directory unless `allowedRoots` is set, in which case it defaults to the first canonical allowed root.
+- Relative paths are resolved against `workBaseDir` unless a more specific absolute/derived path is supplied by the tool logic.
+
+For stable desktop-app behavior, hosts should usually:
+
+- set `workBaseDir` explicitly
+- pass an absolute per-call `workDir` for the active project/workspace
+
+### Environment behavior
+
+Effective environment merge order is:
+
+- `shellcommand`
+  1. current process environment
+  2. tool base env (`WithBaseEnv` or bootstrapped defaults)
+  3. session env
+  4. per-call `env`
+
+- `runscript`
+  1. current process environment
+  2. tool base env (`WithBaseEnv` or bootstrapped defaults)
+  3. per-call `env`
+
+Bootstrapped base env is intentionally filtered. It keeps variables that are usually relevant to command and interpreter resolution, for example:
+
+- command lookup: `PATH`, `PATHEXT`
+- home/temp/runtime basics: `HOME`, `USERPROFILE`, `TMP`, `TEMP`, `TMPDIR`, `SHELL`, `COMSPEC`, app-data dirs
+- locale basics: `LANG`, `LC_*`, `TERM`
+- common toolchain/version-manager variables: `ASDF_*`, `PYENV_*`, `NVM_*`, `VOLTA_*`, `SDKMAN_*`, `GOPATH`, `GOBIN`, `JAVA_HOME`, `PNPM_HOME`, `CARGO_HOME`, `CONDA_*`
+
+This avoids importing unrelated prompt/theme variables while still making command lookup and common toolchains behave more like the user’s shell.
+
+### Shell sessions: what persists and what does not
+
+`shellcommand` sessions are persistent tool state, not persistent shell processes.
+
+What persists across calls when you reuse `sessionID`:
+
+- `workDir` passed as a tool argument
+- `env` passed as a tool argument
+
+What does not persist:
+
+- `cd ...` issued inside a command string
+- `export FOO=...` issued inside a command string
+- aliases, functions, shell options, sourced files
+- any in-memory shell state
+
+So this works predictably:
+
+```json
+{
+  "workDir": "/repo",
+  "commands": ["go test ./..."]
+}
+```
+
+But this is not persistent across separate command entries or later calls:
+
+```json
+{
+  "commands": ["cd /repo", "go test ./..."]
+}
+```
+
+Each command entry is executed in a fresh shell process.
+
+### Command lookup and login-shell behavior
+
+Working directory and command lookup are separate concerns.
+
+- Working directory controls where the child process starts.
+- Command lookup for bare names like `golangci-lint` depends on `PATH` and shell behavior.
+
+Important nuance:
+
+- Commands are executed using non-persistent shell invocations.
+- You should not assume they behave exactly like an interactive terminal.
+- On Unix, `zsh -c`/`bash -c` behavior differs from an interactive login terminal.
+- On PowerShell, execution uses explicit non-interactive flags.
+
+That is why `BootstrapDefaults(...)` exists: it captures a stable, tool-useful environment once, instead of relying on every command to run as an interactive login shell.
+
+For predictable command execution, hosts should prefer:
+
+- explicit `workDir`
+- explicit or bootstrapped base env
+- explicit `shell` or `WithDefaultShell(...)`
+- absolute executable paths when needed
+
+### Run Script behavior
+
+`runscript`:
+
+- executes a pre-existing script from disk
+- validates the script path through path policy
+- selects how to invoke the script from `RunScriptPolicy`
+
+Default policy includes mappings such as:
+
+- `.sh` -> shell mode with `sh`
+- `.bash` -> shell mode with `bash`
+- `.zsh` -> shell mode with `zsh`
+- `.ps1` -> direct PowerShell execution
+- `.py` -> interpreter mode with `python3` on Unix and `python` on Windows
+
+Behavioral notes:
+
+- `runscript` inherits tool base env and per-call env.
+- Interpreter availability still depends on the effective environment, especially `PATH`.
+
+### Execution limits and blocking
+
+`ExecutionPolicy` controls:
+
+- timeout
+- output caps
+- max commands
+- max command length
+
+There is also a non-overridable hard blocklist of command names and some heuristic blocking for obviously unsafe shell patterns.
+
+The registry may also impose a call timeout. If you use both registry-level and tool-level timeouts, ensure the registry timeout is not shorter than the exec-tool timeout.
+
+### Important behavioral notes
+
+- `executeParallel=true` does not run commands concurrently. It means commands are treated as independent and execution does not stop on the first non-zero result.
+- `shellcommand` executes each command entry separately. If you need shell chaining semantics, put them in one command string, for example `cd repo && go test ./...`.
+- `workBaseDir` is a default anchor, not a persistent current-directory concept by itself.
+- If you omit both `workBaseDir` and `allowedRoots`, relative/default behavior falls back to the host process working directory.
+- If you set `allowedRoots` but omit `workBaseDir`, the base defaults to the first canonical allowed root.
+- `allowedRoots` constrains tool-resolved paths; it does not turn child processes into a full OS sandbox.
+- For packaged desktop apps, relying on ambient process cwd or ambient process env is usually less stable than passing explicit values.
 
 ## Development
 
@@ -169,7 +347,7 @@ Examples:
 - Useful scripts are defined in `taskfile.yml`; requires [Task](https://taskfile.dev/).
 - Bug reports and PRs are welcome:
   - Keep the public API (`package llmtools` and `spec`) small and intentional.
-  - Avoid leaking provider‑specific types through the public surface; put them under `internal/`.
+  - Avoid leaking provider-specific types through the public surface; put them under `internal/`.
   - Please run tests and linters before sending a PR.
 
 ## License
