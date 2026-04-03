@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/flexigpt/llmtools-go/internal/executil"
+	"github.com/flexigpt/llmtools-go/internal/logutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
@@ -32,25 +33,6 @@ func BootstrapDefaults(ctx context.Context) (*BootstrappedDefaults, error) {
 	return out, nil
 }
 
-func normalizeShellName(shell ShellName) (ShellName, error) {
-	s := ShellName(strings.ToLower(strings.TrimSpace(string(shell))))
-	switch s {
-	case ShellNameAuto,
-		ShellNameBash,
-		ShellNameZsh,
-		ShellNameSh,
-		ShellNameDash,
-		ShellNameKsh,
-		ShellNameFish,
-		ShellNamePwsh,
-		ShellNamePowershell,
-		ShellNameCmd:
-		return s, nil
-	default:
-		return "", fmt.Errorf("invalid shell: %q", shell)
-	}
-}
-
 func withBootstrapTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -70,6 +52,29 @@ func bootstrapBaseEnv(ctx context.Context, sel executil.SelectedShell) (map[stri
 		return nil, errors.New("invalid bootstrap command")
 	}
 
+	// In Flatpak: try running the bootstrap command on the host first so that
+	// the user's real login shell, PATH, and tool-manager vars are captured.
+	if executil.HostSpawnAvailable(ctx) {
+		hostArgs, _ := executil.PrependHostSpawn(ctx, args)
+		//nolint:gosec // Bootstrap hand-crafted.
+		cmd := exec.CommandContext(ctx, hostArgs[0], hostArgs[1:]...)
+		if out, err := cmd.CombinedOutput(); err == nil {
+			if env, parseErr := parseAndFilterBootstrapEnv(string(out)); parseErr == nil {
+				return env, nil
+			} else {
+				logutil.WarnContext(
+					ctx,
+					"exectool: bootstrap parse via host-spawn failed: retrying direct",
+					"err",
+					parseErr,
+				)
+			}
+		} else {
+			logutil.WarnContext(ctx, "exectool: bootstrap exec via host-spawn failed: retrying direct", "err", err)
+		}
+	}
+
+	// Direct execution (non-Flatpak, or host-spawn fallback).
 	//nolint:gosec // Bootstrap hand crafted.
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	out, err := cmd.CombinedOutput()
@@ -77,7 +82,13 @@ func bootstrapBaseEnv(ctx context.Context, sel executil.SelectedShell) (map[stri
 		return nil, fmt.Errorf("bootstrap env via %s failed: %w", sel.Name, err)
 	}
 
-	raw, err := parseBootstrappedEnv(string(out))
+	return parseAndFilterBootstrapEnv(string(out))
+}
+
+// parseAndFilterBootstrapEnv parses raw bootstrap output, filters to useful
+// variables, and validates the result.
+func parseAndFilterBootstrapEnv(output string) (map[string]string, error) {
+	raw, err := parseBootstrappedEnv(output)
 	if err != nil {
 		return nil, err
 	}

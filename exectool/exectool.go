@@ -72,7 +72,7 @@ func WithExecutionPolicy(p ExecutionPolicy) ExecToolOption {
 // WithDefaultShell configures the default shell used when ShellCommandArgs.Shell is omitted or "auto".
 func WithDefaultShell(shell ShellName) ExecToolOption {
 	return func(et *ExecTool) error {
-		norm, err := normalizeShellName(shell)
+		norm, err := executil.NormalizeShellName(shell)
 		if err != nil {
 			return err
 		}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/flexigpt/llmtools-go/internal/executil"
+	"github.com/flexigpt/llmtools-go/internal/logutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
@@ -296,7 +297,7 @@ func selectShellWithDefault(ctx context.Context, requested, defaultShell ShellNa
 	}
 
 	if r != string(ShellNameAuto) {
-		return resolveShell(r)
+		return resolveShell(ctx, r)
 	}
 	return resolveAutoShell(ctx)
 }
@@ -323,6 +324,14 @@ func resolveWindowsAutoShell() (executil.SelectedShell, error) {
 }
 
 func resolveUnixAutoShell(ctx context.Context) (executil.SelectedShell, error) {
+	// In Flatpak: prefer querying the host for the user's real shell.
+	if executil.HostSpawnAvailable(ctx) {
+		if sel, ok := executil.ResolveHostAutoShell(ctx); ok {
+			return sel, nil
+		}
+		logutil.WarnContext(ctx, "exectool: host shell detection failed; falling back to sandbox shell detection")
+	}
+
 	// Prefer $SHELL if present.
 	if sel, ok := selectedShellFromCandidate(os.Getenv("SHELL")); ok {
 		return sel, nil
@@ -396,7 +405,7 @@ func selectedShellFromCandidate(candidate string) (executil.SelectedShell, bool)
 		}
 	}
 
-	norm, err := normalizeShellName(ShellName(base))
+	norm, err := executil.NormalizeShellName(ShellName(base))
 	if err != nil || norm == ShellNameAuto {
 		return executil.SelectedShell{}, false
 	}
@@ -457,10 +466,23 @@ func lookupPasswdUserShell(username string) string {
 	return ""
 }
 
-func resolveShell(name string) (executil.SelectedShell, error) {
+func resolveShell(ctx context.Context, name string) (executil.SelectedShell, error) {
 	shellName := ShellName(name)
 	switch shellName {
 	case ShellNameBash, ShellNameZsh, ShellNameSh, ShellNameDash, ShellNameKsh, ShellNameFish:
+		// In Flatpak: resolve the shell path on the host, not the sandbox.
+		if executil.HostSpawnAvailable(ctx) {
+			rctx, rcancel := context.WithTimeout(ctx, 3*time.Second)
+			defer rcancel()
+			if out, err := executil.HostExec(rctx, "sh", "-c", "command -v "+name); err == nil {
+				p := strings.TrimSpace(string(out))
+				if p != "" {
+					return executil.SelectedShell{Name: shellName, Path: p}, nil
+				}
+			}
+			logutil.WarnContext(ctx, "exectool: host lookup for shell failed; trying sandbox PATH", "shellname", name)
+		}
+
 		p, err := exec.LookPath(name)
 		if err != nil {
 			return executil.SelectedShell{}, fmt.Errorf("shell not found: %s", name)
