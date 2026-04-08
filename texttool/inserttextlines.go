@@ -24,55 +24,54 @@ var insertTextLinesTool = spec.Tool{
 	Version:       "v1.0.0",
 	DisplayName:   "Insert text lines",
 	Description: "Insert lines into a UTF-8 text file at start/end or relative to a uniquely matched anchor block. " +
-		"Anchor matching compares TrimSpace(line). Prefer a distinctive multi-line anchor. " +
-		"Avoid generic anchors such as blank lines, braces, import blocks, or repeated one-line statements. " +
-		"If the anchor may repeat, add immediate anchorBeforeLines/anchorAfterLines. " +
-		"maybeStartLine can softly prefer a nearby anchor, but the tool still fails if the call is not unambiguous.",
+		"Before calling for beforeAnchor/afterAnchor, locate the anchor with find/read tools unless you already have exact text and line numbers. " +
+		"Anchor matching compares TrimSpace(line). Use a pointed exact anchor of > 2 consecutive lines, add anchorBeforeLines/anchorAfterLines when the anchor may repeat, and pass maybeStartLine from the observed line number when relevant. " +
+		"Do not insert against a generic or repeated anchor. The tool fails if the anchor is not unique.",
 	Tags: []string{"text"},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",
 "type": "object",
 "properties": {
-	"path": {
-		"type": "string",
-		"description": "Path of the UTF-8 text file."
-	},
-	"position": {
-		"type": "string",
-		"enum": ["start", "end", "beforeAnchor", "afterAnchor"],
-		"description": "Where to insert the new lines.",
-		"default": "end"
-	},
-	"linesToInsert": {
-		"type": "array",
-		"items": { "type": "string" },
-		"minItems": 1,
-		"description": "Lines to insert. These are written exactly as provided. Newline characters inside items are allowed and are treated as line breaks."
-	},
-	"anchorMatchLines": {
-		"type": "array",
-		"items": { "type": "string" },
-		"minItems": 1,
-		"description": "Anchor block to match using TrimSpace comparison. Required for position=beforeAnchor/afterAnchor. Prefer > 2 consecutive lines; avoid short generic anchors."
-	},
-	"anchorBeforeLines": {
-		"type": "array",
-		"items": { "type": "string" },
-		"minItems": 1,
-		"description": "Optional immediate-adjacent lines that must appear directly before anchorMatchLines. Use 2-5 neighboring lines to disambiguate."
-	},
-	"anchorAfterLines": {
-		"type": "array",
-		"items": { "type": "string" },
-		"minItems": 1,
-		"description": "Optional immediate-adjacent lines that must appear directly after anchorMatchLines. Use 2-5 neighboring lines to disambiguate."
-	},
-	"maybeStartLine": {
-		"type": "integer",
-		"minimum": 1,
-		"description": "Optional 1-based approximate start line hint for the anchor. If several anchors match, the tool will prefer a uniquely closest nearby match within a small built-in tolerance; otherwise it still fails and reports candidates."
-	}
+"path": {
+	"type": "string",
+	"description": "Path of the UTF-8 text file."
+},
+"position": {
+	"type": "string",
+	"enum": ["start", "end", "beforeAnchor", "afterAnchor"],
+	"description": "Where to insert the new lines.",
+	"default": "end"
+},
+"linesToInsert": {
+	"type": "array",
+	"items": { "type": "string" },
+	"minItems": 1,
+	"description": "Lines to insert. These are written exactly as provided. Newline characters inside items are allowed and are treated as line breaks."
+},
+"anchorMatchLines": {
+	"type": "array",
+	"items": { "type": "string" },
+	"minItems": 1,
+	"description": "Anchor block copied exactly from the file. Required for position=beforeAnchor/afterAnchor. Prefer a distinctive block of > 2 consecutive lines. Do not use short generic anchors."
+},
+"anchorBeforeLines": {
+	"type": "array",
+	"items": { "type": "string" },
+	"minItems": 1,
+	"description": "Optional exact immediate-adjacent lines copied from the file that must appear directly before anchorMatchLines. Use 2-5 lines whenever the anchor might repeat."
+},
+"anchorAfterLines": {
+	"type": "array",
+	"items": { "type": "string" },
+	"minItems": 1,
+	"description": "Optional exact immediate-adjacent lines copied from the file that must appear directly after anchorMatchLines. Use 2-5 lines whenever the anchor might repeat."
+},
+"maybeStartLine": {
+	"type": "integer",
+	"minimum": 1,
+	"description": "Optional 1-based anchor start-line hint taken from read/find output. Supply it whenever available to point at the intended anchor. If several anchors still match, the tool only succeeds when one nearby anchor is uniquely preferred within a small built-in tolerance."
+}
 },
 "required": ["path", "linesToInsert"],
 "additionalProperties": false

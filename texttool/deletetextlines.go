@@ -19,48 +19,49 @@ var deleteTextLinesTool = spec.Tool{
 	Slug:          "deletetextlines",
 	Version:       "v1.0.0",
 	DisplayName:   "Delete text lines",
-	Description: "Delete one or more exact line-block occurrences from a UTF-8 text file. Matching compares TrimSpace(line). " +
-		"For reliable calls, prefer editing > 2 consecutive lines and use immediate beforeLines/afterLines to reduce ambiguity. " +
-		"maybeStartLine can softly prefer a nearby occurrence, but the tool still fails unless the final deletion count equals expectedDeletions.",
+	Description: "Delete a uniquely located block of lines from a UTF-8 text file. Matching compares TrimSpace(line). " +
+		"Before calling, get exact file text and line numbers with find/read tools unless you already have them. " +
+		"Use a pointed locator: copy an exact distinctive block of > 2 consecutive lines, add immediate beforeLines/afterLines when the block may repeat, and pass maybeStartLine from the observed line number when relevant. " +
+		"Do not send generic, repeated, overlapping, or conflict-prone deletions. The tool fails unless the final deletion count equals expectedDeletions.",
 	Tags: []string{"text"},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",
 "type": "object",
 "properties": {
-	"path": {
-		"type": "string",
-		"description": "Path of the UTF-8 text file."
-	},
-	"matchLines": {
-		"type": "array",
-		"items": { "type": "string" },
-		"minItems": 1,
-		"description": "Distinctive block of lines to delete. Prefer editing > 2 consecutive lines. Avoid generic single lines such as blank lines, braces, or repeated return statements. Newline characters inside items are allowed and treated as line breaks."
-	},
-	"beforeLines": {
-		"type": "array",
-		"items": { "type": "string" },
-		"minItems": 1,
-		"description": "Optional immediate-adjacent lines that must appear directly before matchLines. Use 2-5 neighboring lines to disambiguate."
-	},
-	"afterLines": {
-		"type": "array",
-		"items": { "type": "string" },
-		"minItems": 1,
-		"description": "Optional immediate-adjacent lines that must appear directly after matchLines. Use 2-5 neighboring lines to disambiguate."
-	},
-	"maybeStartLine": {
-		"type": "integer",
-		"minimum": 1,
-		"description": "Optional 1-based approximate start line hint. Best used when you expect one deletion. If several matches exist, the tool will prefer a uniquely closest nearby match within a small built-in tolerance; otherwise it still fails and reports candidates."
-	},
-	"expectedDeletions": {
-		"type": "integer",
-		"minimum": 1,
-		"default": 1,
-		"description": "Fail unless the number of deleted blocks equals this value. Leave at 1 for the common case of a single intended deletion."
-	}
+"path": {
+	"type": "string",
+	"description": "Path of the UTF-8 text file."
+},
+"matchLines": {
+	"type": "array",
+	"items": { "type": "string" },
+	"minItems": 1,
+	"description": "Exact consecutive lines to delete, copied from the file. Prefer a distinctive block of > 2 lines. Do not paraphrase. Do not use generic single lines such as blank lines, braces, or repeated return statements. Newline characters inside items are allowed and treated as line breaks."
+},
+"beforeLines": {
+	"type": "array",
+	"items": { "type": "string" },
+	"minItems": 1,
+	"description": "Optional exact immediate-adjacent lines copied from the file that must appear directly before matchLines. Use 2-5 lines whenever the target block might repeat."
+},
+"afterLines": {
+	"type": "array",
+	"items": { "type": "string" },
+	"minItems": 1,
+	"description": "Optional exact immediate-adjacent lines copied from the file that must appear directly after matchLines. Use 2-5 lines whenever the target block might repeat."
+},
+"maybeStartLine": {
+	"type": "integer",
+	"minimum": 1,
+	"description": "Optional 1-based start-line hint taken from read/find output. Supply it whenever available to point at the intended occurrence. If several matches still exist, the tool only succeeds when one nearby match is uniquely preferred within a small built-in tolerance."
+},
+"expectedDeletions": {
+	"type": "integer",
+	"minimum": 1,
+	"default": 1,
+	"description": "Fail unless the number of deleted blocks equals this value. Keep at 1 for the normal case. Do not raise this to bypass ambiguity."
+}
 },
 "required": ["path", "matchLines"],
 "additionalProperties": false

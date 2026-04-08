@@ -21,60 +21,56 @@ var findTextTool = spec.Tool{
 	Slug:          "findtext",
 	Version:       "v1.0.0",
 	DisplayName:   "Find text matches with context",
-	Description: "Search a UTF-8 text file and return matching lines or line-blocks with surrounding context. " +
-		"Use this tool before edit tools to gather exact lines and line numbers. " +
-		"substring and regex are best for discovery; lineBlock is best for validating an edit locator. " +
-		"For lineBlock mode, matching compares TrimSpace(line). Prefer a distinctive multi-line block, and add beforeLines/afterLines when the block may repeat.",
+	Description: "Locate exact edit targets in a UTF-8 text file and return matches with surrounding context and line numbers. " +
+		"Use this before insert/replace/delete whenever you need a reliable locator. Request enough context lines to build a unique follow-up change block. " +
+		"Use substring or regex to discover candidate areas, then reuse the returned exact text and line numbers in edit calls. Use lineBlock to validate that a pointed exact multi-line block is unique before editing. " +
+		"For lineBlock mode, matching compares TrimSpace(line) and works best with a distinctive > 2 line block plus beforeLines/afterLines when the block may repeat.",
 	Tags: []string{"text"},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",
 "type": "object",
 "properties": {
-	"path": {
-		"type": "string",
-		"description": "Path of the UTF-8 text file."
-	},
-	"queryType": {
-		"type": "string",
-		"enum": ["substring", "regex", "lineBlock"],
-		"default": "substring",
-		"description": "Search mode. Use substring or regex to discover candidate areas; use lineBlock when you want to validate a specific block before editing."
-	},
-	"query": {
-		"type": "string",
-		"description": "Query string for queryType=substring or regex (Go/RE2 regex). Omit for queryType=lineBlock."
-	},
-	"matchLines": {
-		"type": "array",
-		"items": { "type": "string" },
-		"minItems": 1,
-		"description": "For queryType=lineBlock only: distinctive block of lines to match. Prefer > 2 consecutive lines. Avoid generic single lines such as blank lines, braces, or repeated return statements. Newline characters in items are allowed and treated as line breaks."
-	},
-	"beforeLines": {
-		"type": "array",
-		"items": { "type": "string" },
-		"minItems": 1,
-		"description": "For queryType=lineBlock only: optional immediate-adjacent lines that must appear directly before matchLines. Use 2-5 neighboring lines to disambiguate."
-	},
-	"afterLines": {
-		"type": "array",
-		"items": { "type": "string" },
-		"minItems": 1,
-		"description": "For queryType=lineBlock only: optional immediate-adjacent lines that must appear directly after matchLines. Use 2-5 neighboring lines to disambiguate."
-	},
-	"contextLines": {
-		"type": "integer",
-		"minimum": 0,
-		"default": 5,
-		"description": "Number of lines to include before and after each returned match. Small values such as 2-8 are usually best for building follow-up edit calls."
-	},
-	"maxMatches": {
-		"type": "integer",
-		"minimum": 1,
-		"default": 10,
-		"description": "Maximum number of matches to return."
-	}
+"path": {
+	"type": "string",
+	"description": "Path of the UTF-8 text file."
+},
+"queryType": {
+	"type": "string",
+	"enum": ["substring", "regex", "lineBlock"],
+	"default": "substring",
+	"description": "Search mode. Use substring or regex to discover candidate regions. Use lineBlock to verify an exact multi-line edit locator before calling an edit tool."
+},
+"matchLines": {
+	"type": "array",
+	"items": { "type": "string" },
+	"minItems": 1,
+	"description": "For queryType=lineBlock only: exact consecutive lines copied from the file to validate an edit locator. Prefer > 2 distinctive lines. Avoid generic single lines such as blank lines, braces, or repeated return statements. Newline characters in items are allowed and treated as line breaks."
+},
+"beforeLines": {
+	"type": "array",
+	"items": { "type": "string" },
+	"minItems": 1,
+	"description": "For queryType=lineBlock only: optional exact immediate-adjacent lines copied from the file that must appear directly before matchLines. Use 2-5 lines to disambiguate repeated blocks."
+},
+"afterLines": {
+	"type": "array",
+	"items": { "type": "string" },
+	"minItems": 1,
+	"description": "For queryType=lineBlock only: optional exact immediate-adjacent lines copied from the file that must appear directly after matchLines. Use 2-5 lines to disambiguate repeated blocks."
+},
+"contextLines": {
+	"type": "integer",
+	"minimum": 0,
+	"default": 5,
+	"description": "Number of lines to include before and after each returned match. Use enough context, usually 5-20 lines, to build a unique follow-up edit call and capture a useful maybeStartLine."
+},
+"maxMatches": {
+	"type": "integer",
+	"minimum": 1,
+	"default": 10,
+	"description": "Maximum number of matches to return. Keep this reasonably small while narrowing to a unique target."
+}
 },
 "required": ["path"],
 "additionalProperties": false

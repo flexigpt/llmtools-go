@@ -18,10 +18,9 @@ var readTextRangeTool = spec.Tool{
 	Slug:          "readtextrange",
 	Version:       "v1.0.0",
 	DisplayName:   "Read text range",
-
-	Description: "Read a UTF-8 text file and return lines. Optional start and end marker blocks can narrow the range. " +
-		"Marker matching uses TrimSpace(line). For reliable marker selection, copy distinctive lines and avoid short generic markers. " +
-		"Returned lines preserve original text and line numbers so they can be reused in follow-up edit calls.",
+	Description: "Read a UTF-8 text file and return original lines with line numbers for building safe follow-up edits. " +
+		"Use this to capture exact text, enough surrounding context, and pointed marker blocks before calling replace/delete/insert. " +
+		"Optional start and end marker blocks can narrow the range. Marker matching uses TrimSpace(line), and each provided marker must match exactly once, so choose distinctive multi-line markers instead of short generic snippets.",
 	Tags: []string{"text"},
 
 	ArgSchema: spec.JSONSchema(`{
@@ -36,13 +35,13 @@ var readTextRangeTool = spec.Tool{
 	"type": "array",
 	"items": { "type": "string" },
 	"minItems": 1,
-	"description": "Optional start marker block. Must match exactly once. Prefer a distinctive multi-line block; avoid short generic markers."
+	"description": "Optional exact start marker block copied from the file. Must match exactly once. Prefer a distinctive block of > 2 lines; avoid short generic markers."
 },
 "endMatchLines": {
 	"type": "array",
 	"items": { "type": "string" },
 	"minItems": 1,
-	"description": "Optional end marker block. Must match exactly once. Prefer a distinctive multi-line block; avoid short generic markers."
+	"description": "Optional exact end marker block copied from the file. Must match exactly once. Prefer a distinctive block of > 2 lines; avoid short generic markers."
 }
 },
 "required": ["path"],
