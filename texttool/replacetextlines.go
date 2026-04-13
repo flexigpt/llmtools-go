@@ -20,9 +20,9 @@ var replaceTextLinesTool = spec.Tool{
 	Version:       "v1.0.0",
 	DisplayName:   "Replace text lines",
 	Description: "Replace a uniquely located block of lines in a UTF-8 text file with a NEW non-empty block of lines. Matching uses TrimSpace(line). " +
-		"Before calling, get exact file text and line numbers with find/read tools unless you already have them. " +
+		"The required params are: **replaceWithLines**, path, matchLines. The tool fails if any required param is missing. " +
 		"Use a pointed locator: copy an exact distinctive block of > 2 consecutive lines, add immediate beforeLines/afterLines when the block may repeat, and pass maybeStartLine from the observed line number when relevant. " +
-		"Do not send empty replacements, generic, repeated, overlapping, or conflict-prone edits. The tool fails if matchLines or replaceWithLines or path is empty.",
+		"Do not send empty replacements, generic, repeated, overlapping, or conflict-prone edits.",
 	Tags: []string{"text"},
 
 	ArgSchema: spec.JSONSchema(`{

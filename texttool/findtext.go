@@ -22,7 +22,7 @@ var findTextTool = spec.Tool{
 	Version:       "v1.0.0",
 	DisplayName:   "Find text matches with context",
 	Description: "Locate exact edit targets in a UTF-8 text file and return matches with surrounding context and line numbers. " +
-		"Use this before insert/replace/delete whenever you need a reliable locator. Request enough context lines to build a unique follow-up change block. " +
+		"Request enough context lines to build a unique follow-up change block. " +
 		"Use substring or regex to discover candidate areas, then reuse the returned exact text and line numbers in edit calls. Use lineBlock to validate that a pointed exact multi-line block is unique before editing. " +
 		"For lineBlock mode, matching compares TrimSpace(line) and works best with a distinctive > 2 line block plus beforeLines/afterLines when the block may repeat.",
 	Tags: []string{"text"},
@@ -38,8 +38,12 @@ var findTextTool = spec.Tool{
 "queryType": {
 	"type": "string",
 	"enum": ["substring", "regex", "lineBlock"],
-	"default": "substring",
 	"description": "Search mode. Use substring or regex to discover candidate regions. Use lineBlock to verify an exact multi-line edit locator before calling an edit tool."
+},
+"query": {
+	"type": "string",
+	"default": "",
+	"description": "Required for queryType=substring/regex. The string/regex to find."
 },
 "matchLines": {
 	"type": "array",
@@ -72,7 +76,7 @@ var findTextTool = spec.Tool{
 	"description": "Maximum number of matches to return. Keep this reasonably small while narrowing to a unique target."
 }
 },
-"required": ["path"],
+"required": ["path", "queryType"],
 "additionalProperties": false
 }`),
 

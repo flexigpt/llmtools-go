@@ -24,9 +24,9 @@ var insertTextLinesTool = spec.Tool{
 	Version:       "v1.0.0",
 	DisplayName:   "Insert text lines",
 	Description: "Insert lines into a UTF-8 text file at start/end or relative to a uniquely matched anchor block. " +
-		"Before calling for beforeAnchor/afterAnchor, locate the anchor with find/read tools unless you already have exact text and line numbers. " +
+		"Before calling for beforeAnchor/afterAnchor, locate the anchor with find/read tools unless you already have exact text and line numbers. A unique anchor is required. " +
 		"Anchor matching compares TrimSpace(line). Use a pointed exact anchor of > 2 consecutive lines, add anchorBeforeLines/anchorAfterLines when the anchor may repeat, and pass maybeStartLine from the observed line number when relevant. " +
-		"Do not insert against a generic or repeated anchor. The tool fails if the anchor is not unique.",
+		"Do not insert against a generic or repeated anchor.",
 	Tags: []string{"text"},
 
 	ArgSchema: spec.JSONSchema(`{
