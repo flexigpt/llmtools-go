@@ -194,3 +194,7 @@ func debugJSON(t *testing.T, v any) string {
 func stringPtr(s string) *string {
 	return &s
 }
+
+func intPtr(i int) *int {
+	return &i
+}

@@ -42,9 +42,9 @@ func TestE2E_Text_ReadModifyLoop(t *testing.T) {
 
 	// 2) Read a bounded range (marker-to-marker) to show how to constrain reads.
 	rng := callJSON[texttool.ReadTextRangeOut](t, h.r, "readtextrange", texttool.ReadTextRangeArgs{
-		Path:            docRel,
-		StartMatchLines: []string{"<!-- B START -->"},
-		EndMatchLines:   []string{"<!-- B END -->"},
+		Path:      docRel,
+		StartLine: intPtr(10),
+		LineCount: intPtr(3),
 	})
 	if rng.LinesReturned == 0 {
 		t.Fatalf("expected some lines in range, got: %s", debugJSON(t, rng))

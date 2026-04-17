@@ -18,31 +18,31 @@ var readTextRangeTool = spec.Tool{
 	Slug:          "readtextrange",
 	Version:       "v1.0.0",
 	DisplayName:   "Read text range",
-	Description: "Read a UTF-8 text file and return original lines with line numbers. " +
-		"Use this to capture exact text, enough surrounding context, and pointed marker blocks before calling replace/delete/insert. " +
-		"Optional start and end marker blocks can narrow the range. Marker matching uses TrimSpace(line), and each provided marker must match exactly once, so choose distinctive multi-line markers instead of short generic snippets.",
-	Tags: []string{"text"},
+	Description:   "Read a contiguous range of lines from a UTF-8 text file and return them with line numbers.",
+	Tags:          []string{"text"},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",
 "type": "object",
 "properties": {
-"path": {
-	"type": "string",
-	"description": "Path of the file"
-},
-"startMatchLines": {
-	"type": "array",
-	"items": { "type": "string" },
-	"minItems": 1,
-	"description": "Optional exact start marker block copied from the file. Must match exactly once. Prefer a distinctive block of > 2 lines; avoid short generic markers."
-},
-"endMatchLines": {
-	"type": "array",
-	"items": { "type": "string" },
-	"minItems": 1,
-	"description": "Optional exact end marker block copied from the file. Must match exactly once. Prefer a distinctive block of > 2 lines; avoid short generic markers."
-}
+  "path": {
+    "type": "string",
+    "minLength": 1,
+    "description": "Path of the UTF-8 text file."
+  },
+  "startLine": {
+    "type": "integer",
+    "minimum": 1,
+    "default": 1,
+    "description": "Optional 1-based line number to start reading from. Defaults to 1."
+  },
+  "lineCount": {
+    "type": "integer",
+    "minimum": 1,
+    "maximum": 16000,
+    "default": 1000,
+    "description": "Optional number of lines to return. Defaults to 1000. Maximum 16000. If the file ends sooner, fewer lines are returned and eofReached will be true."
+  }
 },
 "required": ["path"],
 "additionalProperties": false
@@ -54,15 +54,19 @@ var readTextRangeTool = spec.Tool{
 	ModifiedAt: spec.SchemaStartTime,
 }
 
-// Hard cap to keep tool responses bounded (prevents massive JSON payloads).
-// If the selected range exceeds this, the tool fails (no truncation).
-const maxReadTextRangeOutputLines = 2000
+const (
+	maxReadTextRangeOutputLines   = 16000
+	defaultReadTextRangeLineCount = 1000
+)
 
 type ReadTextRangeArgs struct {
 	Path string `json:"path"`
 
-	StartMatchLines []string `json:"startMatchLines,omitempty"`
-	EndMatchLines   []string `json:"endMatchLines,omitempty"`
+	// Optional 1-based start line. Defaults to 1.
+	StartLine *int `json:"startLine,omitempty"`
+
+	// Optional number of lines to return. Defaults to defaultReadTextRangeLineCount.
+	LineCount *int `json:"lineCount,omitempty"`
 }
 
 type ReadTextRangeLine struct {
@@ -71,22 +75,23 @@ type ReadTextRangeLine struct {
 }
 
 type ReadTextRangeOut struct {
-	StartLine     int                 `json:"startLine,omitempty"` // 1-based
-	EndLine       int                 `json:"endLine,omitempty"`   // 1-based
+	StartLine     int                 `json:"startLine,omitempty"` // 1-based; zero for empty output
+	EndLine       int                 `json:"endLine,omitempty"`   // 1-based; zero for empty output
 	LinesReturned int                 `json:"linesReturned"`
 	Lines         []ReadTextRangeLine `json:"lines"`
+	EOFReached    bool                `json:"eofReached"` // true if returned range reaches EOF
 }
 
-// readTextRange reads a UTF‑8 file and returns a bounded range of lines.
+// readTextRange reads a contiguous range of lines from a UTF-8 file.
 //
-// Behavior notes (entry point):
-//   - File must exist, be regular, not a symlink, and valid UTF‑8.
-//   - Matching uses TrimSpace comparisons (for file + provided blocks).
-//   - Deterministic / no ambiguity:
-//   - startMatchLines (if provided) must match exactly once.
-//   - endMatchLines (if provided) must match exactly once.
-//   - if both are provided, end must occur after start block (non-overlapping).
-//   - If the selected range exceeds maxReadTextRangeOutputLines, the tool fails.
+// Behavior notes:
+//   - File must exist, be regular, not a symlink, and valid UTF-8.
+//   - No text matching is performed.
+//   - startLine is 1-based and defaults to 1.
+//   - lineCount defaults to 1000 and may not exceed 16000.
+//   - If the file ends before lineCount lines are available, the tool returns through EOF.
+//   - eofReached is true when the returned range includes the end of the file.
+//   - Empty file returns zero lines with eofReached=true; startLine may be omitted or set to 1.
 func readTextRange(
 	ctx context.Context,
 	args ReadTextRangeArgs,
@@ -95,8 +100,25 @@ func readTextRange(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	startBlock := ioutil.NormalizeLineBlockInput(args.StartMatchLines)
-	endBlock := ioutil.NormalizeLineBlockInput(args.EndMatchLines)
+
+	startLine := 1
+	if args.StartLine != nil {
+		startLine = *args.StartLine
+	}
+	if startLine < 1 {
+		return nil, fmt.Errorf("startLine must be >= 1 (got %d)", startLine)
+	}
+
+	lineCount := defaultReadTextRangeLineCount
+	if args.LineCount != nil {
+		lineCount = *args.LineCount
+	}
+	if lineCount < 1 {
+		return nil, fmt.Errorf("lineCount must be >= 1 (got %d)", lineCount)
+	}
+	if lineCount > maxReadTextRangeOutputLines {
+		return nil, fmt.Errorf("lineCount too large: %d (max %d)", lineCount, maxReadTextRangeOutputLines)
+	}
 
 	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, toolutil.MaxTextProcessingBytes)
 	if err != nil {
@@ -105,74 +127,29 @@ func readTextRange(
 
 	total := len(tf.Lines)
 	if total == 0 {
+		if startLine > 1 {
+			return nil, fmt.Errorf("startLine %d is out of bounds for empty file", startLine)
+		}
 		return &ReadTextRangeOut{
 			Lines:         nil,
 			LinesReturned: 0,
+			EOFReached:    true,
 		}, nil
 	}
 
-	// Selection (0-based inclusive).
-	selStart := 0
-	selEnd := total - 1
-
-	var startIdx int
-	var endIdx int
-	var haveStartIdx bool
-	var haveEndIdx bool
-
-	if len(startBlock) > 0 {
-		startIdx, err = ioutil.RequireSingleTrimmedBlockMatch(tf.Lines, startBlock, "startMatchLines")
-		if err != nil {
-			return nil, err
-		}
-		haveStartIdx = true
-		selStart = startIdx
+	if startLine > total {
+		return nil, fmt.Errorf("startLine %d is out of bounds for file with %d lines", startLine, total)
 	}
 
-	if len(endBlock) > 0 {
-		endIdx, err = ioutil.RequireSingleTrimmedBlockMatch(tf.Lines, endBlock, "endMatchLines")
-		if err != nil {
-			return nil, err
-		}
-		haveEndIdx = true
-		selEnd = endIdx + len(endBlock) - 1
-		if selEnd >= total {
-			// Defensive: should not happen, but keep bounds safe.
-			selEnd = total - 1
-		}
+	selStart := startLine - 1
+	selEnd := selStart + lineCount - 1
+	if selEnd >= total {
+		selEnd = total - 1
 	}
 
-	// If both markers provided, enforce order (non-overlapping).
-	if haveStartIdx && haveEndIdx {
-		if endIdx < startIdx+len(startBlock) {
-			return nil, fmt.Errorf(
-				"endMatchLines occurs before (or overlaps) startMatchLines (start at line %d, end at line %d)",
-				startIdx+1,
-				endIdx+1,
-			)
-		}
-	}
+	eofReached := selEnd == total-1
 
-	if selStart < 0 || selStart >= total {
-		return nil, fmt.Errorf("invalid selected start computed: %d", selStart)
-	}
-	if selEnd < 0 || selEnd >= total {
-		return nil, fmt.Errorf("invalid selected end computed: %d", selEnd)
-	}
-	if selStart > selEnd {
-		return nil, fmt.Errorf("invalid selection: start after end (start line %d, end line %d)", selStart+1, selEnd+1)
-	}
-
-	nOut := selEnd - selStart + 1
-	if nOut > maxReadTextRangeOutputLines {
-		return nil, fmt.Errorf(
-			"selected range too large: %d lines (max %d). Provide startMatchLines/endMatchLines with distinctive marker blocks to narrow the range",
-			nOut,
-			maxReadTextRangeOutputLines,
-		)
-	}
-
-	outLines := make([]ReadTextRangeLine, 0, nOut)
+	outLines := make([]ReadTextRangeLine, 0, selEnd-selStart+1)
 	for i := selStart; i <= selEnd; i++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -188,5 +165,6 @@ func readTextRange(
 		EndLine:       selEnd + 1,
 		LinesReturned: len(outLines),
 		Lines:         outLines,
+		EOFReached:    eofReached,
 	}, nil
 }

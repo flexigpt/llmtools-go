@@ -81,10 +81,10 @@ Grouped under `exectool`.
 
 Grouped under `texttool`.
 
-- `readtextrange`: read lines, optionally constrained by unique start/end marker blocks.
+- `readtextrange`: read `n` text lines from a line number.
 - `findtext`: find matches with context.
-- `inserttext`: insert lines at start/end/between text blocks.
-- `replacetext`: replace exact line blocks, with optional disambiguation using adjacent lines.
+- `inserttext`: insert text at start/end/between text blocks.
+- `replacetext`: replace text, with optional disambiguation using above/below text.
 - `deletetextlines`: delete exact line blocks, with optional disambiguation using adjacent lines.
 
 ### Image tools

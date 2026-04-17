@@ -14,70 +14,96 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	tests := []struct {
-		name         string
-		initial      string
-		args         func(path string) ReadTextRangeArgs
-		wantStart    int
-		wantEnd      int
-		wantCount    int
-		wantLine1    *ReadTextRangeLine
-		wantErrSub   string
-		wantErrIsNil bool
+		name      string
+		initial   string
+		args      func(path string) ReadTextRangeArgs
+		wantStart int
+		wantEnd   int
+		wantCount int
+		wantEOF   bool
+		wantFirst *ReadTextRangeLine
+		wantLast  *ReadTextRangeLine
 	}{
 		{
-			name:    "no_markers_returns_entire_file",
+			name:    "no_args_returns_entire_short_file_with_defaults",
 			initial: "A\nB\nC\n",
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{Path: path}
 			},
-			wantStart:    1,
-			wantEnd:      3,
-			wantCount:    3,
-			wantErrIsNil: true,
+			wantStart: 1,
+			wantEnd:   3,
+			wantCount: 3,
+			wantEOF:   true,
+			wantFirst: &ReadTextRangeLine{LineNumber: 1, Text: "A"},
+			wantLast:  &ReadTextRangeLine{LineNumber: 3, Text: "C"},
 		},
 		{
-			name:    "start_marker_only_includes_start_block",
-			initial: "a\nSTART\nb\nc\n",
+			name:    "startLine_only_reads_from_given_line_to_eof",
+			initial: "A\nB\nC\nD\n",
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
-					Path:            path,
-					StartMatchLines: []string{"START"},
+					Path:      path,
+					StartLine: readTextRangeIntPtr(3),
 				}
 			},
-			wantStart:    2,
-			wantEnd:      4,
-			wantCount:    3,
-			wantErrIsNil: true,
+			wantStart: 3,
+			wantEnd:   4,
+			wantCount: 2,
+			wantEOF:   true,
+			wantFirst: &ReadTextRangeLine{LineNumber: 3, Text: "C"},
+			wantLast:  &ReadTextRangeLine{LineNumber: 4, Text: "D"},
 		},
 		{
-			name:    "end_marker_only_includes_end_block",
-			initial: "a\nb\nEND\nc\n",
+			name:    "startLine_and_lineCount_reads_requested_window_not_at_eof",
+			initial: "A\nB\nC\nD\nE\n",
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
-					Path:          path,
-					EndMatchLines: []string{"END"},
+					Path:      path,
+					StartLine: readTextRangeIntPtr(2),
+					LineCount: readTextRangeIntPtr(2),
 				}
 			},
-			wantStart:    1,
-			wantEnd:      3,
-			wantCount:    3,
-			wantErrIsNil: true,
+			wantStart: 2,
+			wantEnd:   3,
+			wantCount: 2,
+			wantEOF:   false,
+			wantFirst: &ReadTextRangeLine{LineNumber: 2, Text: "B"},
+			wantLast:  &ReadTextRangeLine{LineNumber: 3, Text: "C"},
 		},
 		{
-			name:    "both_markers_trimmed_match_and_order_enforced",
-			initial: "a\n  START  \nb\nEND\nc\n",
+			name:    "lineCount_larger_than_remaining_returns_to_eof",
+			initial: "A\nB\nC\nD\nE\n",
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
-					Path:            path,
-					StartMatchLines: []string{"START"},
-					EndMatchLines:   []string{"END"},
+					Path:      path,
+					StartLine: readTextRangeIntPtr(4),
+					LineCount: readTextRangeIntPtr(10),
 				}
 			},
-			wantStart:    2,
-			wantEnd:      4,
-			wantCount:    3,
-			wantErrIsNil: true,
+			wantStart: 4,
+			wantEnd:   5,
+			wantCount: 2,
+			wantEOF:   true,
+			wantFirst: &ReadTextRangeLine{LineNumber: 4, Text: "D"},
+			wantLast:  &ReadTextRangeLine{LineNumber: 5, Text: "E"},
+		},
+		{
+			name:    "startLine_at_last_line_returns_one_line_and_eof",
+			initial: "A\nB\nC\n",
+			args: func(path string) ReadTextRangeArgs {
+				return ReadTextRangeArgs{
+					Path:      path,
+					StartLine: readTextRangeIntPtr(3),
+				}
+			},
+			wantStart: 3,
+			wantEnd:   3,
+			wantCount: 1,
+			wantEOF:   true,
+			wantFirst: &ReadTextRangeLine{LineNumber: 3, Text: "C"},
+			wantLast:  &ReadTextRangeLine{LineNumber: 3, Text: "C"},
 		},
 		{
 			name:    "file_with_single_empty_line_and_final_newline",
@@ -85,49 +111,72 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{Path: path}
 			},
-			wantStart:    1,
-			wantEnd:      1,
-			wantCount:    1,
-			wantLine1:    &ReadTextRangeLine{LineNumber: 1, Text: ""},
-			wantErrIsNil: true,
+			wantStart: 1,
+			wantEnd:   1,
+			wantCount: 1,
+			wantEOF:   true,
+			wantFirst: &ReadTextRangeLine{LineNumber: 1, Text: ""},
+			wantLast:  &ReadTextRangeLine{LineNumber: 1, Text: ""},
 		},
 		{
-			name:    "multi_line_start_and_end_markers_select_including_full_blocks",
-			initial: "hdr\nSTART1\nSTART2\nx\nEND1\nEND2\ntail\n",
-			args: func(path string) ReadTextRangeArgs {
-				return ReadTextRangeArgs{
-					Path:            path,
-					StartMatchLines: []string{"START1", "START2"},
-					EndMatchLines:   []string{"END1", "END2"},
-				}
-			},
-			wantStart:    2,
-			wantEnd:      6,
-			wantCount:    5,
-			wantLine1:    &ReadTextRangeLine{LineNumber: 2, Text: "START1"},
-			wantErrIsNil: true,
-		},
-		{
-			name:    "empty_file_returns_empty_deterministically",
+			name:    "explicit_startLine_1_on_empty_file_returns_empty_and_eof",
 			initial: "",
 			args: func(path string) ReadTextRangeArgs {
-				return ReadTextRangeArgs{Path: path}
+				return ReadTextRangeArgs{
+					Path:      path,
+					StartLine: readTextRangeIntPtr(1),
+					LineCount: readTextRangeIntPtr(10),
+				}
 			},
-			wantStart:    0,
-			wantEnd:      0,
-			wantCount:    0,
-			wantErrIsNil: true,
+			wantStart: 0,
+			wantEnd:   0,
+			wantCount: 0,
+			wantEOF:   true,
 		},
 		{
 			name:    "exactly_max_output_lines_allowed",
-			initial: makeNLines(2000, func(i int) string { return "x" }, "\n", true),
+			initial: makeNLines(16000, func(i int) string { return "x" }, "\n", true),
+			args: func(path string) ReadTextRangeArgs {
+				return ReadTextRangeArgs{
+					Path:      path,
+					LineCount: readTextRangeIntPtr(16000),
+				}
+			},
+			wantStart: 1,
+			wantEnd:   16000,
+			wantCount: 16000,
+			wantEOF:   true,
+			wantFirst: &ReadTextRangeLine{LineNumber: 1, Text: "x"},
+			wantLast:  &ReadTextRangeLine{LineNumber: 16000, Text: "x"},
+		},
+		{
+			name:    "omitted_lineCount_uses_default_and_may_not_reach_eof",
+			initial: makeNLines(2001, func(i int) string { return "x" }, "\n", true),
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{Path: path}
 			},
-			wantStart:    1,
-			wantEnd:      2000,
-			wantCount:    2000,
-			wantErrIsNil: true,
+			wantStart: 1,
+			wantEnd:   1000,
+			wantCount: 1000,
+			wantEOF:   false,
+			wantFirst: &ReadTextRangeLine{LineNumber: 1, Text: "x"},
+			wantLast:  &ReadTextRangeLine{LineNumber: 1000, Text: "x"},
+		},
+		{
+			name:    "omitted_lineCount_from_late_start_can_reach_eof",
+			initial: makeNLines(2001, func(i int) string { return "x" }, "\n", true),
+			args: func(path string) ReadTextRangeArgs {
+				return ReadTextRangeArgs{
+					Path:      path,
+					StartLine: readTextRangeIntPtr(1500),
+				}
+			},
+			wantStart: 1500,
+			wantEnd:   2001,
+			wantCount: 502,
+			wantEOF:   true,
+			wantFirst: &ReadTextRangeLine{LineNumber: 1500, Text: "x"},
+			wantLast:  &ReadTextRangeLine{LineNumber: 2001, Text: "x"},
 		},
 	}
 
@@ -138,30 +187,60 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 
 			out, err := readTextRange(t.Context(), args, policy)
 			mustNoErr(t, err)
+
 			if len(out.Lines) != out.LinesReturned {
 				t.Fatalf("invariant failed: len(Lines)=%d but LinesReturned=%d", len(out.Lines), out.LinesReturned)
+			}
+			if out.StartLine != tt.wantStart || out.EndLine != tt.wantEnd {
+				t.Fatalf("Start/End: want %d/%d got %d/%d", tt.wantStart, tt.wantEnd, out.StartLine, out.EndLine)
 			}
 			if out.LinesReturned != tt.wantCount {
 				t.Fatalf("LinesReturned: want %d, got %d", tt.wantCount, out.LinesReturned)
 			}
+			if out.EOFReached != tt.wantEOF {
+				t.Fatalf("EOFReached: want %v, got %v", tt.wantEOF, out.EOFReached)
+			}
+
 			if tt.wantCount == 0 {
-				// For empty file, StartLine/EndLine are left as zero values.
-				if out.StartLine != tt.wantStart || out.EndLine != tt.wantEnd {
-					t.Fatalf("Start/End: want %d/%d got %d/%d", tt.wantStart, tt.wantEnd, out.StartLine, out.EndLine)
+				if len(out.Lines) != 0 {
+					t.Fatalf("expected zero output lines, got %d", len(out.Lines))
 				}
 				return
 			}
 
-			if out.StartLine != tt.wantStart || out.EndLine != tt.wantEnd {
-				t.Fatalf("Start/End: want %d/%d got %d/%d", tt.wantStart, tt.wantEnd, out.StartLine, out.EndLine)
+			if out.EndLine-out.StartLine+1 != out.LinesReturned {
+				t.Fatalf(
+					"invariant failed: StartLine=%d EndLine=%d LinesReturned=%d",
+					out.StartLine,
+					out.EndLine,
+					out.LinesReturned,
+				)
 			}
 
-			if tt.wantLine1 != nil {
+			for i, line := range out.Lines {
+				wantLineNumber := out.StartLine + i
+				if line.LineNumber != wantLineNumber {
+					t.Fatalf("Lines[%d].LineNumber: want %d, got %d", i, wantLineNumber, line.LineNumber)
+				}
+			}
+
+			if tt.wantFirst != nil {
 				if len(out.Lines) < 1 {
 					t.Fatalf("expected at least 1 line, got 0")
 				}
-				if out.Lines[0].LineNumber != tt.wantLine1.LineNumber || out.Lines[0].Text != tt.wantLine1.Text {
-					t.Fatalf("first line mismatch: want %+v got %+v", *tt.wantLine1, out.Lines[0])
+				got := out.Lines[0]
+				if got.LineNumber != tt.wantFirst.LineNumber || got.Text != tt.wantFirst.Text {
+					t.Fatalf("first line mismatch: want %+v got %+v", *tt.wantFirst, got)
+				}
+			}
+
+			if tt.wantLast != nil {
+				if len(out.Lines) < 1 {
+					t.Fatalf("expected at least 1 line, got 0")
+				}
+				got := out.Lines[len(out.Lines)-1]
+				if got.LineNumber != tt.wantLast.LineNumber || got.Text != tt.wantLast.Text {
+					t.Fatalf("last line mismatch: want %+v got %+v", *tt.wantLast, got)
 				}
 			}
 		})
@@ -174,6 +253,7 @@ func TestReadTextRange_ErrorCases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	tests := []struct {
 		name       string
 		setup      func() string
@@ -182,69 +262,69 @@ func TestReadTextRange_ErrorCases(t *testing.T) {
 		wantIsCtx  bool
 	}{
 		{
-			name: "no_match_startMarker",
+			name: "startLine_must_be_ge_1",
 			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "A\nB\n")
-			},
-			args: func(path string) ReadTextRangeArgs {
-				return ReadTextRangeArgs{Path: path, StartMatchLines: []string{"NOPE"}}
-			},
-			wantErrSub: "no match found for startMatchLines",
-		},
-		{
-			name: "ambiguous_startMarker",
-			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "START\nx\nSTART\n")
-			},
-			args: func(path string) ReadTextRangeArgs {
-				return ReadTextRangeArgs{Path: path, StartMatchLines: []string{"START"}}
-			},
-			wantErrSub: "ambiguous match for startMatchLines",
-		},
-		{
-			name: "no_match_endMarker",
-			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "A\nB\n")
-			},
-			args: func(path string) ReadTextRangeArgs {
-				return ReadTextRangeArgs{Path: path, EndMatchLines: []string{"NOPE"}}
-			},
-			wantErrSub: "no match found for endMatchLines",
-		},
-		{
-			name: "ambiguous_endMarker",
-			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "END\nx\nEND\n")
-			},
-			args: func(path string) ReadTextRangeArgs {
-				return ReadTextRangeArgs{Path: path, EndMatchLines: []string{"END"}}
-			},
-			wantErrSub: "ambiguous match for endMatchLines",
-		},
-		{
-			name: "end_before_or_overlaps_start_rejected",
-			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "END\nSTART\n")
+				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
-					Path:            path,
-					StartMatchLines: []string{"START"},
-					EndMatchLines:   []string{"END"},
+					Path:      path,
+					StartLine: readTextRangeIntPtr(0),
 				}
 			},
-			wantErrSub: "endMatchLines occurs before",
+			wantErrSub: "startLine must be >= 1",
 		},
 		{
-			name: "range_too_large_without_markers",
+			name: "lineCount_must_be_ge_1",
 			setup: func() string {
-				content := makeNLines(2001, func(i int) string { return "x" }, "\n", true)
-				return writeTempTextFile(t, dir, "big-*.txt", content)
+				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) ReadTextRangeArgs {
-				return ReadTextRangeArgs{Path: path}
+				return ReadTextRangeArgs{
+					Path:      path,
+					LineCount: readTextRangeIntPtr(0),
+				}
 			},
-			wantErrSub: "selected range too large",
+			wantErrSub: "lineCount must be >= 1",
+		},
+		{
+			name: "lineCount_too_large",
+			setup: func() string {
+				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+			},
+			args: func(path string) ReadTextRangeArgs {
+				return ReadTextRangeArgs{
+					Path:      path,
+					LineCount: readTextRangeIntPtr(16001),
+				}
+			},
+			wantErrSub: "lineCount too large",
+		},
+		{
+			name: "startLine_out_of_bounds_for_non_empty_file",
+			setup: func() string {
+				return writeTempTextFile(t, dir, "x-*.txt", "A\nB\n")
+			},
+			args: func(path string) ReadTextRangeArgs {
+				return ReadTextRangeArgs{
+					Path:      path,
+					StartLine: readTextRangeIntPtr(3),
+				}
+			},
+			wantErrSub: "out of bounds for file with 2 lines",
+		},
+		{
+			name: "startLine_out_of_bounds_for_empty_file",
+			setup: func() string {
+				return writeTempTextFile(t, dir, "x-*.txt", "")
+			},
+			args: func(path string) ReadTextRangeArgs {
+				return ReadTextRangeArgs{
+					Path:      path,
+					StartLine: readTextRangeIntPtr(2),
+				}
+			},
+			wantErrSub: "out of bounds for empty file",
 		},
 		{
 			name: "context_canceled",
@@ -277,7 +357,12 @@ func TestReadTextRange_ErrorCases(t *testing.T) {
 				}
 				return
 			}
+
 			mustErrContains(t, err, tt.wantErrSub)
 		})
 	}
+}
+
+func readTextRangeIntPtr(v int) *int {
+	return &v
 }
