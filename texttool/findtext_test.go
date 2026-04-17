@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
@@ -16,6 +17,7 @@ func TestFindText_HappyPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	const hit3 = "hit ghit fhit\n"
 	tests := []struct {
 		name        string
 		initial     string
@@ -25,106 +27,47 @@ func TestFindText_HappyPaths(t *testing.T) {
 		assert      func(t *testing.T, out *FindTextOut)
 	}{
 		{
-			name:    "substring_default_queryType_trimmed_line_match_and_context",
+			name:    "substring_default_queryType_trims_query_and_coerces_context_to_1",
 			initial: " alpha \nbeta\n gamma alpha \ndelta\n",
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:         path,
-					Query:        "alpha",
-					ContextLines: 1,
-					MaxMatches:   10,
-				}
-			},
-			wantMatches: 2,
-			wantReached: false,
-			assert: func(t *testing.T, out *FindTextOut) {
-				t.Helper()
-				if out.Matches[0].MatchStartLine != 1 || out.Matches[0].MatchEndLine != 1 {
-					t.Fatalf(
-						"match0 range: want 1..1 got %d..%d",
-						out.Matches[0].MatchStartLine,
-						out.Matches[0].MatchEndLine,
-					)
-				}
-				// ContextLines=1 => for line 1 should include [1..2].
-				if len(out.Matches[0].MatchedLinesWithContext) != 2 {
-					t.Fatalf("match0 context lines: want 2 got %d", len(out.Matches[0].MatchedLinesWithContext))
-				}
-				if out.Matches[0].MatchedLinesWithContext[0].LineNumber != 1 ||
-					out.Matches[0].MatchedLinesWithContext[0].Text != " alpha " {
-					t.Fatalf("match0 ctx[0] unexpected: %+v", out.Matches[0].MatchedLinesWithContext[0])
-				}
-			},
-		},
-		{
-			name:    "substring_negative_contextLines_treated_as_0",
-			initial: "A\nB\nA\n",
-			args: func(path string) FindTextArgs {
-				return FindTextArgs{
-					Path:         path,
-					QueryType:    "substring",
-					Query:        "A",
-					ContextLines: -10,
-					MaxMatches:   10,
-				}
-			},
-			wantMatches: 2,
-			wantReached: false,
-		},
-		{
-			name:    "substring_query_is_trimmed",
-			initial: "alpha\n",
-			args: func(path string) FindTextArgs {
-				return FindTextArgs{
-					Path:         path,
-					QueryType:    "substring",
 					Query:        "  alpha  ",
 					ContextLines: 0,
 					MaxMatches:   10,
 				}
 			},
-			wantMatches: 1,
+			wantMatches: 2,
 			wantReached: false,
-		},
-		{
-			name:    "queryType_is_trimmed_and_case_insensitive",
-			initial: " alpha \nbeta\n",
-			args: func(path string) FindTextArgs {
-				return FindTextArgs{
-					Path:         path,
-					QueryType:    "  ReGeX  ",
-					Query:        `^alpha$`,
-					ContextLines: 0,
-					MaxMatches:   10,
+			assert: func(t *testing.T, out *FindTextOut) {
+				t.Helper()
+
+				m0 := out.Matches[0]
+				assertMatchRange(t, m0, 1, 2, 1, 7)
+				if len(m0.Context) != 2 {
+					t.Fatalf("match0 context len: want 2 got %d", len(m0.Context))
 				}
-			},
-			wantMatches: 1,
-			wantReached: false,
-		},
-		{
-			name:    "regex_queryType_matches_trimmed_line",
-			initial: " alpha \nbeta\n",
-			args: func(path string) FindTextArgs {
-				return FindTextArgs{
-					Path:         path,
-					QueryType:    "regex",
-					Query:        `^alpha$`,
-					ContextLines: 0,
-					MaxMatches:   10,
+				assertContextLine(t, m0.Context[0], 1, " alpha ")
+				assertContextLine(t, m0.Context[1], 2, "beta")
+
+				m1 := out.Matches[1]
+				assertMatchRange(t, m1, 3, 8, 3, 13)
+				if len(m1.Context) != 3 {
+					t.Fatalf("match1 context len: want 3 got %d", len(m1.Context))
 				}
+				assertContextLine(t, m1.Context[0], 2, "beta")
+				assertContextLine(t, m1.Context[1], 3, " gamma alpha ")
+				assertContextLine(t, m1.Context[2], 4, "delta")
 			},
-			wantMatches: 1,
-			wantReached: false,
 		},
 		{
-			name:    "lineBlock_matches_multiline_block_trimmed_with_linebreaks",
-			initial: "a\n beta \n gamma \nd\n",
+			name:    "substring_multiline_query_matches_across_lines",
+			initial: "func a() {\nreturn 1\n}\nnext\n",
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:         path,
-					QueryType:    "LiNeBlOcK",
-					MatchLines:   []string{"beta\ngamma"},
-					ContextLines: 0,
+					Query:        "\nreturn 1\n}\n",
+					ContextLines: 1,
 					MaxMatches:   10,
 				}
 			},
@@ -132,40 +75,115 @@ func TestFindText_HappyPaths(t *testing.T) {
 			wantReached: false,
 			assert: func(t *testing.T, out *FindTextOut) {
 				t.Helper()
-				if out.Matches[0].MatchStartLine != 2 || out.Matches[0].MatchEndLine != 3 {
-					t.Fatalf(
-						"block match range: want 2..3 got %d..%d",
-						out.Matches[0].MatchStartLine,
-						out.Matches[0].MatchEndLine,
-					)
+
+				m := out.Matches[0]
+				assertMatchRange(t, m, 2, 1, 3, 2)
+				if len(m.Context) != 4 {
+					t.Fatalf("context len: want 4 got %d", len(m.Context))
 				}
-				if len(out.Matches[0].MatchedLinesWithContext) != 2 {
-					t.Fatalf("context lines: want 2 got %d", len(out.Matches[0].MatchedLinesWithContext))
+				assertContextLine(t, m.Context[0], 1, "func a() {")
+				assertContextLine(t, m.Context[1], 2, "return 1")
+				assertContextLine(t, m.Context[2], 3, "}")
+				assertContextLine(t, m.Context[3], 4, "next")
+			},
+		},
+		{
+			name:    "substring_query_crlf_newlines_are_normalized",
+			initial: "a\nb\nc\n",
+			args: func(path string) FindTextArgs {
+				return FindTextArgs{
+					Path:         path,
+					QueryType:    "substring",
+					Query:        "b\r\nc",
+					ContextLines: 1,
+					MaxMatches:   10,
 				}
-				if out.Matches[0].MatchedLinesWithContext[0].LineNumber != 2 ||
-					out.Matches[0].MatchedLinesWithContext[0].Text != " beta " {
-					t.Fatalf("ctx[0] unexpected: %+v", out.Matches[0].MatchedLinesWithContext[0])
+			},
+			wantMatches: 1,
+			wantReached: false,
+			assert: func(t *testing.T, out *FindTextOut) {
+				t.Helper()
+				assertMatchRange(t, out.Matches[0], 2, 1, 3, 2)
+			},
+		},
+		{
+			name:    "regex_queryType_is_trimmed_case_insensitive_and_matches_whole_file",
+			initial: "prefix\nfoo()\nbar()\nsuffix\n",
+			args: func(path string) FindTextArgs {
+				return FindTextArgs{
+					Path:         path,
+					QueryType:    "  ReGeX  ",
+					Query:        "foo\\(\\)\r\nbar\\(\\)",
+					ContextLines: 1,
+					MaxMatches:   10,
 				}
-				if out.Matches[0].MatchedLinesWithContext[1].LineNumber != 3 ||
-					out.Matches[0].MatchedLinesWithContext[1].Text != " gamma " {
-					t.Fatalf("ctx[1] unexpected: %+v", out.Matches[0].MatchedLinesWithContext[1])
+			},
+			wantMatches: 1,
+			wantReached: false,
+			assert: func(t *testing.T, out *FindTextOut) {
+				t.Helper()
+
+				m := out.Matches[0]
+				assertMatchRange(t, m, 2, 1, 3, 6)
+				if len(m.Context) != 4 {
+					t.Fatalf("context len: want 4 got %d", len(m.Context))
+				}
+				assertContextLine(t, m.Context[0], 1, "prefix")
+				assertContextLine(t, m.Context[1], 2, "foo()")
+				assertContextLine(t, m.Context[2], 3, "bar()")
+				assertContextLine(t, m.Context[3], 4, "suffix")
+			},
+		},
+		{
+			name:    "multiple_matches_on_same_line_have_distinct_columns",
+			initial: hit3,
+			args: func(path string) FindTextArgs {
+				return FindTextArgs{
+					Path:         path,
+					Query:        "hit",
+					ContextLines: 1,
+					MaxMatches:   10,
+				}
+			},
+			wantMatches: 3,
+			wantReached: false,
+			assert: func(t *testing.T, out *FindTextOut) {
+				t.Helper()
+
+				assertMatchRange(t, out.Matches[0], 1, 1, 1, 4)
+				assertMatchRange(t, out.Matches[1], 1, 6, 1, 9)
+				assertMatchRange(t, out.Matches[2], 1, 11, 1, 14)
+
+				for i, m := range out.Matches {
+					if len(m.Context) != 1 {
+						t.Fatalf("match %d context len: want 1 got %d", i, len(m.Context))
+					}
+					assertContextLine(t, m.Context[0], 1, strings.TrimSpace(hit3))
 				}
 			},
 		},
 		{
 			name:    "maxMatches_enforced_and_reachedMaxMatches_set",
-			initial: "hit\nhit\nhit\n", //nolint:dupword // Test.
+			initial: hit3,
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:         path,
-					QueryType:    "substring",
 					Query:        "hit",
-					ContextLines: 0,
+					ContextLines: 1,
 					MaxMatches:   2,
 				}
 			},
 			wantMatches: 2,
 			wantReached: true,
+			assert: func(t *testing.T, out *FindTextOut) {
+				t.Helper()
+
+				if out.AdditionalMatchesOmitted != 1 {
+					t.Fatalf("AdditionalMatchesOmitted: want 1 got %d", out.AdditionalMatchesOmitted)
+				}
+				assertMatchRange(t, out.Matches[0], 1, 1, 1, 4)
+				assertMatchRange(t, out.Matches[1], 1, 6, 1, 9)
+			},
 		},
 		{
 			name:    "maxMatches_0_defaults_to_10_and_sets_reachedMaxMatches",
@@ -173,24 +191,20 @@ func TestFindText_HappyPaths(t *testing.T) {
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:         path,
-					QueryType:    "substring",
 					Query:        "hit",
-					ContextLines: 0,
-					MaxMatches:   0, // default to 10
+					ContextLines: 1,
+					MaxMatches:   0,
 				}
 			},
 			wantMatches: 10,
 			wantReached: true,
 			assert: func(t *testing.T, out *FindTextOut) {
 				t.Helper()
-				if len(out.Matches) != 10 {
-					t.Fatalf("len(Matches): want 10 got %d", len(out.Matches))
+
+				if out.AdditionalMatchesOmitted != 1 {
+					t.Fatalf("AdditionalMatchesOmitted: want 1 got %d", out.AdditionalMatchesOmitted)
 				}
-				// Deterministic order: should return lines 1..10.
-				last := out.Matches[9]
-				if last.MatchStartLine != 10 || last.MatchEndLine != 10 {
-					t.Fatalf("last match range: want 10..10 got %d..%d", last.MatchStartLine, last.MatchEndLine)
-				}
+				assertMatchRange(t, out.Matches[9], 10, 1, 10, 4)
 			},
 		},
 		{
@@ -199,9 +213,8 @@ func TestFindText_HappyPaths(t *testing.T) {
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:         path,
-					QueryType:    "substring",
 					Query:        "NOPE",
-					ContextLines: 0,
+					ContextLines: 1,
 					MaxMatches:   10,
 				}
 			},
@@ -214,9 +227,8 @@ func TestFindText_HappyPaths(t *testing.T) {
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:         path,
-					QueryType:    "substring",
 					Query:        "x",
-					ContextLines: 5,
+					ContextLines: 1,
 					MaxMatches:   10,
 				}
 			},
@@ -232,6 +244,7 @@ func TestFindText_HappyPaths(t *testing.T) {
 
 			out, err := findText(t.Context(), args, policy)
 			mustNoErr(t, err)
+
 			if out.MatchesReturned != len(out.Matches) {
 				t.Fatalf("invariant failed: MatchesReturned=%d len(Matches)=%d", out.MatchesReturned, len(out.Matches))
 			}
@@ -241,7 +254,7 @@ func TestFindText_HappyPaths(t *testing.T) {
 			if out.ReachedMaxMatches != tt.wantReached {
 				t.Fatalf("ReachedMaxMatches: want %v, got %v", tt.wantReached, out.ReachedMaxMatches)
 			}
-			if tt.assert != nil && tt.wantMatches > 0 {
+			if tt.assert != nil {
 				tt.assert(t, out)
 			}
 		})
@@ -254,6 +267,7 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	tests := []struct {
 		name       string
 		setup      func(t *testing.T) string
@@ -268,7 +282,11 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
-				return FindTextArgs{Path: path, QueryType: "wat", Query: "A"}
+				return FindTextArgs{
+					Path:      path,
+					QueryType: "wat",
+					Query:     "A",
+				}
 			},
 			wantErrSub: "invalid queryType",
 		},
@@ -279,7 +297,11 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
-				return FindTextArgs{Path: path, QueryType: "substring", Query: "   "}
+				return FindTextArgs{
+					Path:      path,
+					QueryType: "substring",
+					Query:     " \n\t ",
+				}
 			},
 			wantErrSub: "query is required for queryType=substring",
 		},
@@ -290,7 +312,11 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
-				return FindTextArgs{Path: path, QueryType: "regex", Query: ""}
+				return FindTextArgs{
+					Path:      path,
+					QueryType: "regex",
+					Query:     " \n\t ",
+				}
 			},
 			wantErrSub: "query is required for queryType=regex",
 		},
@@ -301,72 +327,28 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
-				return FindTextArgs{Path: path, QueryType: "regex", Query: "("}
+				return FindTextArgs{
+					Path:      path,
+					QueryType: "regex",
+					Query:     "(",
+				}
 			},
 			wantErrSub: "error parsing regexp",
 		},
 		{
-			name: "matchLines_must_be_omitted_for_substring",
+			name: "regex_zero_length_matches_only",
 			setup: func(t *testing.T) string {
 				t.Helper()
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
-					Path:       path,
-					QueryType:  "substring",
-					Query:      "A",
-					MatchLines: []string{"A"},
+					Path:      path,
+					QueryType: "regex",
+					Query:     "^",
 				}
 			},
-			wantErrSub: "matchLines must be omitted",
-		},
-		{
-			name: "matchLines_must_be_omitted_for_regex",
-			setup: func(t *testing.T) string {
-				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
-			},
-			args: func(path string) FindTextArgs {
-				return FindTextArgs{
-					Path:       path,
-					QueryType:  "regex",
-					Query:      "A",
-					MatchLines: []string{"A"},
-				}
-			},
-			wantErrSub: "matchLines must be omitted",
-		},
-		{
-			name: "lineBlock_requires_matchLines",
-			setup: func(t *testing.T) string {
-				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
-			},
-			args: func(path string) FindTextArgs {
-				return FindTextArgs{
-					Path:       path,
-					QueryType:  "lineBlock",
-					MatchLines: nil,
-				}
-			},
-			wantErrSub: "matchLines is required for queryType=lineBlock",
-		},
-		{
-			name: "lineBlock_disallows_query",
-			setup: func(t *testing.T) string {
-				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
-			},
-			args: func(path string) FindTextArgs {
-				return FindTextArgs{
-					Path:       path,
-					QueryType:  "lineBlock",
-					Query:      "nope",
-					MatchLines: []string{"A"},
-				}
-			},
-			wantErrSub: "query must be omitted/empty",
+			wantErrSub: "regex matched only empty strings",
 		},
 		{
 			name: "contextLines_too_large",
@@ -377,7 +359,6 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:         path,
-					QueryType:    "substring",
 					Query:        "A",
 					ContextLines: 2001,
 				}
@@ -393,7 +374,6 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:       path,
-					QueryType:  "substring",
 					Query:      "A",
 					MaxMatches: 501,
 				}
@@ -401,27 +381,9 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			wantErrSub: "maxMatches too large",
 		},
 		{
-			name: "lineBlock_overlapping_matches_rejected",
-			setup: func(t *testing.T) string {
-				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "X\nX\nX\n") //nolint:dupword // Test.
-			},
-			args: func(path string) FindTextArgs {
-				return FindTextArgs{
-					Path:         path,
-					QueryType:    "lineBlock",
-					MatchLines:   []string{"X", "X"},
-					ContextLines: 0,
-					MaxMatches:   10,
-				}
-			},
-			wantErrSub: "overlapping matches detected",
-		},
-		{
 			name: "response_too_large_guard",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				// 5000 short lines, one hit in the middle.
 				content := makeNLines(5000, func(i int) string {
 					if i == 2500 {
 						return "HIT"
@@ -433,9 +395,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:         path,
-					QueryType:    "substring",
 					Query:        "HIT",
-					ContextLines: 2000, // allowed (cap=2000) but will exceed totalReturnedLines cap (4000)
+					ContextLines: 2000,
 					MaxMatches:   10,
 				}
 			},
@@ -449,12 +410,11 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			},
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
-					Path:      path,
-					QueryType: "substring",
-					Query:     "A",
+					Path:  path,
+					Query: "A",
 				}
 			},
-			wantErrSub: "", // platform dependent; just require non-nil error
+			wantErrSub: "",
 		},
 		{
 			name: "invalid_utf8_rejected",
@@ -464,9 +424,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			},
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
-					Path:      path,
-					QueryType: "substring",
-					Query:     "A",
+					Path:  path,
+					Query: "A",
 				}
 			},
 			wantErrSub: "not valid UTF-8",
@@ -491,9 +450,8 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			},
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
-					Path:      path,
-					QueryType: "substring",
-					Query:     "A",
+					Path:  path,
+					Query: "A",
 				}
 			},
 			wantErrSub: "symlink",
@@ -505,7 +463,10 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) FindTextArgs {
-				return FindTextArgs{Path: path, QueryType: "substring", Query: "A"}
+				return FindTextArgs{
+					Path:  path,
+					Query: "A",
+				}
 			},
 			wantIsCtx: true,
 		},
@@ -538,5 +499,42 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			}
 			mustErrContains(t, err, tt.wantErrSub)
 		})
+	}
+}
+
+func assertMatchRange(
+	t *testing.T,
+	got FindTextMatch,
+	wantStartLine, wantStartCol, wantEndLine, wantEndCol int,
+) {
+	t.Helper()
+	if got.MatchStartLine != wantStartLine ||
+		got.MatchStartColumn != wantStartCol ||
+		got.MatchEndLine != wantEndLine ||
+		got.MatchEndColumn != wantEndCol {
+		t.Fatalf(
+			"match range: want %d:%d..%d:%d got %d:%d..%d:%d",
+			wantStartLine,
+			wantStartCol,
+			wantEndLine,
+			wantEndCol,
+			got.MatchStartLine,
+			got.MatchStartColumn,
+			got.MatchEndLine,
+			got.MatchEndColumn,
+		)
+	}
+}
+
+func assertContextLine(t *testing.T, got FindTextLine, wantLineNumber int, wantText string) {
+	t.Helper()
+	if got.LineNumber != wantLineNumber || got.Text != wantText {
+		t.Fatalf(
+			"context line: want {lineNumber:%d text:%q} got {lineNumber:%d text:%q}",
+			wantLineNumber,
+			wantText,
+			got.LineNumber,
+			got.Text,
+		)
 	}
 }

@@ -36,7 +36,7 @@ var listDirectoryTool = spec.Tool{
 	},
 	"nameGlob": {
 		"type": "string",
-		"description": "Optional glob applied to immediate entry names, like \"*.txt\". Not a regex."
+		"description": "Optional glob applied to immediate entry names, like \"*.txt\"."
 	},
 	"includeDotEntries": {
 		"type": "boolean",

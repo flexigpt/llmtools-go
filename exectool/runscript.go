@@ -23,7 +23,7 @@ var runScriptToolSpec = spec.Tool{
 	Slug:          "runscript",
 	Version:       "v1.0.0",
 	DisplayName:   "Run Script",
-	Description:   "Run a pre-existing script from disk.",
+	Description:   "Run an existing script from disk.",
 	Tags:          []string{"exec"},
 
 	ArgSchema: spec.JSONSchema(`{

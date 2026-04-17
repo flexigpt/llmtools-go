@@ -23,8 +23,9 @@ var searchFilesTool = spec.Tool{
 	Slug:          "searchfiles",
 	Version:       "v1.0.0",
 	DisplayName:   "Search files (content or path)",
-	Description:   "Recursively search files by path, file content, or both. Dot-prefixed files and directories are excluded by default. Content search only checks small (< 1MB) UTF-8 text-like files.",
-	Tags:          []string{"fs", "search"},
+	Description: "Recursively search files by path, file content, or both. " +
+		"Dot-prefixed files and directories are excluded by default. Content search only checks small (< 1MB) UTF-8 text-like files.",
+	Tags: []string{"fs", "search"},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",
@@ -52,7 +53,7 @@ var searchFilesTool = spec.Tool{
 	},
 	"nameGlob": {
 		"type": "string",
-		"description": "Optional basename glob to limit which files are searched, like \"*.go\". Not a regex."
+		"description": "Optional basename glob to limit which files are searched, like \"*.go\"."
 	},
 	"caseSensitive": {
 		"type": "boolean",

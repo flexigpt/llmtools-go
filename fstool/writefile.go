@@ -23,7 +23,7 @@ var writeFileTool = spec.Tool{
 	Slug:          "writefile",
 	Version:       "v1.0.0",
 	DisplayName:   "Write file",
-	Description:   "Write a file to disk. Text mode writes UTF-8 text. Binary mode expects base64 input and writes raw bytes.",
+	Description:   "Write a file to disk. Set createParents=true if folders dont exist. Set overwrite=true to replace the file. Text mode writes UTF-8 text. Binary mode expects base64 input and writes raw bytes.",
 	Tags:          []string{"fs"},
 
 	ArgSchema: spec.JSONSchema(`{

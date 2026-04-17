@@ -19,8 +19,7 @@ var deleteTextLinesTool = spec.Tool{
 	Slug:          "deletetextlines",
 	Version:       "v1.0.0",
 	DisplayName:   "Delete text lines",
-	Description: "Delete a uniquely located block of lines from a UTF-8 text file. Matching compares TrimSpace(line). " +
-		"Before calling, get exact file text and line numbers with find/read tools unless you already have them. " +
+	Description: "Delete a block of lines. Matching compares TrimSpace(line). " +
 		"Use a pointed locator: copy an exact distinctive block of > 2 consecutive lines, add immediate beforeLines/afterLines when the block may repeat, and pass maybeStartLine from the observed line number when relevant. " +
 		"Do not send generic, repeated, overlapping, or conflict-prone deletions. The tool fails unless the final deletion count equals expectedDeletions.",
 	Tags: []string{"text"},
@@ -31,13 +30,13 @@ var deleteTextLinesTool = spec.Tool{
 "properties": {
 "path": {
 	"type": "string",
-	"description": "Path of the UTF-8 text file."
+	"description": "Path of the file."
 },
 "matchLines": {
 	"type": "array",
 	"items": { "type": "string" },
 	"minItems": 1,
-	"description": "Exact consecutive lines to delete, copied from the file. Prefer a distinctive block of > 2 lines. Do not paraphrase. Do not use generic single lines such as blank lines, braces, or repeated return statements. Newline characters inside items are allowed and treated as line breaks."
+	"description": "Lines to delete. Prefer a distinctive block of > 2 lines. Do not paraphrase. Do not use generic single lines such as blank lines, braces, or repeated return statements. Newline characters inside items are allowed and treated as line breaks."
 },
 "beforeLines": {
 	"type": "array",
