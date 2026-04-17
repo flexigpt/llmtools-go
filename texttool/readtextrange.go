@@ -18,7 +18,7 @@ var readTextRangeTool = spec.Tool{
 	Slug:          "readtextrange",
 	Version:       "v1.0.0",
 	DisplayName:   "Read text range",
-	Description: "Read a UTF-8 text file and return original lines with line numbers for building safe follow-up edits. " +
+	Description: "Read a UTF-8 text file and return original lines with line numbers. " +
 		"Use this to capture exact text, enough surrounding context, and pointed marker blocks before calling replace/delete/insert. " +
 		"Optional start and end marker blocks can narrow the range. Marker matching uses TrimSpace(line), and each provided marker must match exactly once, so choose distinctive multi-line markers instead of short generic snippets.",
 	Tags: []string{"text"},
@@ -29,7 +29,7 @@ var readTextRangeTool = spec.Tool{
 "properties": {
 "path": {
 	"type": "string",
-	"description": "Path of the UTF-8 text file."
+	"description": "Path of the file"
 },
 "startMatchLines": {
 	"type": "array",
