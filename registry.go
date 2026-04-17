@@ -148,7 +148,7 @@ func RegisterBuiltins(r *Registry) error {
 	if err := RegisterTypedAsTextTool(r, tt.FindTextTool(), tt.FindText); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, tt.InsertTextLinesTool(), tt.InsertTextLines); err != nil {
+	if err := RegisterTypedAsTextTool(r, tt.InsertTextTool(), tt.InsertText); err != nil {
 		return err
 	}
 	if err := RegisterTypedAsTextTool(r, tt.ReplaceTextTool(), tt.ReplaceText); err != nil {

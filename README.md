@@ -83,7 +83,7 @@ Grouped under `texttool`.
 
 - `readtextrange`: read lines, optionally constrained by unique start/end marker blocks.
 - `findtext`: find matches with context.
-- `inserttextlines`: insert lines at start/end/between text blocks.
+- `inserttext`: insert lines at start/end/between text blocks.
 - `replacetext`: replace exact line blocks, with optional disambiguation using adjacent lines.
 - `deletetextlines`: delete exact line blocks, with optional disambiguation using adjacent lines.
 

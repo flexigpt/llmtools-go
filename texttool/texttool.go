@@ -84,7 +84,7 @@ func NewTextTool(opts ...TextToolOption) (*TextTool, error) {
 
 func (tt *TextTool) DeleteTextLinesTool() spec.Tool { return toolutil.CloneTool(deleteTextLinesTool) }
 func (tt *TextTool) FindTextTool() spec.Tool        { return toolutil.CloneTool(findTextTool) }
-func (tt *TextTool) InsertTextLinesTool() spec.Tool { return toolutil.CloneTool(insertTextLinesTool) }
+func (tt *TextTool) InsertTextTool() spec.Tool      { return toolutil.CloneTool(insertTextTool) }
 func (tt *TextTool) ReadTextRangeTool() spec.Tool   { return toolutil.CloneTool(readTextRangeTool) }
 func (tt *TextTool) ReplaceTextTool() spec.Tool     { return toolutil.CloneTool(replaceTextTool) }
 
@@ -102,10 +102,10 @@ func (tt *TextTool) FindText(ctx context.Context, args FindTextArgs) (*FindTextO
 	})
 }
 
-func (tt *TextTool) InsertTextLines(ctx context.Context, args InsertTextLinesArgs) (*InsertTextLinesOut, error) {
-	return toolutil.WithRecoveryResp(func() (*InsertTextLinesOut, error) {
+func (tt *TextTool) InsertText(ctx context.Context, args InsertTextArgs) (*InsertTextOut, error) {
+	return toolutil.WithRecoveryResp(func() (*InsertTextOut, error) {
 		p := tt.snapshotPolicy()
-		return insertTextLines(ctx, args, p)
+		return insertText(ctx, args, p)
 	})
 }
 

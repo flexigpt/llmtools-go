@@ -13,15 +13,15 @@ import (
 )
 
 const (
-	insertTextLinesFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/texttool/inserttextlines.InsertTextLines"
-	whereBetween          string      = "between"
-	whereEnd              string      = "end"
+	insertTextFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/texttool/inserttext.InsertText"
+	whereBetween     string      = "between"
+	whereEnd         string      = "end"
 )
 
-var insertTextLinesTool = spec.Tool{
+var insertTextTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019c04d3-572e-7d26-b4ca-f37feb7e8368",
-	Slug:          "inserttextlines",
+	Slug:          "inserttext",
 	Version:       "v1.0.0",
 	DisplayName:   "Insert text",
 	Description: "Insert a text block into a text file at the start, end, or between text. " +
@@ -65,13 +65,13 @@ var insertTextLinesTool = spec.Tool{
 "additionalProperties": false
 }`),
 
-	GoImpl: spec.GoToolImpl{FuncID: insertTextLinesFuncID},
+	GoImpl: spec.GoToolImpl{FuncID: insertTextFuncID},
 
 	CreatedAt:  spec.SchemaStartTime,
 	ModifiedAt: spec.SchemaStartTime,
 }
 
-type InsertTextLinesArgs struct {
+type InsertTextArgs struct {
 	Path      string  `json:"path"`
 	Text      *string `json:"text"`
 	Position  string  `json:"position"`
@@ -80,7 +80,7 @@ type InsertTextLinesArgs struct {
 	LineHint  *int    `json:"lineHint,omitempty"`
 }
 
-type InsertTextLinesOut struct {
+type InsertTextOut struct {
 	InsertedAtLine         int  `json:"insertedAtLine"` // 1-based, where insertion begins
 	InsertedLineCount      int  `json:"insertedLineCount"`
 	TextAboveMatchedAtLine *int `json:"textAboveMatchedAtLine,omitempty"` // 1-based start line of the matched textAbove boundary block used in the original file
@@ -94,7 +94,7 @@ func normalizeOptionalTextBlock(s *string) []string {
 	return ioutil.NormalizeTextBlockString(*s)
 }
 
-// insertTextLines inserts Text into a UTF‑8 file.
+// insertText inserts Text into a UTF‑8 file.
 // Behavior notes (entry point):
 //
 //   - File must exist, be regular, not a symlink, and valid UTF‑8.
@@ -104,11 +104,11 @@ func normalizeOptionalTextBlock(s *string) []string {
 //     and insertion occurs at the start of that blank gap.
 //   - The resulting insertion location must match exactly once; otherwise it fails.
 //   - Writes are atomic and preserve newline style and final newline presence.
-func insertTextLines(
+func insertText(
 	ctx context.Context,
-	args InsertTextLinesArgs,
+	args InsertTextArgs,
 	p fspolicy.FSPolicy,
-) (*InsertTextLinesOut, error) {
+) (*InsertTextOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -171,7 +171,7 @@ func insertTextLines(
 		return nil, err
 	}
 
-	return &InsertTextLinesOut{
+	return &InsertTextOut{
 		InsertedAtLine:         insertAt + 1,
 		InsertedLineCount:      len(textToInsert),
 		TextAboveMatchedAtLine: textAboveAt,

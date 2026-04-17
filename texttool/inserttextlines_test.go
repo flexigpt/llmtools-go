@@ -9,7 +9,7 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
-func TestInsertTextLines_HappyPaths(t *testing.T) {
+func TestInsertText_HappyPaths(t *testing.T) {
 	dir := newWorkDir(t)
 	policy, err := fspolicy.New("", nil, true)
 	if err != nil {
@@ -27,13 +27,13 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 	tests := []struct {
 		name    string
 		initial string
-		args    InsertTextLinesArgs
+		args    InsertTextArgs
 		want    want
 	}{
 		{
 			name:    "position_end_inserts_at_end_preserves_final_newline",
 			initial: "A\nB\n",
-			args: InsertTextLinesArgs{
+			args: InsertTextArgs{
 				Position: "end",
 				Text:     stringPtr("X"),
 			},
@@ -46,7 +46,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "position_start_inserts_at_start",
 			initial: "A\nB\nC\n",
-			args: InsertTextLinesArgs{
+			args: InsertTextArgs{
 				Position: "start",
 				Text:     stringPtr("X"),
 			},
@@ -59,7 +59,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "between_with_textBelow_inserts_before_matching_block_trimspace_match",
 			initial: "a\n  ANCHOR  \nb\n",
-			args: InsertTextLinesArgs{
+			args: InsertTextArgs{
 				Position:  "between",
 				Text:      stringPtr("X"),
 				TextBelow: stringPtr("ANCHOR"),
@@ -74,7 +74,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "between_with_textAbove_inserts_after_matching_block_trimspace_match",
 			initial: "a\n  ANCHOR  \nb\n",
-			args: InsertTextLinesArgs{
+			args: InsertTextArgs{
 				Position:  "between",
 				Text:      stringPtr("X"),
 				TextAbove: stringPtr("ANCHOR"),
@@ -89,7 +89,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "between_with_textAbove_and_textBelow_inserts_at_exact_boundary",
 			initial: "## Intro\nParagraph\n## Usage\nParagraph\n",
-			args: InsertTextLinesArgs{
+			args: InsertTextArgs{
 				Position:  "between",
 				Text:      stringPtr("Inserted"),
 				TextAbove: stringPtr("## Usage"),
@@ -106,7 +106,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "between_with_blank_gap_inserts_at_start_of_gap",
 			initial: "A\n\nB\n",
-			args: InsertTextLinesArgs{
+			args: InsertTextArgs{
 				Position:  "between",
 				Text:      stringPtr("X"),
 				TextAbove: stringPtr("A"),
@@ -123,7 +123,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "between_tolerates_blank_line_drift_on_boundary_blocks",
 			initial: "<!-- A END -->\n\n## Section B\n",
-			args: InsertTextLinesArgs{
+			args: InsertTextArgs{
 				Position:  "between",
 				Text:      stringPtr("\nInserted after A"),
 				TextAbove: stringPtr("<!-- A END -->\n\n"),
@@ -140,7 +140,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "between_lineHint_narrows_ambiguous_location",
 			initial: "ANCHOR\nx\nANCHOR\ny\n",
-			args: InsertTextLinesArgs{
+			args: InsertTextArgs{
 				Position:  "between",
 				Text:      stringPtr("X"),
 				TextBelow: stringPtr("ANCHOR"),
@@ -156,7 +156,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "text_with_embedded_newlines_splits_into_multiple_lines",
 			initial: "A\nB\n",
-			args: InsertTextLinesArgs{
+			args: InsertTextArgs{
 				Position: "end",
 				Text:     stringPtr("X\nY"),
 			},
@@ -169,7 +169,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "preserves_crlf_newlines_and_final_newline",
 			initial: "A\r\nB\r\n",
-			args: InsertTextLinesArgs{
+			args: InsertTextArgs{
 				Position: "start",
 				Text:     stringPtr("X"),
 			},
@@ -182,7 +182,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "empty_file_no_final_newline_preserved",
 			initial: "",
-			args: InsertTextLinesArgs{
+			args: InsertTextArgs{
 				Position: "end",
 				Text:     stringPtr("A"),
 			},
@@ -195,7 +195,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "file_with_single_empty_line_and_final_newline_keeps_final_newline",
 			initial: "\n",
-			args: InsertTextLinesArgs{
+			args: InsertTextArgs{
 				Position: "start",
 				Text:     stringPtr("A"),
 			},
@@ -208,7 +208,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "non_empty_file_without_final_newline_preserved",
 			initial: "A",
-			args: InsertTextLinesArgs{
+			args: InsertTextArgs{
 				Position: "end",
 				Text:     stringPtr("B"),
 			},
@@ -225,7 +225,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "insert-*.txt", tt.initial)
 			tt.args.Path = path
 
-			out, err := insertTextLines(t.Context(), tt.args, policy)
+			out, err := insertText(t.Context(), tt.args, policy)
 			mustNoErr(t, err)
 
 			got := readFileString(t, path)
@@ -277,7 +277,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 	}
 }
 
-func TestInsertTextLines_ErrorCases(t *testing.T) {
+func TestInsertText_ErrorCases(t *testing.T) {
 	dir := newWorkDir(t)
 	policy, err := fspolicy.New("", nil, true)
 	if err != nil {
@@ -287,7 +287,7 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 	tests := []struct {
 		name              string
 		setupFile         func() string
-		args              func(path string) InsertTextLinesArgs
+		args              func(path string) InsertTextArgs
 		wantErrSub        string
 		wantIsCtx         bool
 		checkContentAfter bool
@@ -298,8 +298,8 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 			setupFile: func() string {
 				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
 			},
-			args: func(path string) InsertTextLinesArgs {
-				return InsertTextLinesArgs{
+			args: func(path string) InsertTextArgs {
+				return InsertTextArgs{
 					Path:     path,
 					Position: "end",
 				}
@@ -311,8 +311,8 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 			setupFile: func() string {
 				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
 			},
-			args: func(path string) InsertTextLinesArgs {
-				return InsertTextLinesArgs{
+			args: func(path string) InsertTextArgs {
+				return InsertTextArgs{
 					Path: path,
 					Text: stringPtr("X"),
 				}
@@ -324,8 +324,8 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 			setupFile: func() string {
 				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
 			},
-			args: func(path string) InsertTextLinesArgs {
-				return InsertTextLinesArgs{
+			args: func(path string) InsertTextArgs {
+				return InsertTextArgs{
 					Path:     path,
 					Position: "middle",
 					Text:     stringPtr("X"),
@@ -338,8 +338,8 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 			setupFile: func() string {
 				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
 			},
-			args: func(path string) InsertTextLinesArgs {
-				return InsertTextLinesArgs{
+			args: func(path string) InsertTextArgs {
+				return InsertTextArgs{
 					Path:      path,
 					Position:  "end",
 					Text:      stringPtr("X"),
@@ -353,8 +353,8 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 			setupFile: func() string {
 				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
 			},
-			args: func(path string) InsertTextLinesArgs {
-				return InsertTextLinesArgs{
+			args: func(path string) InsertTextArgs {
+				return InsertTextArgs{
 					Path:     path,
 					Position: "between",
 					Text:     stringPtr("X"),
@@ -367,8 +367,8 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 			setupFile: func() string {
 				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
 			},
-			args: func(path string) InsertTextLinesArgs {
-				return InsertTextLinesArgs{
+			args: func(path string) InsertTextArgs {
+				return InsertTextArgs{
 					Path:      path,
 					Position:  "between",
 					Text:      stringPtr("X"),
@@ -383,8 +383,8 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 			setupFile: func() string {
 				return writeTempTextFile(t, dir, "ins-*.txt", "A\nB\n")
 			},
-			args: func(path string) InsertTextLinesArgs {
-				return InsertTextLinesArgs{
+			args: func(path string) InsertTextArgs {
+				return InsertTextArgs{
 					Path:      path,
 					Position:  "between",
 					Text:      stringPtr("X"),
@@ -398,8 +398,8 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 			setupFile: func() string {
 				return writeTempTextFile(t, dir, "ins-*.txt", "A\nnote\nB\n")
 			},
-			args: func(path string) InsertTextLinesArgs {
-				return InsertTextLinesArgs{
+			args: func(path string) InsertTextArgs {
+				return InsertTextArgs{
 					Path:      path,
 					Position:  "between",
 					Text:      stringPtr("X"),
@@ -415,8 +415,8 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 			setupFile: func() string {
 				return writeTempTextFile(t, dir, "ins-*.txt", "ANCHOR\nx\nANCHOR\n")
 			},
-			args: func(path string) InsertTextLinesArgs {
-				return InsertTextLinesArgs{
+			args: func(path string) InsertTextArgs {
+				return InsertTextArgs{
 					Path:      path,
 					Position:  "between",
 					Text:      stringPtr("X"),
@@ -430,8 +430,8 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 			setupFile: func() string {
 				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
 			},
-			args: func(path string) InsertTextLinesArgs {
-				return InsertTextLinesArgs{
+			args: func(path string) InsertTextArgs {
+				return InsertTextArgs{
 					Path:      path,
 					Position:  "end",
 					Text:      stringPtr("X"),
@@ -447,8 +447,8 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 			setupFile: func() string {
 				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
 			},
-			args: func(path string) InsertTextLinesArgs {
-				return InsertTextLinesArgs{
+			args: func(path string) InsertTextArgs {
+				return InsertTextArgs{
 					Path:     path,
 					Position: "end",
 					Text:     stringPtr("X"),
@@ -470,7 +470,7 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := insertTextLines(ctx, args, policy)
+			_, err := insertText(ctx, args, policy)
 			if strings.Contains(tt.name, "context_canceled") {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)

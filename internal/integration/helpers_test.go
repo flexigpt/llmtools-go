@@ -106,8 +106,8 @@ func newHarness(t *testing.T, base string, execOpts ...exectool.ExecToolOption) 
 	if err := llmtools.RegisterTypedAsTextTool(r, tt.FindTextTool(), tt.FindText); err != nil {
 		t.Fatalf("register findtext: %v", err)
 	}
-	if err := llmtools.RegisterTypedAsTextTool(r, tt.InsertTextLinesTool(), tt.InsertTextLines); err != nil {
-		t.Fatalf("register inserttextlines: %v", err)
+	if err := llmtools.RegisterTypedAsTextTool(r, tt.InsertTextTool(), tt.InsertText); err != nil {
+		t.Fatalf("register inserttext: %v", err)
 	}
 	if err := llmtools.RegisterTypedAsTextTool(r, tt.ReplaceTextTool(), tt.ReplaceText); err != nil {
 		t.Fatalf("register replacetext: %v", err)
