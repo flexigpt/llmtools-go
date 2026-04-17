@@ -71,6 +71,167 @@ func RequireSingleMatch(idxs []int, name string) (int, error) {
 	return idxs[0], nil
 }
 
+// NormalizeTextBlockString normalizes a multiline text block into logical lines.
+//
+// It normalizes CRLF/CR to LF and removes at most one terminal newline, so a
+// final line terminator does not create an extra empty line while intentional
+// trailing blank lines are preserved.
+func NormalizeTextBlockString(s string) []string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	s = strings.TrimSuffix(s, "\n")
+	return strings.Split(s, "\n")
+}
+
+// InsertionPointMatch describes one candidate insertion point.
+type InsertionPointMatch struct {
+	InsertAt   int
+	AboveStart *int
+	BelowStart *int
+}
+
+// InsertionPointMatchIndices returns the 0-based insertion indices from matches.
+func InsertionPointMatchIndices(matches []InsertionPointMatch) []int {
+	if len(matches) == 0 {
+		return nil
+	}
+	out := make([]int, len(matches))
+	for i, m := range matches {
+		out[i] = m.InsertAt
+	}
+	return out
+}
+
+// FindTrimmedInsertionPointMatchCandidates returns candidate insertion points.
+//
+// Matching compares strings.TrimSpace line-wise.
+//
+// If only one of above/below is provided, matching is exact at the immediate
+// boundary.
+//
+// If both are provided, the matcher allows zero or more blank or
+// whitespace-only lines between them and places the insertion point at the
+// start of that blank gap. To reduce newline-count brittleness, trailing blank
+// lines in above and leading blank lines in below are ignored for matching when
+// those blocks also contain at least one nonblank line.
+func FindTrimmedInsertionPointMatchCandidates(lines, above, below []string) []InsertionPointMatch {
+	if len(above) == 0 && len(below) == 0 {
+		return nil
+	}
+
+	tLines := GetTrimmedLines(lines)
+
+	switch {
+	case len(above) > 0 && len(below) > 0:
+		tAbove := trimTrailingBoundaryBlankLines(GetTrimmedLines(above))
+		tBelow := trimLeadingBoundaryBlankLines(GetTrimmedLines(below))
+
+		var matches []InsertionPointMatch
+		for insertAt := 0; insertAt <= len(tLines); insertAt++ {
+			var aboveStart *int
+			if len(tAbove) > 0 {
+				start := insertAt - len(tAbove)
+				if !IsBlockEqualsAt(tLines, tAbove, start) {
+					continue
+				}
+				aboveStart = &start
+			}
+
+			var belowStart *int
+			if len(tBelow) > 0 {
+				found := -1
+				for start := insertAt; start <= len(tLines); start++ {
+					if start > insertAt && tLines[start-1] != "" {
+						break
+					}
+					if IsBlockEqualsAt(tLines, tBelow, start) {
+						found = start
+						break
+					}
+				}
+				if found < 0 {
+					continue
+				}
+				belowStart = &found
+			}
+
+			matches = append(matches, InsertionPointMatch{
+				InsertAt:   insertAt,
+				AboveStart: aboveStart,
+				BelowStart: belowStart,
+			})
+		}
+		return matches
+
+	case len(above) > 0:
+		tAbove := GetTrimmedLines(above)
+		var matches []InsertionPointMatch
+		for start := 0; start+len(tAbove) <= len(tLines); start++ {
+			if !IsBlockEqualsAt(tLines, tAbove, start) {
+				continue
+			}
+			s := start
+			matches = append(matches, InsertionPointMatch{
+				InsertAt:   start + len(tAbove),
+				AboveStart: &s,
+			})
+		}
+		return matches
+
+	default:
+		tBelow := GetTrimmedLines(below)
+		var matches []InsertionPointMatch
+		for start := 0; start+len(tBelow) <= len(tLines); start++ {
+			if !IsBlockEqualsAt(tLines, tBelow, start) {
+				continue
+			}
+			s := start
+			matches = append(matches, InsertionPointMatch{
+				InsertAt:   start,
+				BelowStart: &s,
+			})
+		}
+		return matches
+	}
+}
+
+// FindTrimmedInsertionPointMatches returns the 0-based insertion indices from
+// FindTrimmedInsertionPointMatchCandidates.
+func FindTrimmedInsertionPointMatches(lines, above, below []string) []int {
+	return InsertionPointMatchIndices(FindTrimmedInsertionPointMatchCandidates(lines, above, below))
+}
+
+func trimTrailingBoundaryBlankLines(lines []string) []string {
+	if len(lines) == 0 || !hasAnyNonBlankTrimmedLine(lines) {
+		return cloneStringSlice(lines)
+	}
+	end := len(lines)
+	for end > 0 && lines[end-1] == "" {
+		end--
+	}
+	return cloneStringSlice(lines[:end])
+}
+
+func trimLeadingBoundaryBlankLines(lines []string) []string {
+	if len(lines) == 0 || !hasAnyNonBlankTrimmedLine(lines) {
+		return cloneStringSlice(lines)
+	}
+	start := 0
+	for start < len(lines) && lines[start] == "" {
+		start++
+	}
+	return cloneStringSlice(lines[start:])
+}
+
+func hasAnyNonBlankTrimmedLine(lines []string) bool {
+	for _, line := range lines {
+		if line != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func FindTrimmedBlockMatches(lines, block []string) []int {
 	if len(block) == 0 {
 		return nil

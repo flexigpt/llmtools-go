@@ -190,3 +190,7 @@ func debugJSON(t *testing.T, v any) string {
 	}
 	return string(b)
 }
+
+func stringPtr(s string) *string {
+	return &s
+}

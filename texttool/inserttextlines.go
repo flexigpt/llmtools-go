@@ -14,6 +14,7 @@ import (
 
 const (
 	insertTextLinesFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/texttool/inserttextlines.InsertTextLines"
+	whereBetween          string      = "between"
 	whereEnd              string      = "end"
 )
 
@@ -22,58 +23,45 @@ var insertTextLinesTool = spec.Tool{
 	ID:            "019c04d3-572e-7d26-b4ca-f37feb7e8368",
 	Slug:          "inserttextlines",
 	Version:       "v1.0.0",
-	DisplayName:   "Insert text lines",
-	Description: "Insert lines into a UTF-8 text file at start/end or relative to a uniquely matched anchor block. " +
-		"Before calling for beforeAnchor/afterAnchor, locate the anchor with find/read tools unless you already have exact text and line numbers. A unique anchor is required. " +
-		"Anchor matching compares TrimSpace(line). Use a pointed exact anchor of > 2 consecutive lines, add anchorBeforeLines/anchorAfterLines when the anchor may repeat, and pass maybeStartLine from the observed line number when relevant. " +
-		"Do not insert against a generic or repeated anchor.",
+	DisplayName:   "Insert text",
+	Description: "Insert a text block into a text file at the start, end, or between text. " +
+		"Between mode needs atleast one of textAbove or textBelow. Blank or whitespace-only lines are allowed between above and below texts and insertion is at the start of blank space. " +
+		"Include larger textAbove and/or textBelow text when the location may repeat, and pass lineHint from read/find output when relevant. Do not target a generic repeated location.",
 	Tags: []string{"text"},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",
 "type": "object",
 "properties": {
-"path": {
-	"type": "string",
-	"description": "Path of the UTF-8 text file."
+	"path": {
+		"type": "string",
+		"minLength": 1,
+		"description": "Path of the file."
+	},
+	"text": {
+		"type": "string",
+		"description": "Text block to insert. Newline characters are treated as line breaks. A single trailing newline is treated as a line terminator, not as an additional empty line. An empty string inserts one blank line"
+	},
+	"position": {
+		"type": "string",
+		"enum": ["start", "end", "between"],
+		"description": "Where to insert the text block"
+	},
+	"textAbove": {
+		"type": "string",
+		"description": "Text above the insertion point"
+	},
+	"textBelow": {
+		"type": "string",
+		"description": "Text below the insertion point"
+	},
+	"lineHint": {
+		"type": "integer",
+		"minimum": 1,
+		"description": "Optional 1-based hint for the line where inserted text should begin, taken from read/find output. If several locations still match, the tool only succeeds when one nearby location is uniquely preferred within a small built-in tolerance"
+	}
 },
-"position": {
-	"type": "string",
-	"enum": ["start", "end", "beforeAnchor", "afterAnchor"],
-	"description": "Where to insert the new lines.",
-	"default": "end"
-},
-"linesToInsert": {
-	"type": "array",
-	"items": { "type": "string" },
-	"minItems": 1,
-	"description": "Lines to insert. These are written exactly as provided. Newline characters inside items are allowed and are treated as line breaks."
-},
-"anchorMatchLines": {
-	"type": "array",
-	"items": { "type": "string" },
-	"minItems": 1,
-	"description": "Anchor block copied exactly from the file. Required for position=beforeAnchor/afterAnchor. Prefer a distinctive block of > 2 consecutive lines. Do not use short generic anchors."
-},
-"anchorBeforeLines": {
-	"type": "array",
-	"items": { "type": "string" },
-	"minItems": 1,
-	"description": "Optional exact immediate-adjacent lines copied from the file that must appear directly before anchorMatchLines. Use 2-5 lines whenever the anchor might repeat."
-},
-"anchorAfterLines": {
-	"type": "array",
-	"items": { "type": "string" },
-	"minItems": 1,
-	"description": "Optional exact immediate-adjacent lines copied from the file that must appear directly after anchorMatchLines. Use 2-5 lines whenever the anchor might repeat."
-},
-"maybeStartLine": {
-	"type": "integer",
-	"minimum": 1,
-	"description": "Optional 1-based anchor start-line hint taken from read/find output. Supply it whenever available to point at the intended anchor. If several anchors still match, the tool only succeeds when one nearby anchor is uniquely preferred within a small built-in tolerance."
-}
-},
-"required": ["path", "linesToInsert"],
+"required": ["path", "text", "position"],
 "additionalProperties": false
 }`),
 
@@ -84,26 +72,37 @@ var insertTextLinesTool = spec.Tool{
 }
 
 type InsertTextLinesArgs struct {
-	Path              string   `json:"path"`
-	Position          string   `json:"position,omitempty"` // default "end"
-	LinesToInsert     []string `json:"linesToInsert"`
-	AnchorMatchLines  []string `json:"anchorMatchLines,omitempty"`
-	AnchorBeforeLines []string `json:"anchorBeforeLines,omitempty"`
-	AnchorAfterLines  []string `json:"anchorAfterLines,omitempty"`
-	MaybeStartLine    *int     `json:"maybeStartLine,omitempty"`
+	Path      string  `json:"path"`
+	Text      *string `json:"text"`
+	Position  string  `json:"position"`
+	TextAbove *string `json:"textAbove,omitempty"`
+	TextBelow *string `json:"textBelow,omitempty"`
+	LineHint  *int    `json:"lineHint,omitempty"`
 }
 
 type InsertTextLinesOut struct {
-	InsertedAtLine      int  `json:"insertedAtLine"` // 1-based, where insertion begins
-	InsertedLineCount   int  `json:"insertedLineCount"`
-	AnchorMatchedAtLine *int `json:"anchorMatchedAtLine,omitempty"` // 1-based start line of anchor block
+	InsertedAtLine         int  `json:"insertedAtLine"` // 1-based, where insertion begins
+	InsertedLineCount      int  `json:"insertedLineCount"`
+	TextAboveMatchedAtLine *int `json:"textAboveMatchedAtLine,omitempty"` // 1-based start line of the matched textAbove boundary block used in the original file
+	TextBelowMatchedAtLine *int `json:"textBelowMatchedAtLine,omitempty"` // 1-based start line of the matched textBelow boundary block used in the original file
 }
 
-// insertTextLines inserts LinesToInsert into a UTF‑8 file.
+func normalizeOptionalTextBlock(s *string) []string {
+	if s == nil {
+		return nil
+	}
+	return ioutil.NormalizeTextBlockString(*s)
+}
+
+// insertTextLines inserts Text into a UTF‑8 file.
 // Behavior notes (entry point):
+//
 //   - File must exist, be regular, not a symlink, and valid UTF‑8.
 //   - Matching is line-wise using strings.TrimSpace.
-//   - For beforeAnchor/afterAnchor: the anchor block must match exactly once; otherwise it fails.
+//   - For position="between": at least one of textAbove/textBelow is required.
+//   - If both textAbove and textBelow are provided, only blank/whitespace-only lines may lie between them
+//     and insertion occurs at the start of that blank gap.
+//   - The resulting insertion location must match exactly once; otherwise it fails.
 //   - Writes are atomic and preserve newline style and final newline presence.
 func insertTextLines(
 	ctx context.Context,
@@ -114,40 +113,36 @@ func insertTextLines(
 		return nil, err
 	}
 
-	if len(args.LinesToInsert) == 0 {
-		return nil, errors.New("linesToInsert is required")
+	if args.Path == "" {
+		return nil, errors.New("path is required")
+	}
+	if args.Text == nil {
+		return nil, errors.New("text is required")
 	}
 
-	linesToInsert := ioutil.NormalizeLineBlockInput(args.LinesToInsert)
-	anchorLines := ioutil.NormalizeLineBlockInput(args.AnchorMatchLines)
-	anchorBeforeLines := ioutil.NormalizeLineBlockInput(args.AnchorBeforeLines)
-	anchorAfterLines := ioutil.NormalizeLineBlockInput(args.AnchorAfterLines)
 	pos := strings.TrimSpace(strings.ToLower(args.Position))
 	if pos == "" {
-		pos = whereEnd
-	}
-	if args.MaybeStartLine != nil && *args.MaybeStartLine < 1 {
-		args.MaybeStartLine = nil
+		return nil, errors.New("position is required")
 	}
 
-	// Reject irrelevant anchor input to keep calls unambiguous.
+	textToInsert := normalizeOptionalTextBlock(args.Text)
+	textAbove := normalizeOptionalTextBlock(args.TextAbove)
+	textBelow := normalizeOptionalTextBlock(args.TextBelow)
+
 	switch pos {
 	case "start", whereEnd:
-		if len(anchorLines) > 0 {
-			return nil, errors.New(`anchorMatchLines must be omitted when position is "start" or "end"`)
+		if args.TextAbove != nil || args.TextBelow != nil || args.LineHint != nil {
+			return nil, errors.New(`textAbove/textBelow/lineHint must be omitted when position is "start" or "end"`)
 		}
-		if len(anchorBeforeLines) > 0 || len(anchorAfterLines) > 0 {
-			return nil, errors.New(
-				`anchorBeforeLines/anchorAfterLines must be omitted when position is "start" or "end"`,
-			)
+	case whereBetween:
+		if args.TextAbove == nil && args.TextBelow == nil {
+			return nil, errors.New(`position="between" requires textAbove or textBelow`)
 		}
-		if args.MaybeStartLine != nil {
-			return nil, errors.New(`maybeStartLine must be omitted when position is "start" or "end"`)
+		if args.LineHint != nil && *args.LineHint < 1 {
+			return nil, errors.New("lineHint must be >= 1")
 		}
-	case "beforeanchor", "afteranchor":
-		// Anchor required: handled by computeInsertIndex, but we keep this explicit for clarity.
 	default:
-		// Index will error out.
+		// "computeInsertIndex" will return a clear invalid-position error.
 	}
 
 	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, toolutil.MaxTextProcessingBytes)
@@ -155,13 +150,12 @@ func insertTextLines(
 		return nil, err
 	}
 
-	insertAt, anchorAt, err := computeInsertIndex(
+	insertAt, textAboveAt, textBelowAt, err := computeInsertIndex(
 		tf.Lines,
 		pos,
-		anchorLines,
-		anchorBeforeLines,
-		anchorAfterLines,
-		args.MaybeStartLine,
+		textAbove,
+		textBelow,
+		args.LineHint,
 	)
 	if err != nil {
 		return nil, err
@@ -170,7 +164,7 @@ func insertTextLines(
 		return nil, err
 	}
 
-	tf.Lines = insertLines(tf.Lines, insertAt, linesToInsert)
+	tf.Lines = insertLines(tf.Lines, insertAt, textToInsert)
 
 	outStr := tf.Render()
 	if err := ioutil.WriteFileAtomicBytesResolved(p, tf.Path, []byte(outStr), tf.Perm, true); err != nil {
@@ -178,97 +172,88 @@ func insertTextLines(
 	}
 
 	return &InsertTextLinesOut{
-		InsertedAtLine:      insertAt + 1,
-		InsertedLineCount:   len(linesToInsert),
-		AnchorMatchedAtLine: anchorAt,
+		InsertedAtLine:         insertAt + 1,
+		InsertedLineCount:      len(textToInsert),
+		TextAboveMatchedAtLine: textAboveAt,
+		TextBelowMatchedAtLine: textBelowAt,
 	}, nil
 }
 
 func computeInsertIndex(
 	lines []string,
 	pos string,
-	anchor []string,
-	anchorBefore []string,
-	anchorAfter []string,
-	maybeStartLine *int,
-) (insertAt int, anchorAtLine *int, err error) {
+	textAbove []string,
+	textBelow []string,
+	lineHint *int,
+) (insertAt int, textAboveMatchedAtLine, textBelowMatchedAtLine *int, err error) {
 	switch pos {
 	case "start":
-		return 0, nil, nil
+		return 0, nil, nil, nil
 	case whereEnd:
-		return len(lines), nil, nil
-	case "beforeanchor":
-		if len(anchor) == 0 {
-			return 0, nil, errors.New(`position="beforeAnchor" requires anchorMatchLines`)
+		return len(lines), nil, nil, nil
+	case whereBetween:
+		if len(textAbove) == 0 && len(textBelow) == 0 {
+			return 0, nil, nil, errors.New(`position="between" requires textAbove or textBelow`)
 		}
-		idxs := ioutil.FindTrimmedAdjacentBlockMatches(lines, anchorBefore, anchor, anchorAfter)
-		if err := ioutil.EnsureNonOverlappingFixedWidth(idxs, len(anchor)); err != nil {
-			return 0, nil, err
-		}
-		idxs, hintDiag := ioutil.NarrowMatchIndicesByMaybeStartLine(idxs, maybeStartLine, maybeStartLineTolerance)
+
+		matches := ioutil.FindTrimmedInsertionPointMatchCandidates(lines, textAbove, textBelow)
+		idxs := ioutil.InsertionPointMatchIndices(matches)
+		idxs, hintDiag := ioutil.NarrowIndicesByLineHint(idxs, lineHint, maybeStartLineTolerance)
+
 		if len(idxs) != 1 {
-			diag := ioutil.BuildBlockMatchDiagnosticJSON(
+			diag := ioutil.BuildInsertionPointDiagnosticJSON(
 				lines,
 				idxs,
-				len(anchor),
+				len(textAbove),
+				len(textBelow),
 				hintDiag,
 				maxAmbiguityDiagnosticCandidates,
 				ambiguityDiagnosticContextLines,
 			)
+
 			if len(idxs) == 0 {
-				return 0, nil, fmt.Errorf(
-					"no match found for anchorMatchLines. diagnostics=%s suggestion=copy a longer distinctive anchor block from the file, add immediate anchorBeforeLines/anchorAfterLines, and if you know roughly where it is set maybeStartLine near it",
+				return 0, nil, nil, fmt.Errorf(
+					"no insertion point matched the provided textAbove/textBelow. diagnostics=%s suggestion=copy exact text immediately above and/or below the intended insertion point, include more surrounding lines, remember that when both are provided the tool only skips blank or whitespace-only lines between them, and if you know roughly where the text should be inserted set lineHint near that line",
 					diag,
 				)
 			}
-			return 0, nil, fmt.Errorf(
-				"ambiguous match for anchorMatchLines: found %d occurrences. diagnostics=%s suggestion=copy a longer distinctive anchor block from the file, add immediate anchorBeforeLines/anchorAfterLines, and if you know roughly where it is set maybeStartLine near it",
+
+			return 0, nil, nil, fmt.Errorf(
+				"ambiguous insertion point: found %d candidate locations. diagnostics=%s suggestion=copy exact text immediately above and/or below the intended insertion point, include more surrounding lines, remember that when both are provided the tool only skips blank or whitespace-only lines between them, and if you know roughly where the text should be inserted set lineHint near that line",
 				len(idxs),
 				diag,
 			)
 		}
-		i := idxs[0]
-		a := i + 1
-		return i, &a, nil
-	case "afteranchor":
-		if len(anchor) == 0 {
-			return 0, nil, errors.New(`position="afterAnchor" requires anchorMatchLines`)
-		}
-		idxs := ioutil.FindTrimmedAdjacentBlockMatches(lines, anchorBefore, anchor, anchorAfter)
-		if err := ioutil.EnsureNonOverlappingFixedWidth(idxs, len(anchor)); err != nil {
-			return 0, nil, err
-		}
-		idxs, hintDiag := ioutil.NarrowMatchIndicesByMaybeStartLine(idxs, maybeStartLine, maybeStartLineTolerance)
-		if len(idxs) != 1 {
-			diag := ioutil.BuildBlockMatchDiagnosticJSON(
-				lines,
-				idxs,
-				len(anchor),
-				hintDiag,
-				maxAmbiguityDiagnosticCandidates,
-				ambiguityDiagnosticContextLines,
-			)
-			if len(idxs) == 0 {
-				return 0, nil, fmt.Errorf(
-					"no match found for anchorMatchLines. diagnostics=%s suggestion=copy a longer distinctive anchor block from the file, add immediate anchorBeforeLines/anchorAfterLines, and if you know roughly where it is set maybeStartLine near it",
-					diag,
-				)
+
+		insertAt = idxs[0]
+
+		matchIdx := -1
+		for i := range matches {
+			if matches[i].InsertAt == insertAt {
+				matchIdx = i
+				break
 			}
-			return 0, nil, fmt.Errorf(
-				"ambiguous match for anchorMatchLines: found %d occurrences. diagnostics=%s suggestion=copy a longer distinctive anchor block from the file, add immediate anchorBeforeLines/anchorAfterLines, and if you know roughly where it is set maybeStartLine near it",
-				len(idxs),
-				diag,
-			)
 		}
-		i := idxs[0]
-		a := i + 1
-		return i + len(anchor), &a, nil
+		if matchIdx < 0 {
+			return 0, nil, nil, errors.New("internal error resolving insertion point candidate")
+		}
+
+		m := matches[matchIdx]
+		if m.AboveStart != nil {
+			a := *m.AboveStart + 1
+			textAboveMatchedAtLine = &a
+		}
+		if m.BelowStart != nil {
+			b := *m.BelowStart + 1
+			textBelowMatchedAtLine = &b
+		}
+
+		return m.InsertAt, textAboveMatchedAtLine, textBelowMatchedAtLine, nil
 	default:
-		return 0, nil, fmt.Errorf(
-			`invalid position value %q (expected: "start","end","beforeAnchor","afterAnchor")`,
+		return 0, nil, nil, fmt.Errorf(
+			`invalid position value %q (expected: "start","end","between")`,
 			pos,
 		)
-
 	}
 }
 

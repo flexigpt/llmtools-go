@@ -75,13 +75,11 @@ func TestE2E_Text_ReadModifyLoop(t *testing.T) {
 
 	// 5) Insert after a uniquely-matched anchor.
 	_ = callJSON[texttool.InsertTextLinesOut](t, h.r, "inserttextlines", texttool.InsertTextLinesArgs{
-		Path:             docRel,
-		Position:         "afterAnchor",
-		AnchorMatchLines: []string{"<!-- A END -->"},
-		LinesToInsert: []string{
-			"",
-			"Inserted after A",
-		},
+		Path:      docRel,
+		Position:  "between",
+		TextAbove: stringPtr("<!-- A END -->\n\n"),
+		TextBelow: stringPtr("## Section B"),
+		Text:      stringPtr("\nInserted after A"),
 	})
 
 	// 6) Delete a line block (exact match).
