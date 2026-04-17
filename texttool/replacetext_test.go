@@ -125,13 +125,13 @@ func TestReplaceText_HappyPaths(t *testing.T) {
 			wantAtLines: []int{2},
 		},
 		{
-			name:    "newText_empty_string_means_one_blank_line_not_deletion",
+			name:    "blank_line_replacement_uses_explicit_newline_block",
 			initial: "A\nX\nB\n",
 			args: func(path string) ReplaceTextArgs {
 				return ReplaceTextArgs{
 					Path:    path,
 					OldText: stringPtr("X"),
-					NewText: stringPtr(""),
+					NewText: stringPtr("\n"),
 				}
 			},
 			wantContent: "A\n\nB\n",
@@ -139,12 +139,12 @@ func TestReplaceText_HappyPaths(t *testing.T) {
 			wantAtLines: []int{2},
 		},
 		{
-			name:    "oldText_empty_string_can_replace_blank_line",
+			name:    "blank_line_target_uses_explicit_newline_block",
 			initial: "A\n\nB\n",
 			args: func(path string) ReplaceTextArgs {
 				return ReplaceTextArgs{
 					Path:      path,
-					OldText:   stringPtr(""),
+					OldText:   stringPtr("\n"),
 					NewText:   stringPtr("X"),
 					TextAbove: stringPtr("A"),
 					TextBelow: stringPtr("B"),
@@ -242,6 +242,20 @@ func TestReplaceText_ErrorCases(t *testing.T) {
 			wantErrSub: "oldText is required",
 		},
 		{
+			name: "oldText_must_not_be_empty",
+			setup: func() string {
+				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+			},
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
+					Path:    path,
+					OldText: stringPtr(""),
+					NewText: stringPtr("X"),
+				}
+			},
+			wantErrSub: "oldText must not be empty",
+		},
+		{
 			name: "newText_required_nil",
 			setup: func() string {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
@@ -254,6 +268,50 @@ func TestReplaceText_ErrorCases(t *testing.T) {
 				}
 			},
 			wantErrSub: "newText is required",
+		},
+		{
+			name: "newText_must_not_be_empty",
+			setup: func() string {
+				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+			},
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
+					Path:    path,
+					OldText: stringPtr("A"),
+					NewText: stringPtr(""),
+				}
+			},
+			wantErrSub: "newText must not be empty",
+		},
+		{
+			name: "textAbove_must_not_be_empty",
+			setup: func() string {
+				return writeTempTextFile(t, dir, "x-*.txt", "A\nX\n")
+			},
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
+					Path:      path,
+					OldText:   stringPtr("X"),
+					NewText:   stringPtr("Y"),
+					TextAbove: stringPtr(""),
+				}
+			},
+			wantErrSub: "textAbove must not be empty",
+		},
+		{
+			name: "textBelow_must_not_be_empty",
+			setup: func() string {
+				return writeTempTextFile(t, dir, "x-*.txt", "X\nB\n")
+			},
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
+					Path:      path,
+					OldText:   stringPtr("X"),
+					NewText:   stringPtr("Y"),
+					TextBelow: stringPtr(""),
+				}
+			},
+			wantErrSub: "textBelow must not be empty",
 		},
 		{
 			name: "expectedCount_must_be_ge_1",

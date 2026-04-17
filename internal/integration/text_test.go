@@ -83,10 +83,10 @@ func TestE2E_Text_ReadModifyLoop(t *testing.T) {
 	})
 
 	// 6) Delete a line block (exact match).
-	_ = callJSON[texttool.DeleteTextLinesOut](t, h.r, "deletetextlines", texttool.DeleteTextLinesArgs{
-		Path:              docRel,
-		MatchLines:        []string{"Intro line"},
-		ExpectedDeletions: 1,
+	_ = callJSON[texttool.DeleteTextOut](t, h.r, "deletetext", texttool.DeleteTextArgs{
+		Path:          docRel,
+		OldText:       stringPtr("Intro line"),
+		ExpectedCount: intPtr(1),
 	})
 
 	// 7) Verify final content via readfile.

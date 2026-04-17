@@ -112,8 +112,8 @@ func newHarness(t *testing.T, base string, execOpts ...exectool.ExecToolOption) 
 	if err := llmtools.RegisterTypedAsTextTool(r, tt.ReplaceTextTool(), tt.ReplaceText); err != nil {
 		t.Fatalf("register replacetext: %v", err)
 	}
-	if err := llmtools.RegisterTypedAsTextTool(r, tt.DeleteTextLinesTool(), tt.DeleteTextLines); err != nil {
-		t.Fatalf("register deletetextlines: %v", err)
+	if err := llmtools.RegisterTypedAsTextTool(r, tt.DeleteTextTool(), tt.DeleteText); err != nil {
+		t.Fatalf("register deletetext: %v", err)
 	}
 
 	return &harness{t: t, base: base, r: r}

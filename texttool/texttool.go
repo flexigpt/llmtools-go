@@ -82,16 +82,16 @@ func NewTextTool(opts ...TextToolOption) (*TextTool, error) {
 	return tt, nil
 }
 
-func (tt *TextTool) DeleteTextLinesTool() spec.Tool { return toolutil.CloneTool(deleteTextLinesTool) }
-func (tt *TextTool) FindTextTool() spec.Tool        { return toolutil.CloneTool(findTextTool) }
-func (tt *TextTool) InsertTextTool() spec.Tool      { return toolutil.CloneTool(insertTextTool) }
-func (tt *TextTool) ReadTextRangeTool() spec.Tool   { return toolutil.CloneTool(readTextRangeTool) }
-func (tt *TextTool) ReplaceTextTool() spec.Tool     { return toolutil.CloneTool(replaceTextTool) }
+func (tt *TextTool) DeleteTextTool() spec.Tool    { return toolutil.CloneTool(deleteTextTool) }
+func (tt *TextTool) FindTextTool() spec.Tool      { return toolutil.CloneTool(findTextTool) }
+func (tt *TextTool) InsertTextTool() spec.Tool    { return toolutil.CloneTool(insertTextTool) }
+func (tt *TextTool) ReadTextRangeTool() spec.Tool { return toolutil.CloneTool(readTextRangeTool) }
+func (tt *TextTool) ReplaceTextTool() spec.Tool   { return toolutil.CloneTool(replaceTextTool) }
 
-func (tt *TextTool) DeleteTextLines(ctx context.Context, args DeleteTextLinesArgs) (*DeleteTextLinesOut, error) {
-	return toolutil.WithRecoveryResp(func() (*DeleteTextLinesOut, error) {
+func (tt *TextTool) DeleteText(ctx context.Context, args DeleteTextArgs) (*DeleteTextOut, error) {
+	return toolutil.WithRecoveryResp(func() (*DeleteTextOut, error) {
 		p := tt.snapshotPolicy()
-		return deleteTextLines(ctx, args, p)
+		return deleteText(ctx, args, p)
 	})
 }
 

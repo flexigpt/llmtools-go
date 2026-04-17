@@ -51,7 +51,7 @@ func Test_replaceLinesSlice_Bounds(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := replaceLinesSlice(lines, tt.start, tt.end, repl)
+			got := replaceTextBlockLinesSlice(lines, tt.start, tt.end, repl)
 			if len(got) != len(tt.want) {
 				t.Fatalf("len: want %d got %d (%v)", len(tt.want), len(got), got)
 			}

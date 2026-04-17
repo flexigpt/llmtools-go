@@ -85,7 +85,7 @@ Grouped under `texttool`.
 - `findtext`: find matches with context.
 - `inserttext`: insert text at start/end/between text blocks.
 - `replacetext`: replace text, with optional disambiguation using above/below text.
-- `deletetextlines`: delete exact line blocks, with optional disambiguation using adjacent lines.
+- `deletetext`: delete text, with optional disambiguation using above/below text.
 
 ### Image tools
 
