@@ -14,109 +14,160 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	tests := []struct {
-		name         string
-		initial      string
-		args         func(path string) ReplaceTextLinesArgs
-		wantContent  string
-		wantMade     int
-		wantAtLines  []int
-		wantErrSub   string
-		wantErrIsNil bool
+		name        string
+		initial     string
+		args        func(path string) ReplaceTextLinesArgs
+		wantContent string
+		wantMade    int
+		wantAtLines []int
 	}{
 		{
 			name:    "replace_single_line_with_two_lines_default_expected_1",
 			initial: "A\nB\nC\n",
 			args: func(path string) ReplaceTextLinesArgs {
 				return ReplaceTextLinesArgs{
-					Path:             path,
-					MatchLines:       []string{"B"},
-					ReplaceWithLines: []string{"X", "Y"},
+					Path:    path,
+					OldText: stringPtr("B"),
+					NewText: stringPtr("X\nY"),
 				}
 			},
-			wantContent:  "A\nX\nY\nC\n",
-			wantMade:     1,
-			wantAtLines:  []int{2},
-			wantErrIsNil: true,
+			wantContent: "A\nX\nY\nC\n",
+			wantMade:    1,
+			wantAtLines: []int{2},
 		},
 		{
-			name:    "replace_disambiguated_by_before_after",
-			initial: "hdr\nctx1\nX\nctx2\nctx1\nX\nctx3\n",
+			name:    "replace_disambiguated_by_textAbove_textBelow_with_blank_gap_tolerance",
+			initial: "hdr\nctx1\n\nX\n\nctx2\nctx1\nX\nctx3\n",
 			args: func(path string) ReplaceTextLinesArgs {
 				return ReplaceTextLinesArgs{
-					Path:                 path,
-					BeforeLines:          []string{"ctx1"},
-					MatchLines:           []string{"X"},
-					AfterLines:           []string{"ctx2"},
-					ReplaceWithLines:     []string{"REPL"},
-					ExpectedReplacements: ptrInt(1),
+					Path:      path,
+					OldText:   stringPtr("X"),
+					NewText:   stringPtr("REPL"),
+					TextAbove: stringPtr("ctx1\n\n\n"),
+					TextBelow: stringPtr("\n\nctx2"),
 				}
 			},
-			wantContent:  "hdr\nctx1\nREPL\nctx2\nctx1\nX\nctx3\n",
-			wantMade:     1,
-			wantAtLines:  []int{3},
-			wantErrIsNil: true,
+			wantContent: "hdr\nctx1\n\nREPL\n\nctx2\nctx1\nX\nctx3\n",
+			wantMade:    1,
+			wantAtLines: []int{4},
 		},
 		{
 			name:    "preserves_crlf_newlines_and_final_newline",
 			initial: "A\r\nB\r\n",
 			args: func(path string) ReplaceTextLinesArgs {
 				return ReplaceTextLinesArgs{
-					Path:             path,
-					MatchLines:       []string{"B"},
-					ReplaceWithLines: []string{"X"},
+					Path:    path,
+					OldText: stringPtr("B"),
+					NewText: stringPtr("X"),
 				}
 			},
-			wantContent:  "A\r\nX\r\n",
-			wantMade:     1,
-			wantAtLines:  []int{2},
-			wantErrIsNil: true,
+			wantContent: "A\r\nX\r\n",
+			wantMade:    1,
+			wantAtLines: []int{2},
 		},
 		{
-			name:    "replacement_lines_are_written_verbatim_not_trimmed",
-			initial: "A\nB\n",
+			name:    "preserves_absence_of_final_newline",
+			initial: "A\nB",
 			args: func(path string) ReplaceTextLinesArgs {
 				return ReplaceTextLinesArgs{
-					Path:             path,
-					MatchLines:       []string{"B"},
-					ReplaceWithLines: []string{"  X  "},
+					Path:    path,
+					OldText: stringPtr("B"),
+					NewText: stringPtr("X"),
 				}
 			},
-			wantContent:  "A\n  X  \n",
-			wantMade:     1,
-			wantAtLines:  []int{2},
-			wantErrIsNil: true,
+			wantContent: "A\nX",
+			wantMade:    1,
+			wantAtLines: []int{2},
+		},
+		{
+			name:    "matching_uses_trimspace_but_newText_written_verbatim",
+			initial: "A\n  B  \n",
+			args: func(path string) ReplaceTextLinesArgs {
+				return ReplaceTextLinesArgs{
+					Path:    path,
+					OldText: stringPtr("B"),
+					NewText: stringPtr("  X  "),
+				}
+			},
+			wantContent: "A\n  X  \n",
+			wantMade:    1,
+			wantAtLines: []int{2},
 		},
 		{
 			name:    "multiple_replacements_expected_2_reports_original_line_numbers",
 			initial: "A\nX\nB\nX\nC\n",
 			args: func(path string) ReplaceTextLinesArgs {
 				return ReplaceTextLinesArgs{
-					Path:                 path,
-					MatchLines:           []string{"X"},
-					ReplaceWithLines:     []string{"Y"},
-					ExpectedReplacements: ptrInt(2),
+					Path:          path,
+					OldText:       stringPtr("X"),
+					NewText:       stringPtr("Y"),
+					ExpectedCount: intPtr(2),
 				}
 			},
-			wantContent:  "A\nY\nB\nY\nC\n",
-			wantMade:     2,
-			wantAtLines:  []int{2, 4},
-			wantErrIsNil: true,
+			wantContent: "A\nY\nB\nY\nC\n",
+			wantMade:    2,
+			wantAtLines: []int{2, 4},
 		},
 		{
-			name:    "replaceWithLines_embedded_newlines_splits_into_multiple_lines",
+			name:    "newText_embedded_newlines_splits_into_multiple_lines",
 			initial: "A\nX\n",
 			args: func(path string) ReplaceTextLinesArgs {
 				return ReplaceTextLinesArgs{
-					Path:             path,
-					MatchLines:       []string{"X"},
-					ReplaceWithLines: []string{"Y\nZ"},
+					Path:    path,
+					OldText: stringPtr("X"),
+					NewText: stringPtr("Y\nZ"),
 				}
 			},
-			wantContent:  "A\nY\nZ\n",
-			wantMade:     1,
-			wantAtLines:  []int{2},
-			wantErrIsNil: true,
+			wantContent: "A\nY\nZ\n",
+			wantMade:    1,
+			wantAtLines: []int{2},
+		},
+		{
+			name:    "newText_empty_string_means_one_blank_line_not_deletion",
+			initial: "A\nX\nB\n",
+			args: func(path string) ReplaceTextLinesArgs {
+				return ReplaceTextLinesArgs{
+					Path:    path,
+					OldText: stringPtr("X"),
+					NewText: stringPtr(""),
+				}
+			},
+			wantContent: "A\n\nB\n",
+			wantMade:    1,
+			wantAtLines: []int{2},
+		},
+		{
+			name:    "oldText_empty_string_can_replace_blank_line",
+			initial: "A\n\nB\n",
+			args: func(path string) ReplaceTextLinesArgs {
+				return ReplaceTextLinesArgs{
+					Path:      path,
+					OldText:   stringPtr(""),
+					NewText:   stringPtr("X"),
+					TextAbove: stringPtr("A"),
+					TextBelow: stringPtr("B"),
+				}
+			},
+			wantContent: "A\nX\nB\n",
+			wantMade:    1,
+			wantAtLines: []int{2},
+		},
+		{
+			name:    "lineHint_narrows_ambiguous_match",
+			initial: "A\nX\nB\nX\nC\n",
+			args: func(path string) ReplaceTextLinesArgs {
+				return ReplaceTextLinesArgs{
+					Path:     path,
+					OldText:  stringPtr("X"),
+					NewText:  stringPtr("Y"),
+					LineHint: intPtr(4),
+				}
+			},
+			wantContent: "A\nX\nB\nY\nC\n",
+			wantMade:    1,
+			wantAtLines: []int{4},
 		},
 	}
 
@@ -127,6 +178,7 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 
 			out, err := replaceTextLines(t.Context(), args, policy)
 			mustNoErr(t, err)
+
 			if out.ReplacementsMade != len(out.ReplacedAtLines) {
 				t.Fatalf(
 					"invariant failed: ReplacementsMade=%d but len(ReplacedAtLines)=%d",
@@ -134,7 +186,6 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 					len(out.ReplacedAtLines),
 				)
 			}
-
 			if out.ReplacementsMade != tt.wantMade {
 				t.Fatalf("ReplacementsMade: want %d, got %d", tt.wantMade, out.ReplacementsMade)
 			}
@@ -166,6 +217,7 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	tests := []struct {
 		name              string
 		setup             func() string
@@ -176,64 +228,78 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 		wantContentAfter  string
 	}{
 		{
-			name: "matchLines_required",
-			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
-			},
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{Path: path, MatchLines: nil, ReplaceWithLines: []string{"X"}}
-			},
-			wantErrSub: "matchLines is required",
-		},
-		{
-			name: "replaceWithLines_required_nil",
-			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
-			},
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{Path: path, MatchLines: []string{"A"}, ReplaceWithLines: nil}
-			},
-			wantErrSub: "replaceWithLines is required",
-		},
-		{
-			name: "replaceWithLines_must_have_at_least_one_line",
-			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
-			},
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{Path: path, MatchLines: []string{"A"}, ReplaceWithLines: []string{}}
-			},
-			wantErrSub: "must contain at least one line",
-		},
-		{
-			name: "expectedReplacements_must_be_ge_1",
+			name: "oldText_required",
 			setup: func() string {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
 			args: func(path string) ReplaceTextLinesArgs {
 				return ReplaceTextLinesArgs{
-					Path:                 path,
-					MatchLines:           []string{"A"},
-					ReplaceWithLines:     []string{"X"},
-					ExpectedReplacements: ptrInt(0),
+					Path:    path,
+					OldText: nil,
+					NewText: stringPtr("X"),
 				}
 			},
-			wantErrSub: "expectedReplacements must be >= 1",
+			wantErrSub: "oldText is required",
 		},
 		{
-			name: "match_count_mismatch",
+			name: "newText_required_nil",
+			setup: func() string {
+				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+			},
+			args: func(path string) ReplaceTextLinesArgs {
+				return ReplaceTextLinesArgs{
+					Path:    path,
+					OldText: stringPtr("A"),
+					NewText: nil,
+				}
+			},
+			wantErrSub: "newText is required",
+		},
+		{
+			name: "expectedCount_must_be_ge_1",
+			setup: func() string {
+				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+			},
+			args: func(path string) ReplaceTextLinesArgs {
+				return ReplaceTextLinesArgs{
+					Path:          path,
+					OldText:       stringPtr("A"),
+					NewText:       stringPtr("X"),
+					ExpectedCount: intPtr(0),
+				}
+			},
+			wantErrSub: "expectedCount must be >= 1",
+		},
+		{
+			name: "lineHint_must_be_ge_1",
+			setup: func() string {
+				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+			},
+			args: func(path string) ReplaceTextLinesArgs {
+				return ReplaceTextLinesArgs{
+					Path:     path,
+					OldText:  stringPtr("A"),
+					NewText:  stringPtr("X"),
+					LineHint: intPtr(0),
+				}
+			},
+			wantErrSub: "lineHint must be >= 1",
+		},
+		{
+			name: "lineHint_may_only_be_used_when_expectedCount_is_1",
 			setup: func() string {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\nA\n")
 			},
 			args: func(path string) ReplaceTextLinesArgs {
 				return ReplaceTextLinesArgs{
-					Path:             path,
-					MatchLines:       []string{"A"},
-					ReplaceWithLines: []string{"X"},
-					// Default expected=1, but found=2.
+					Path:          path,
+					OldText:       stringPtr("A"),
+					NewText:       stringPtr("X"),
+					LineHint:      intPtr(1),
+					ExpectedCount: intPtr(2),
 				}
 			},
-			wantErrSub: "replace match count mismatch",
+			wantErrSub: "lineHint may only be used when expectedCount == 1",
 		},
 		{
 			name: "match_count_mismatch_does_not_modify_file",
@@ -242,15 +308,48 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 			},
 			args: func(path string) ReplaceTextLinesArgs {
 				return ReplaceTextLinesArgs{
-					Path:             path,
-					MatchLines:       []string{"A"},
-					ReplaceWithLines: []string{"X"},
-					// Default expected=1, but found=2.
+					Path:    path,
+					OldText: stringPtr("A"),
+					NewText: stringPtr("X"),
 				}
 			},
 			wantErrSub:        "replace match count mismatch",
 			checkContentAfter: true,
 			wantContentAfter:  "A\nA\n",
+		},
+		{
+			name: "lineHint_tie_does_not_break_ambiguity",
+			setup: func() string {
+				return writeTempTextFile(t, dir, "x-*.txt", "A\nX\nB\nX\nC\n")
+			},
+			args: func(path string) ReplaceTextLinesArgs {
+				return ReplaceTextLinesArgs{
+					Path:     path,
+					OldText:  stringPtr("X"),
+					NewText:  stringPtr("Y"),
+					LineHint: intPtr(3),
+				}
+			},
+			wantErrSub:        "replace match count mismatch",
+			checkContentAfter: true,
+			wantContentAfter:  "A\nX\nB\nX\nC\n",
+		},
+		{
+			name: "textAbove_does_not_skip_nonblank_lines",
+			setup: func() string {
+				return writeTempTextFile(t, dir, "x-*.txt", "A\nmid\nX\n")
+			},
+			args: func(path string) ReplaceTextLinesArgs {
+				return ReplaceTextLinesArgs{
+					Path:      path,
+					OldText:   stringPtr("X"),
+					NewText:   stringPtr("Y"),
+					TextAbove: stringPtr("A"),
+				}
+			},
+			wantErrSub:        "replace match count mismatch",
+			checkContentAfter: true,
+			wantContentAfter:  "A\nmid\nX\n",
 		},
 		{
 			name: "overlapping_matches_rejected",
@@ -259,10 +358,10 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 			},
 			args: func(path string) ReplaceTextLinesArgs {
 				return ReplaceTextLinesArgs{
-					Path:                 path,
-					MatchLines:           []string{"X", "X"},
-					ReplaceWithLines:     []string{"Y", "Y"},
-					ExpectedReplacements: ptrInt(2),
+					Path:          path,
+					OldText:       stringPtr("X\nX"),
+					NewText:       stringPtr("Y\nY"),
+					ExpectedCount: intPtr(2),
 				}
 			},
 			wantErrSub:        "overlapping matches detected",
@@ -276,9 +375,9 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 			},
 			args: func(path string) ReplaceTextLinesArgs {
 				return ReplaceTextLinesArgs{
-					Path:             path,
-					MatchLines:       []string{"A"},
-					ReplaceWithLines: []string{"X"},
+					Path:    path,
+					OldText: stringPtr("A"),
+					NewText: stringPtr("X"),
 				}
 			},
 			wantIsCtx: true,
@@ -304,7 +403,9 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 				}
 				return
 			}
+
 			mustErrContains(t, err, tt.wantErrSub)
+
 			if tt.checkContentAfter {
 				got := readFileString(t, path)
 				if got != tt.wantContentAfter {

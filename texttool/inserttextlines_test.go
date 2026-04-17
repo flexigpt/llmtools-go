@@ -489,11 +489,3 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 		})
 	}
 }
-
-func stringPtr(s string) *string {
-	return &s
-}
-
-func intPtr(v int) *int {
-	return &v
-}

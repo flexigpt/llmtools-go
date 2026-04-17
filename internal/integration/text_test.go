@@ -65,12 +65,12 @@ func TestE2E_Text_ReadModifyLoop(t *testing.T) {
 	// 4) Replace only the TODO in Section B using beforeLines/afterLines disambiguation.
 	one := 1
 	_ = callJSON[texttool.ReplaceTextLinesOut](t, h.r, "replacetextlines", texttool.ReplaceTextLinesArgs{
-		Path:                 docRel,
-		BeforeLines:          []string{"<!-- B START -->"},
-		MatchLines:           []string{"TODO: old"},
-		AfterLines:           []string{"<!-- B END -->"},
-		ReplaceWithLines:     []string{"TODO: new"},
-		ExpectedReplacements: &one,
+		Path:          docRel,
+		TextAbove:     stringPtr("<!-- B START -->"),
+		OldText:       stringPtr("TODO: old"),
+		TextBelow:     stringPtr("<!-- B END -->"),
+		NewText:       stringPtr("TODO: new"),
+		ExpectedCount: &one,
 	})
 
 	// 5) Insert after a uniquely-matched anchor.

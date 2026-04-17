@@ -103,8 +103,6 @@ func mustNoErr(t *testing.T, err error) {
 	}
 }
 
-func ptrInt(v int) *int { return &v }
-
 func makeNLines(n int, line func(i int) string, sep string, finalNewline bool) string {
 	var sb strings.Builder
 	for i := 1; i <= n; i++ {
@@ -114,4 +112,12 @@ func makeNLines(n int, line func(i int) string, sep string, finalNewline bool) s
 		}
 	}
 	return sb.String()
+}
+
+func stringPtr(s string) *string {
+	return &s
+}
+
+func intPtr(v int) *int {
+	return &v
 }

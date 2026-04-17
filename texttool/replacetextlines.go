@@ -2,6 +2,7 @@ package texttool
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -13,55 +14,63 @@ import (
 
 const replaceTextLinesFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/texttool/replacetextlines.ReplaceTextLines"
 
+const (
+	replaceTextLinesLineHintTolerance                = 8
+	replaceTextLinesMaxAmbiguityDiagnosticCandidates = 5
+	replaceTextLinesAmbiguityDiagnosticContextLines  = 1
+)
+
 var replaceTextLinesTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019c04d3-c723-7dfa-b85a-12ee7d328502",
 	Slug:          "replacetextlines",
 	Version:       "v1.0.0",
-	DisplayName:   "Replace text lines",
-	Description: "Replace a uniquely located block of lines in a UTF-8 text file with a NEW non-empty block of lines. Matching uses TrimSpace(line). " +
-		"The required params are: **replaceWithLines**, path, matchLines. The tool fails if any required param is missing. " +
-		"Use a pointed locator: copy an exact distinctive block of > 2 consecutive lines, add immediate beforeLines/afterLines when the block may repeat, and pass maybeStartLine from the observed line number when relevant. " +
-		"Do not send empty replacements, generic, repeated, overlapping, or conflict-prone edits.",
+	DisplayName:   "Replace text",
+	Description: "Replace a text block in a UTF-8 text file with new text. Matching uses TrimSpace(line). " +
+		"Required params are path, oldText, and newText. Use textAbove and/or textBelow as location hints; " +
+		"only blank or whitespace-only lines may lie between these hints and oldText. " +
+		"Use lineHint for the normal single-match case. The tool fails unless the number of matches equals expectedCount (default 1). " +
+		"newText is required and an empty string means one blank line.",
 	Tags: []string{"text"},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",
 "type": "object",
 "properties": {
-"path": {
-	"type": "string",
-	"description": "Path of the UTF-8 text file."
+	"path": {
+		"type": "string",
+		"minLength": 1,
+		"description": "Path of file."
+	},
+	"oldText": {
+		"type": "string",
+		"description": "Exact text block to replace."
+	},
+	"newText": {
+		"type": "string",
+		"description": "Replacement text block written exactly as provided. An empty string means one blank line."
+	},
+	"textAbove": {
+		"type": "string",
+		"description": "Optional copied text above oldText used only to locate the occurrence"
+	},
+	"textBelow": {
+		"type": "string",
+		"description": "Optional copied text below oldText used only to locate the intended occurrence"
+	},
+	"lineHint": {
+		"type": "integer",
+		"minimum": 1,
+		"description": "Optional 1-based hint for the start line of oldText. Use only when expectedCount is 1."
+	},
+	"expectedCount": {
+		"type": "integer",
+		"minimum": 1,
+		"default": 1,
+		"description": "Fail unless exactly this many replacements would be made. Keep this at 1 for the normal case. Do not raise it to bypass ambiguity."
+	}
 },
-"matchLines": {
-	"type": "array",
-	"items": { "type": "string" },
-	"minItems": 1,
-	"description": "Exact consecutive lines to replace, copied from the file. Prefer a distinctive block of > 2 lines. Do not paraphrase. Do not use generic single lines such as blank lines, braces, or repeated return statements."
-},
-"beforeLines": {
-	"type": "array",
-	"items": { "type": "string" },
-	"description": "Optional exact immediate-adjacent lines copied from the file that must appear directly before matchLines. Use 2-5 lines whenever the target block might repeat."
-},
-"afterLines": {
-	"type": "array",
-	"items": { "type": "string" },
-	"description": "Optional exact immediate-adjacent lines copied from the file that must appear directly after matchLines. Use 2-5 lines whenever the target block might repeat."
-},
-"maybeStartLine": {
-	"type": "integer",
-	"minimum": 1,
-	"description": "Optional 1-based start-line hint taken from read/find output. Supply it whenever available to point at the intended occurrence. If several matches still exist, the tool only succeeds when one nearby match is uniquely preferred within a small built-in tolerance."
-},
-"expectedReplacements": {
-	"type": "integer",
-	"minimum": 1,
-	"default": 1,
-	"description": "Fail if replacements made != this value. Keep at 1 for the normal case. Do not raise this to bypass ambiguity."
-}
-},
-"required": ["path", "matchLines", "replaceWithLines"],
+"required": ["path", "oldText", "newText"],
 "additionalProperties": false
 }`),
 
@@ -74,33 +83,39 @@ var replaceTextLinesTool = spec.Tool{
 type ReplaceTextLinesArgs struct {
 	Path string `json:"path"`
 
-	MatchLines []string `json:"matchLines"`
+	// Required. Nil means omitted. An empty string means one blank line.
+	OldText *string `json:"oldText"`
 
-	// Required; must contain at least one line.
-	// This tool does NOT support deletion (use deletetextlines).
-	ReplaceWithLines []string `json:"replaceWithLines"`
+	// Required. Nil means omitted. An empty string means one blank line, not deletion.
+	NewText *string `json:"newText"`
 
-	BeforeLines    []string `json:"beforeLines,omitempty"`
-	AfterLines     []string `json:"afterLines,omitempty"`
-	MaybeStartLine *int     `json:"maybeStartLine,omitempty"`
+	TextAbove *string `json:"textAbove,omitempty"`
+	TextBelow *string `json:"textBelow,omitempty"`
 
-	// Pointer is used so we can distinguish "omitted" (default to 1) from "explicit 0" (error).
-	ExpectedReplacements *int `json:"expectedReplacements,omitempty"` // default 1; minimum 1
+	// Optional 1-based hint for the start line of oldText.
+	// May only be used when ExpectedCount is omitted or 1.
+	LineHint *int `json:"lineHint,omitempty"`
+
+	// Default 1.
+	ExpectedCount *int `json:"expectedCount,omitempty"`
 }
 
 type ReplaceTextLinesOut struct {
 	ReplacementsMade int   `json:"replacementsMade"`
-	ReplacedAtLines  []int `json:"replacedAtLines"` // 1-based start line of each replacement
+	ReplacedAtLines  []int `json:"replacedAtLines"` // 1-based start lines of replaced oldText blocks
 }
 
-// replaceTextLines replaces occurrences of MatchLines in a UTF‑8 file.
+// replaceTextLines replaces occurrences of OldText in a UTF-8 file.
 //
-// Behavior notes (entry point):
-//   - File must exist, be regular, not a symlink, and valid UTF‑8.
-//   - Matching is line-wise using TrimSpace comparisons (for both file + input blocks).
-//   - Returned/inserted lines are written exactly as provided (no trimming).
-//   - Deterministic / no ambiguity: fails unless match count == expectedReplacements (default 1, minimum 1).
-//   - Deletion is not supported here; use deletetextlines.
+// Behavior notes:
+//   - File must exist, be regular, not a symlink, and valid UTF-8.
+//   - Matching is line-wise using TrimSpace comparisons.
+//   - oldText is the exact block that is replaced.
+//   - textAbove/textBelow are locator-only context and are not replaced.
+//   - Only blank or whitespace-only lines may lie between that context and the target.
+//   - lineHint is a soft 1-based hint and may only be used when expectedCount == 1.
+//   - newText is written exactly as provided after normalization into logical lines.
+//   - newText="" means one blank line, not deletion.
 //   - Writes are atomic and preserve newline style and final newline presence.
 func replaceTextLines(
 	ctx context.Context,
@@ -110,70 +125,69 @@ func replaceTextLines(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	matchLines := ioutil.NormalizeLineBlockInput(args.MatchLines)
-	beforeLines := ioutil.NormalizeLineBlockInput(args.BeforeLines)
-	afterLines := ioutil.NormalizeLineBlockInput(args.AfterLines)
-	if args.MaybeStartLine != nil && *args.MaybeStartLine < 1 {
-		return nil, fmt.Errorf("maybeStartLine must be >= 1 (got %d)", *args.MaybeStartLine)
+	if args.OldText == nil {
+		return nil, errors.New("oldText is required")
 	}
-
-	if len(matchLines) == 0 {
-		return nil, errors.New("matchLines is required")
+	if args.NewText == nil {
+		return nil, errors.New("newText is required")
 	}
-	// Required field semantics: nil means omitted (programmatic call error).
-	if args.ReplaceWithLines == nil {
-		return nil, errors.New("replaceWithLines is required")
-	}
-	replaceWith := ioutil.NormalizeLineBlockInput(args.ReplaceWithLines)
-	if len(replaceWith) == 0 {
-		return nil, errors.New(
-			"replaceWithLines must contain at least one line (deletion is not supported by this tool)",
-		)
+	if args.LineHint != nil && *args.LineHint < 1 {
+		return nil, fmt.Errorf("lineHint must be >= 1 (got %d)", *args.LineHint)
 	}
 
 	expected := 1
-	if args.ExpectedReplacements != nil {
-		expected = *args.ExpectedReplacements
+	if args.ExpectedCount != nil {
+		expected = *args.ExpectedCount
 	}
 	if expected < 1 {
-		return nil, fmt.Errorf("expectedReplacements must be >= 1 (got %d)", expected)
+		return nil, fmt.Errorf("expectedCount must be >= 1 (got %d)", expected)
 	}
+	if args.LineHint != nil && expected != 1 {
+		return nil, errors.New("lineHint may only be used when expectedCount == 1")
+	}
+
+	oldText := ioutil.NormalizeTextBlockString(*args.OldText)
+	newText := ioutil.NormalizeTextBlockString(*args.NewText)
+	textAbove := normalizeOptionalTextBlockString(args.TextAbove)
+	textBelow := normalizeOptionalTextBlockString(args.TextBelow)
 
 	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, toolutil.MaxTextProcessingBytes)
 	if err != nil {
 		return nil, err
 	}
 
-	matchIdxs := ioutil.FindTrimmedAdjacentBlockMatches(tf.Lines, beforeLines, matchLines, afterLines)
+	matchIdxs := findTrimmedReplaceTextMatchStarts(tf.Lines, textAbove, oldText, textBelow)
+
 	// Overlap guard: overlapping matches make replacements ambiguous.
-	if err := ioutil.EnsureNonOverlappingFixedWidth(matchIdxs, len(matchLines)); err != nil {
+	if err := ioutil.EnsureNonOverlappingFixedWidth(matchIdxs, len(oldText)); err != nil {
 		return nil, err
 	}
-	var hintDiag *ioutil.MaybeStartLineDiagnostic
+
+	var hintDiag *ioutil.LineHintDiagnostic
 	if expected == 1 {
-		matchIdxs, hintDiag = ioutil.NarrowMatchIndicesByMaybeStartLine(
+		matchIdxs, hintDiag = ioutil.NarrowIndicesByLineHint(
 			matchIdxs,
-			args.MaybeStartLine,
-			maybeStartLineTolerance,
+			args.LineHint,
+			replaceTextLinesLineHintTolerance,
 		)
 	}
 
 	if len(matchIdxs) != expected {
-		suggestion := "copy a longer unique matchLines block from the file and add immediate beforeLines/afterLines"
+		suggestion := "copy a longer unique oldText block from the file and add nearby textAbove/textBelow"
 		if expected == 1 {
-			suggestion += "; if you know roughly where the block is, set maybeStartLine near the intended start line"
+			suggestion += "; if you know roughly where the block starts, set lineHint near the intended start line"
 		}
 		return nil, fmt.Errorf(
 			"replace match count mismatch: expected %d, found %d. diagnostics=%s suggestion=%s",
 			expected,
 			len(matchIdxs),
-			ioutil.BuildBlockMatchDiagnosticJSON(
+			buildReplaceTextLinesDiagnosticJSON(
 				tf.Lines,
 				matchIdxs,
-				len(matchLines),
+				len(oldText),
 				hintDiag,
-				maxAmbiguityDiagnosticCandidates,
-				ambiguityDiagnosticContextLines,
+				replaceTextLinesMaxAmbiguityDiagnosticCandidates,
+				replaceTextLinesAmbiguityDiagnosticContextLines,
 			),
 			suggestion,
 		)
@@ -185,8 +199,8 @@ func replaceTextLines(
 			return nil, err
 		}
 		start := matchIdxs[i]
-		end := start + len(matchLines) // exclusive
-		tf.Lines = replaceLinesSlice(tf.Lines, start, end, replaceWith)
+		end := start + len(oldText) // exclusive
+		tf.Lines = replaceLinesSlice(tf.Lines, start, end, newText)
 	}
 
 	outStr := tf.Render()
@@ -203,6 +217,200 @@ func replaceTextLines(
 		ReplacementsMade: len(matchIdxs),
 		ReplacedAtLines:  replacedAt,
 	}, nil
+}
+
+func normalizeOptionalTextBlockString(s *string) []string {
+	if s == nil {
+		return nil
+	}
+	return ioutil.NormalizeTextBlockString(*s)
+}
+
+func findTrimmedReplaceTextMatchStarts(lines, textAbove, oldText, textBelow []string) []int {
+	if len(oldText) == 0 {
+		return nil
+	}
+
+	tLines := ioutil.GetTrimmedLines(lines)
+	tAbove := trimReplaceTextAboveBoundaryBlankLines(ioutil.GetTrimmedLines(textAbove))
+	tOld := ioutil.GetTrimmedLines(oldText)
+	tBelow := trimReplaceTextBelowBoundaryBlankLines(ioutil.GetTrimmedLines(textBelow))
+
+	var idxs []int
+	for start := 0; start+len(tOld) <= len(tLines); start++ {
+		if !ioutil.IsBlockEqualsAt(tLines, tOld, start) {
+			continue
+		}
+		if !replaceTextAboveContextMatchesAt(tLines, tAbove, start) {
+			continue
+		}
+		if !replaceTextBelowContextMatchesAt(tLines, tBelow, start+len(tOld)) {
+			continue
+		}
+		idxs = append(idxs, start)
+	}
+
+	return idxs
+}
+
+func replaceTextAboveContextMatchesAt(tLines, tAbove []string, targetStart int) bool {
+	if len(tAbove) == 0 {
+		return true
+	}
+
+	for end := targetStart; end >= len(tAbove); end-- {
+		if end < targetStart && tLines[end] != "" {
+			break
+		}
+		if ioutil.IsBlockEqualsAt(tLines, tAbove, end-len(tAbove)) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func replaceTextBelowContextMatchesAt(tLines, tBelow []string, targetEnd int) bool {
+	if len(tBelow) == 0 {
+		return true
+	}
+
+	for start := targetEnd; start+len(tBelow) <= len(tLines); start++ {
+		if start > targetEnd && tLines[start-1] != "" {
+			break
+		}
+		if ioutil.IsBlockEqualsAt(tLines, tBelow, start) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func trimReplaceTextAboveBoundaryBlankLines(lines []string) []string {
+	if len(lines) == 0 || !replaceTextLinesHasAnyNonBlankTrimmedLine(lines) {
+		return replaceTextLinesCloneStringSlice(lines)
+	}
+	end := len(lines)
+	for end > 0 && lines[end-1] == "" {
+		end--
+	}
+	return replaceTextLinesCloneStringSlice(lines[:end])
+}
+
+func trimReplaceTextBelowBoundaryBlankLines(lines []string) []string {
+	if len(lines) == 0 || !replaceTextLinesHasAnyNonBlankTrimmedLine(lines) {
+		return replaceTextLinesCloneStringSlice(lines)
+	}
+	start := 0
+	for start < len(lines) && lines[start] == "" {
+		start++
+	}
+	return replaceTextLinesCloneStringSlice(lines[start:])
+}
+
+func replaceTextLinesHasAnyNonBlankTrimmedLine(lines []string) bool {
+	for _, line := range lines {
+		if line != "" {
+			return true
+		}
+	}
+	return false
+}
+
+type replaceTextLinesCandidateDiagnostic struct {
+	StartLine   int      `json:"startLine"`
+	EndLine     int      `json:"endLine"`
+	BeforeLines []string `json:"beforeLines,omitempty"`
+	OldText     []string `json:"oldText"`
+	AfterLines  []string `json:"afterLines,omitempty"`
+}
+
+type replaceTextLinesDiagnostic struct {
+	CandidateStartLines         []int                                 `json:"candidateStartLines,omitempty"`
+	AdditionalCandidatesOmitted int                                   `json:"additionalCandidatesOmitted,omitempty"`
+	SampleCandidates            []replaceTextLinesCandidateDiagnostic `json:"sampleCandidates,omitempty"`
+	LineHint                    *ioutil.LineHintDiagnostic            `json:"lineHint,omitempty"`
+}
+
+func buildReplaceTextLinesDiagnosticJSON(
+	lines []string,
+	matchIdxs []int,
+	oldWidth int,
+	hint *ioutil.LineHintDiagnostic,
+	maxCandidates int,
+	contextLines int,
+) string {
+	diag := replaceTextLinesDiagnostic{
+		CandidateStartLines: ioutil.OneBasedLineNumbers(matchIdxs),
+		LineHint:            hint,
+	}
+
+	if maxCandidates < 0 {
+		maxCandidates = 0
+	}
+	if contextLines < 0 {
+		contextLines = 0
+	}
+	if oldWidth < 1 {
+		oldWidth = 1
+	}
+
+	limit := len(matchIdxs)
+	if maxCandidates > 0 && limit > maxCandidates {
+		limit = maxCandidates
+		diag.AdditionalCandidatesOmitted = len(matchIdxs) - maxCandidates
+	}
+
+	if limit > 0 && len(lines) > 0 {
+		diag.SampleCandidates = make([]replaceTextLinesCandidateDiagnostic, 0, limit)
+		for _, idx := range matchIdxs[:limit] {
+			if idx < 0 || idx >= len(lines) {
+				continue
+			}
+
+			matchEndExclusive := replaceTextLinesMin(idx+oldWidth, len(lines))
+			beforeStart := replaceTextLinesMax(idx-contextLines, 0)
+			afterEnd := replaceTextLinesMin(matchEndExclusive+contextLines, len(lines))
+
+			diag.SampleCandidates = append(diag.SampleCandidates, replaceTextLinesCandidateDiagnostic{
+				StartLine:   idx + 1,
+				EndLine:     matchEndExclusive,
+				BeforeLines: replaceTextLinesCloneStringSlice(lines[beforeStart:idx]),
+				OldText:     replaceTextLinesCloneStringSlice(lines[idx:matchEndExclusive]),
+				AfterLines:  replaceTextLinesCloneStringSlice(lines[matchEndExclusive:afterEnd]),
+			})
+		}
+	}
+
+	b, err := json.Marshal(diag)
+	if err != nil {
+		return fmt.Sprintf("candidateStartLines=%v", ioutil.OneBasedLineNumbers(matchIdxs))
+	}
+	return string(b)
+}
+
+func replaceTextLinesCloneStringSlice(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
+}
+
+func replaceTextLinesMin(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func replaceTextLinesMax(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func replaceLinesSlice(lines []string, start, end int, repl []string) []string {
