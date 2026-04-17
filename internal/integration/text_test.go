@@ -64,7 +64,7 @@ func TestE2E_Text_ReadModifyLoop(t *testing.T) {
 
 	// 4) Replace only the TODO in Section B using beforeLines/afterLines disambiguation.
 	one := 1
-	_ = callJSON[texttool.ReplaceTextLinesOut](t, h.r, "replacetextlines", texttool.ReplaceTextLinesArgs{
+	_ = callJSON[texttool.ReplaceTextOut](t, h.r, "replacetext", texttool.ReplaceTextArgs{
 		Path:          docRel,
 		TextAbove:     stringPtr("<!-- B START -->"),
 		OldText:       stringPtr("TODO: old"),

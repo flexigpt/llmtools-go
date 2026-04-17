@@ -12,18 +12,18 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
-const replaceTextLinesFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/texttool/replacetextlines.ReplaceTextLines"
+const replaceTextFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/texttool/replacetext.ReplaceText"
 
 const (
-	replaceTextLinesLineHintTolerance                = 8
-	replaceTextLinesMaxAmbiguityDiagnosticCandidates = 5
-	replaceTextLinesAmbiguityDiagnosticContextLines  = 1
+	replaceTextLineHintTolerance                = 8
+	replaceTextMaxAmbiguityDiagnosticCandidates = 5
+	replaceTextAmbiguityDiagnosticContextLines  = 1
 )
 
-var replaceTextLinesTool = spec.Tool{
+var replaceTextTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019c04d3-c723-7dfa-b85a-12ee7d328502",
-	Slug:          "replacetextlines",
+	Slug:          "replacetext",
 	Version:       "v1.0.0",
 	DisplayName:   "Replace text",
 	Description: "Replace a text block in a UTF-8 text file with new text. Matching uses TrimSpace(line). " +
@@ -74,13 +74,13 @@ var replaceTextLinesTool = spec.Tool{
 "additionalProperties": false
 }`),
 
-	GoImpl: spec.GoToolImpl{FuncID: replaceTextLinesFuncID},
+	GoImpl: spec.GoToolImpl{FuncID: replaceTextFuncID},
 
 	CreatedAt:  spec.SchemaStartTime,
 	ModifiedAt: spec.SchemaStartTime,
 }
 
-type ReplaceTextLinesArgs struct {
+type ReplaceTextArgs struct {
 	Path string `json:"path"`
 
 	// Required. Nil means omitted. An empty string means one blank line.
@@ -100,12 +100,12 @@ type ReplaceTextLinesArgs struct {
 	ExpectedCount *int `json:"expectedCount,omitempty"`
 }
 
-type ReplaceTextLinesOut struct {
+type ReplaceTextOut struct {
 	ReplacementsMade int   `json:"replacementsMade"`
 	ReplacedAtLines  []int `json:"replacedAtLines"` // 1-based start lines of replaced oldText blocks
 }
 
-// replaceTextLines replaces occurrences of OldText in a UTF-8 file.
+// replaceText replaces occurrences of OldText in a UTF-8 file.
 //
 // Behavior notes:
 //   - File must exist, be regular, not a symlink, and valid UTF-8.
@@ -117,11 +117,11 @@ type ReplaceTextLinesOut struct {
 //   - newText is written exactly as provided after normalization into logical lines.
 //   - newText="" means one blank line, not deletion.
 //   - Writes are atomic and preserve newline style and final newline presence.
-func replaceTextLines(
+func replaceText(
 	ctx context.Context,
-	args ReplaceTextLinesArgs,
+	args ReplaceTextArgs,
 	p fspolicy.FSPolicy,
-) (*ReplaceTextLinesOut, error) {
+) (*ReplaceTextOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func replaceTextLines(
 		matchIdxs, hintDiag = ioutil.NarrowIndicesByLineHint(
 			matchIdxs,
 			args.LineHint,
-			replaceTextLinesLineHintTolerance,
+			replaceTextLineHintTolerance,
 		)
 	}
 
@@ -181,13 +181,13 @@ func replaceTextLines(
 			"replace match count mismatch: expected %d, found %d. diagnostics=%s suggestion=%s",
 			expected,
 			len(matchIdxs),
-			buildReplaceTextLinesDiagnosticJSON(
+			buildReplaceTextDiagnosticJSON(
 				tf.Lines,
 				matchIdxs,
 				len(oldText),
 				hintDiag,
-				replaceTextLinesMaxAmbiguityDiagnosticCandidates,
-				replaceTextLinesAmbiguityDiagnosticContextLines,
+				replaceTextMaxAmbiguityDiagnosticCandidates,
+				replaceTextAmbiguityDiagnosticContextLines,
 			),
 			suggestion,
 		)
@@ -213,7 +213,7 @@ func replaceTextLines(
 		replacedAt = append(replacedAt, idx+1)
 	}
 
-	return &ReplaceTextLinesOut{
+	return &ReplaceTextOut{
 		ReplacementsMade: len(matchIdxs),
 		ReplacedAtLines:  replacedAt,
 	}, nil
@@ -288,28 +288,28 @@ func replaceTextBelowContextMatchesAt(tLines, tBelow []string, targetEnd int) bo
 }
 
 func trimReplaceTextAboveBoundaryBlankLines(lines []string) []string {
-	if len(lines) == 0 || !replaceTextLinesHasAnyNonBlankTrimmedLine(lines) {
-		return replaceTextLinesCloneStringSlice(lines)
+	if len(lines) == 0 || !replaceTextHasAnyNonBlankTrimmedLine(lines) {
+		return replaceTextCloneStringSlice(lines)
 	}
 	end := len(lines)
 	for end > 0 && lines[end-1] == "" {
 		end--
 	}
-	return replaceTextLinesCloneStringSlice(lines[:end])
+	return replaceTextCloneStringSlice(lines[:end])
 }
 
 func trimReplaceTextBelowBoundaryBlankLines(lines []string) []string {
-	if len(lines) == 0 || !replaceTextLinesHasAnyNonBlankTrimmedLine(lines) {
-		return replaceTextLinesCloneStringSlice(lines)
+	if len(lines) == 0 || !replaceTextHasAnyNonBlankTrimmedLine(lines) {
+		return replaceTextCloneStringSlice(lines)
 	}
 	start := 0
 	for start < len(lines) && lines[start] == "" {
 		start++
 	}
-	return replaceTextLinesCloneStringSlice(lines[start:])
+	return replaceTextCloneStringSlice(lines[start:])
 }
 
-func replaceTextLinesHasAnyNonBlankTrimmedLine(lines []string) bool {
+func replaceTextHasAnyNonBlankTrimmedLine(lines []string) bool {
 	for _, line := range lines {
 		if line != "" {
 			return true
@@ -318,7 +318,7 @@ func replaceTextLinesHasAnyNonBlankTrimmedLine(lines []string) bool {
 	return false
 }
 
-type replaceTextLinesCandidateDiagnostic struct {
+type replaceTextCandidateDiagnostic struct {
 	StartLine   int      `json:"startLine"`
 	EndLine     int      `json:"endLine"`
 	BeforeLines []string `json:"beforeLines,omitempty"`
@@ -326,14 +326,14 @@ type replaceTextLinesCandidateDiagnostic struct {
 	AfterLines  []string `json:"afterLines,omitempty"`
 }
 
-type replaceTextLinesDiagnostic struct {
-	CandidateStartLines         []int                                 `json:"candidateStartLines,omitempty"`
-	AdditionalCandidatesOmitted int                                   `json:"additionalCandidatesOmitted,omitempty"`
-	SampleCandidates            []replaceTextLinesCandidateDiagnostic `json:"sampleCandidates,omitempty"`
-	LineHint                    *ioutil.LineHintDiagnostic            `json:"lineHint,omitempty"`
+type replaceTextDiagnostic struct {
+	CandidateStartLines         []int                            `json:"candidateStartLines,omitempty"`
+	AdditionalCandidatesOmitted int                              `json:"additionalCandidatesOmitted,omitempty"`
+	SampleCandidates            []replaceTextCandidateDiagnostic `json:"sampleCandidates,omitempty"`
+	LineHint                    *ioutil.LineHintDiagnostic       `json:"lineHint,omitempty"`
 }
 
-func buildReplaceTextLinesDiagnosticJSON(
+func buildReplaceTextDiagnosticJSON(
 	lines []string,
 	matchIdxs []int,
 	oldWidth int,
@@ -341,7 +341,7 @@ func buildReplaceTextLinesDiagnosticJSON(
 	maxCandidates int,
 	contextLines int,
 ) string {
-	diag := replaceTextLinesDiagnostic{
+	diag := replaceTextDiagnostic{
 		CandidateStartLines: ioutil.OneBasedLineNumbers(matchIdxs),
 		LineHint:            hint,
 	}
@@ -363,22 +363,22 @@ func buildReplaceTextLinesDiagnosticJSON(
 	}
 
 	if limit > 0 && len(lines) > 0 {
-		diag.SampleCandidates = make([]replaceTextLinesCandidateDiagnostic, 0, limit)
+		diag.SampleCandidates = make([]replaceTextCandidateDiagnostic, 0, limit)
 		for _, idx := range matchIdxs[:limit] {
 			if idx < 0 || idx >= len(lines) {
 				continue
 			}
 
-			matchEndExclusive := replaceTextLinesMin(idx+oldWidth, len(lines))
-			beforeStart := replaceTextLinesMax(idx-contextLines, 0)
-			afterEnd := replaceTextLinesMin(matchEndExclusive+contextLines, len(lines))
+			matchEndExclusive := replaceTextMin(idx+oldWidth, len(lines))
+			beforeStart := replaceTextMax(idx-contextLines, 0)
+			afterEnd := replaceTextMin(matchEndExclusive+contextLines, len(lines))
 
-			diag.SampleCandidates = append(diag.SampleCandidates, replaceTextLinesCandidateDiagnostic{
+			diag.SampleCandidates = append(diag.SampleCandidates, replaceTextCandidateDiagnostic{
 				StartLine:   idx + 1,
 				EndLine:     matchEndExclusive,
-				BeforeLines: replaceTextLinesCloneStringSlice(lines[beforeStart:idx]),
-				OldText:     replaceTextLinesCloneStringSlice(lines[idx:matchEndExclusive]),
-				AfterLines:  replaceTextLinesCloneStringSlice(lines[matchEndExclusive:afterEnd]),
+				BeforeLines: replaceTextCloneStringSlice(lines[beforeStart:idx]),
+				OldText:     replaceTextCloneStringSlice(lines[idx:matchEndExclusive]),
+				AfterLines:  replaceTextCloneStringSlice(lines[matchEndExclusive:afterEnd]),
 			})
 		}
 	}
@@ -390,7 +390,7 @@ func buildReplaceTextLinesDiagnosticJSON(
 	return string(b)
 }
 
-func replaceTextLinesCloneStringSlice(in []string) []string {
+func replaceTextCloneStringSlice(in []string) []string {
 	if len(in) == 0 {
 		return nil
 	}
@@ -399,14 +399,14 @@ func replaceTextLinesCloneStringSlice(in []string) []string {
 	return out
 }
 
-func replaceTextLinesMin(a, b int) int {
+func replaceTextMin(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
 }
 
-func replaceTextLinesMax(a, b int) int {
+func replaceTextMax(a, b int) int {
 	if a > b {
 		return a
 	}

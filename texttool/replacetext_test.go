@@ -8,7 +8,7 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
-func TestReplaceTextLines_HappyPaths(t *testing.T) {
+func TestReplaceText_HappyPaths(t *testing.T) {
 	dir := newWorkDir(t)
 	policy, err := fspolicy.New("", nil, true)
 	if err != nil {
@@ -18,7 +18,7 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 	tests := []struct {
 		name        string
 		initial     string
-		args        func(path string) ReplaceTextLinesArgs
+		args        func(path string) ReplaceTextArgs
 		wantContent string
 		wantMade    int
 		wantAtLines []int
@@ -26,8 +26,8 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "replace_single_line_with_two_lines_default_expected_1",
 			initial: "A\nB\nC\n",
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:    path,
 					OldText: stringPtr("B"),
 					NewText: stringPtr("X\nY"),
@@ -40,8 +40,8 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "replace_disambiguated_by_textAbove_textBelow_with_blank_gap_tolerance",
 			initial: "hdr\nctx1\n\nX\n\nctx2\nctx1\nX\nctx3\n",
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:      path,
 					OldText:   stringPtr("X"),
 					NewText:   stringPtr("REPL"),
@@ -56,8 +56,8 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "preserves_crlf_newlines_and_final_newline",
 			initial: "A\r\nB\r\n",
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:    path,
 					OldText: stringPtr("B"),
 					NewText: stringPtr("X"),
@@ -70,8 +70,8 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "preserves_absence_of_final_newline",
 			initial: "A\nB",
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:    path,
 					OldText: stringPtr("B"),
 					NewText: stringPtr("X"),
@@ -84,8 +84,8 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "matching_uses_trimspace_but_newText_written_verbatim",
 			initial: "A\n  B  \n",
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:    path,
 					OldText: stringPtr("B"),
 					NewText: stringPtr("  X  "),
@@ -98,8 +98,8 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "multiple_replacements_expected_2_reports_original_line_numbers",
 			initial: "A\nX\nB\nX\nC\n",
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:          path,
 					OldText:       stringPtr("X"),
 					NewText:       stringPtr("Y"),
@@ -113,8 +113,8 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "newText_embedded_newlines_splits_into_multiple_lines",
 			initial: "A\nX\n",
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:    path,
 					OldText: stringPtr("X"),
 					NewText: stringPtr("Y\nZ"),
@@ -127,8 +127,8 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "newText_empty_string_means_one_blank_line_not_deletion",
 			initial: "A\nX\nB\n",
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:    path,
 					OldText: stringPtr("X"),
 					NewText: stringPtr(""),
@@ -141,8 +141,8 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "oldText_empty_string_can_replace_blank_line",
 			initial: "A\n\nB\n",
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:      path,
 					OldText:   stringPtr(""),
 					NewText:   stringPtr("X"),
@@ -157,8 +157,8 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 		{
 			name:    "lineHint_narrows_ambiguous_match",
 			initial: "A\nX\nB\nX\nC\n",
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:     path,
 					OldText:  stringPtr("X"),
 					NewText:  stringPtr("Y"),
@@ -176,7 +176,7 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "repl-*.txt", tt.initial)
 			args := tt.args(path)
 
-			out, err := replaceTextLines(t.Context(), args, policy)
+			out, err := replaceText(t.Context(), args, policy)
 			mustNoErr(t, err)
 
 			if out.ReplacementsMade != len(out.ReplacedAtLines) {
@@ -211,7 +211,7 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 	}
 }
 
-func TestReplaceTextLines_ErrorCases(t *testing.T) {
+func TestReplaceText_ErrorCases(t *testing.T) {
 	dir := newWorkDir(t)
 	policy, err := fspolicy.New("", nil, true)
 	if err != nil {
@@ -221,7 +221,7 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 	tests := []struct {
 		name              string
 		setup             func() string
-		args              func(path string) ReplaceTextLinesArgs
+		args              func(path string) ReplaceTextArgs
 		wantErrSub        string
 		wantIsCtx         bool
 		checkContentAfter bool
@@ -232,8 +232,8 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 			setup: func() string {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:    path,
 					OldText: nil,
 					NewText: stringPtr("X"),
@@ -246,8 +246,8 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 			setup: func() string {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:    path,
 					OldText: stringPtr("A"),
 					NewText: nil,
@@ -260,8 +260,8 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 			setup: func() string {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:          path,
 					OldText:       stringPtr("A"),
 					NewText:       stringPtr("X"),
@@ -275,8 +275,8 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 			setup: func() string {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:     path,
 					OldText:  stringPtr("A"),
 					NewText:  stringPtr("X"),
@@ -290,8 +290,8 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 			setup: func() string {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\nA\n")
 			},
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:          path,
 					OldText:       stringPtr("A"),
 					NewText:       stringPtr("X"),
@@ -306,8 +306,8 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 			setup: func() string {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\nA\n")
 			},
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:    path,
 					OldText: stringPtr("A"),
 					NewText: stringPtr("X"),
@@ -322,8 +322,8 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 			setup: func() string {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\nX\nB\nX\nC\n")
 			},
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:     path,
 					OldText:  stringPtr("X"),
 					NewText:  stringPtr("Y"),
@@ -339,8 +339,8 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 			setup: func() string {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\nmid\nX\n")
 			},
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:      path,
 					OldText:   stringPtr("X"),
 					NewText:   stringPtr("Y"),
@@ -356,8 +356,8 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 			setup: func() string {
 				return writeTempTextFile(t, dir, "x-*.txt", "X\nX\nX\n") //nolint:dupword // Test.
 			},
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:          path,
 					OldText:       stringPtr("X\nX"),
 					NewText:       stringPtr("Y\nY"),
@@ -373,8 +373,8 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 			setup: func() string {
 				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
 			},
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{
+			args: func(path string) ReplaceTextArgs {
+				return ReplaceTextArgs{
 					Path:    path,
 					OldText: stringPtr("A"),
 					NewText: stringPtr("X"),
@@ -396,7 +396,7 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := replaceTextLines(ctx, args, policy)
+			_, err := replaceText(ctx, args, policy)
 			if tt.wantIsCtx {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)
