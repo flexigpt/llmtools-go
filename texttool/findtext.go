@@ -23,7 +23,7 @@ var findTextTool = spec.Tool{
 	Slug:          "findtext",
 	Version:       "v1.0.0",
 	DisplayName:   "Find text matches",
-	Description: "Locate substring or regex matches in a text file and return exact " +
+	Description: "Find substring or regex matches in a text file and return exact " +
 		"line/column ranges with surrounding context. Multi-line search works by including newlines in query",
 	Tags: []string{"text"},
 
@@ -128,6 +128,9 @@ func findText(ctx context.Context, args FindTextArgs, p fspolicy.FSPolicy) (*Fin
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if args.Path == "" {
+		return nil, errors.New("path is required")
+	}
 
 	qtype := strings.ToLower(strings.TrimSpace(args.QueryType))
 	if qtype == "" {
@@ -205,11 +208,11 @@ func findText(ctx context.Context, args FindTextArgs, p fspolicy.FSPolicy) (*Fin
 
 		startLineIdx, startCol, err := findTextOffsetToLineColumn(tf.Lines, lineStarts, startByte)
 		if err != nil {
-			return nil //nolint:nilerr // Not found is not a error.
+			return err
 		}
 		endLineIdx, endCol, err := findTextOffsetToLineColumn(tf.Lines, lineStarts, endByte)
 		if err != nil {
-			return nil //nolint:nilerr // Not found is not a error.
+			return err
 		}
 
 		ctxStart := max(0, startLineIdx-contextLines)

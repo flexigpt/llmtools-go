@@ -24,9 +24,9 @@ var insertTextTool = spec.Tool{
 	Slug:          "inserttext",
 	Version:       "v1.0.0",
 	DisplayName:   "Insert text",
-	Description: "Insert a text block into a text file at the start, end, or between text. " +
-		"Between mode needs atleast one of textAbove or textBelow. Blank or whitespace-only lines are allowed between above and below texts and insertion is at the start of blank space. " +
-		"Include larger textAbove and/or textBelow text when the location may repeat, and pass lineHint from read/find output when relevant. Do not target a generic repeated location.",
+	Description: "Insert a text block into a UTF-8 text file at the start, end, or between copied surrounding text. " +
+		`Between mode requires textAbove or textBelow. When both are provided, only blank or whitespace-only lines may lie between them and insertion happens at the start of that blank gap`,
+
 	Tags: []string{"text"},
 
 	ArgSchema: spec.JSONSchema(`{
@@ -40,7 +40,7 @@ var insertTextTool = spec.Tool{
 	},
 	"text": {
 		"type": "string",
-		"description": "Text block to insert. Newline characters are treated as line breaks. A single trailing newline is treated as a line terminator, not as an additional empty line. An empty string inserts one blank line"
+		"description": "Text block to insert. Newline characters are treated as line breaks."
 	},
 	"position": {
 		"type": "string",
@@ -87,13 +87,6 @@ type InsertTextOut struct {
 	TextBelowMatchedAtLine *int `json:"textBelowMatchedAtLine,omitempty"` // 1-based start line of the matched textBelow boundary block used in the original file
 }
 
-func normalizeOptionalTextBlock(s *string) []string {
-	if s == nil {
-		return nil
-	}
-	return ioutil.NormalizeTextBlockString(*s)
-}
-
 // insertText inserts Text into a UTF‑8 file.
 // Behavior notes (entry point):
 //
@@ -116,19 +109,24 @@ func insertText(
 	if args.Path == "" {
 		return nil, errors.New("path is required")
 	}
-	if args.Text == nil {
-		return nil, errors.New("text is required")
-	}
 
 	pos := strings.TrimSpace(strings.ToLower(args.Position))
 	if pos == "" {
 		return nil, errors.New("position is required")
 	}
 
-	textToInsert := normalizeOptionalTextBlock(args.Text)
-	textAbove := normalizeOptionalTextBlock(args.TextAbove)
-	textBelow := normalizeOptionalTextBlock(args.TextBelow)
-
+	textToInsert, err := normalizeRequiredTextBlockArg("text", args.Text)
+	if err != nil {
+		return nil, err
+	}
+	textAbove, err := normalizeOptionalTextBlockArg("textAbove", args.TextAbove)
+	if err != nil {
+		return nil, err
+	}
+	textBelow, err := normalizeOptionalTextBlockArg("textBelow", args.TextBelow)
+	if err != nil {
+		return nil, err
+	}
 	switch pos {
 	case "start", whereEnd:
 		if args.TextAbove != nil || args.TextBelow != nil || args.LineHint != nil {

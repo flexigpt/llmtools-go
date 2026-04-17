@@ -2,6 +2,7 @@ package texttool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
@@ -113,6 +114,10 @@ func deleteText(
 ) (*DeleteTextOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+
+	if args.Path == "" {
+		return nil, errors.New("path is required")
 	}
 
 	oldText, err := normalizeRequiredTextBlockArg("oldText", args.OldText)

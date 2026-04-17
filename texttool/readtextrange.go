@@ -2,6 +2,7 @@ package texttool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
@@ -101,6 +102,9 @@ func readTextRange(
 		return nil, err
 	}
 
+	if args.Path == "" {
+		return nil, errors.New("path is required")
+	}
 	startLine := 1
 	if args.StartLine != nil {
 		startLine = *args.StartLine

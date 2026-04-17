@@ -132,6 +132,10 @@ func replaceText(
 		return nil, err
 	}
 
+	if args.Path == "" {
+		return nil, errors.New("path is required")
+	}
+
 	oldText, err := normalizeRequiredTextBlockArg("oldText", args.OldText)
 	if err != nil {
 		return nil, err
