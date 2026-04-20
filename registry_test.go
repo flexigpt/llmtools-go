@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -498,7 +499,7 @@ func TestRegisterOutputsTool_StrictDecode(t *testing.T) {
 
 			tool := mkTool("github.com/acme/tools.TypedOutputs", "typedoutputs")
 			fn := func(_ context.Context, a args) ([]spec.ToolOutputUnion, error) {
-				return textOut(string(rune('0' + a.A))), nil
+				return textOut(strconv.Itoa(a.A)), nil
 			}
 
 			if err := RegisterOutputsTool(r, tool, fn); err != nil {
