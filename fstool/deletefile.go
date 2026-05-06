@@ -304,7 +304,7 @@ func moveToTrash(
 	return "", "", 0, fmt.Errorf("could not allocate a unique trash path for %q", base)
 }
 
-// isCrossDeviceRenameErr - In go 1.25: syscall.EXDEV exists on Windows too, and os.LinkError unwraps to the errno.
+// isCrossDeviceRenameErr - In go 1.25+: syscall.EXDEV exists on Windows too, and os.LinkError unwraps to the errno.
 func isCrossDeviceRenameErr(err error) bool {
 	return errors.Is(err, syscall.EXDEV)
 }
