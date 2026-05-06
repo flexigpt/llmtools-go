@@ -9,6 +9,8 @@ import (
 	"testing"
 )
 
+const errEmptyPDFStr = "empty PDF text after extraction"
+
 func TestExtractPDFTextSafe_TableDriven(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -56,21 +58,21 @@ func TestExtractPDFTextSafe_TableDriven(t *testing.T) {
 			path:      happyPath,
 			maxBytes:  0,
 			wantErr:   true,
-			errSubstr: "empty PDF text after extraction",
+			errSubstr: errEmptyPDFStr,
 		},
 		{
 			name:      "maxBytes negative => empty after extraction (LimitedReader.N<=0 reads nothing)",
 			path:      happyPath,
 			maxBytes:  -1,
 			wantErr:   true,
-			errSubstr: "empty PDF text after extraction",
+			errSubstr: errEmptyPDFStr,
 		},
 		{
 			name:      "empty text pdf => specific empty error",
 			path:      emptyTextPath,
 			maxBytes:  1 << 20,
 			wantErr:   true,
-			errSubstr: "empty PDF text after extraction",
+			errSubstr: errEmptyPDFStr,
 		},
 		{
 			name:     "missing file => open error",

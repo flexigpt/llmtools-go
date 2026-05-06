@@ -79,7 +79,7 @@ func TestCopyFileCtx_Errors(t *testing.T) {
 			dst:           filepath.Join(dir, "dst1.txt"),
 			wantErr:       true,
 			wantErrIs:     context.Canceled,
-			wantDstExists: ptrBool(false),
+			wantDstExists: new(false),
 		},
 		{
 			name: "dst exists => O_EXCL error",
@@ -92,7 +92,7 @@ func TestCopyFileCtx_Errors(t *testing.T) {
 			},
 			dst:            filepath.Join(dir, "dst2.txt"),
 			wantErr:        true,
-			wantDstExists:  ptrBool(true),
+			wantDstExists:  new(true),
 			wantDstContent: []byte("already"),
 		},
 		{
@@ -101,7 +101,7 @@ func TestCopyFileCtx_Errors(t *testing.T) {
 			src:           srcMissing,
 			dst:           filepath.Join(dir, "dst3.txt"),
 			wantErr:       true,
-			wantDstExists: ptrBool(false),
+			wantDstExists: new(false),
 		},
 		{
 			name:          "src is directory => error and dst is cleaned up",
@@ -109,7 +109,7 @@ func TestCopyFileCtx_Errors(t *testing.T) {
 			src:           srcDir,
 			dst:           filepath.Join(dir, "dst4.txt"),
 			wantErr:       true,
-			wantDstExists: ptrBool(false),
+			wantDstExists: new(false),
 		},
 	}
 

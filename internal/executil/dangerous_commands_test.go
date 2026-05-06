@@ -9,6 +9,36 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
+const (
+	dangerousBlockedCommandSubstr = "blocked command"
+	dangerousSudoSubstr           = "sudo"
+	dangerousForkBombSubstr       = "fork bomb"
+	dangerousBackgroundSubstr     = "background"
+	dangerousRmSubstr             = "rm"
+	dangerousMkfsSubstr           = "mkfs"
+	dangerousFormatSubstr         = "format"
+	dangerousDiskpartSubstr       = "diskpart"
+	dangerousShutdownSubstr       = "shutdown"
+
+	dangerousEchoHi              = "echo hi"
+	dangerousForkBombClassicCmd  = ":(){ :|:& };:"
+	dangerousBackgroundSleepCmd  = "sleep 1 &"
+	dangerousRmRfRootCmd         = "rm -rf /"
+	dangerousMkfsExt4Cmd         = "mkfs.ext4 /dev/sda1"
+	dangerousShellPathUnix       = "/bin/sh"
+	dangerousShellPathWindowsCmd = `C:\Windows\System32\cmd.exe`
+	dangerousDiskpartFullPath    = `C:\Windows\System32\diskpart.exe`
+	dangerousPowerShellShellName = "powershell"
+
+	dangerousShutdownCmd = "shutdown"
+	dangerousRebootCmd   = "reboot"
+	dangerousHaltCmd     = "halt"
+	dangerousPoweroffCmd = "poweroff"
+	dangerousTopCmd      = "top"
+	dangerousDiskpartCmd = "diskpart"
+	dangerousFormatCmd   = "format"
+)
+
 type rejectTC struct {
 	name       string
 	cmd        string
@@ -48,7 +78,7 @@ func TestRejectDangerous_Unix_SafeInputs(t *testing.T) {
 		{name: "sudo_in_comment", cmd: "echo hi # sudo ls", wantErr: false},
 		{name: "hash_not_comment_when_not_preceded_by_space", cmd: "echo hi#sudo", wantErr: false},
 
-		// "&"" handling: should not reject redirections or escaped ampersand.
+		// "&" handling: should not reject redirections or escaped ampersand.
 		{name: "allow_andand", cmd: "echo a && echo b", wantErr: false},
 		{name: "escaped_ampersand", cmd: `echo hi \&`, wantErr: false},
 		{name: "amp_redir_stdout", cmd: `echo hi &>out.txt`, wantErr: false},
@@ -73,58 +103,113 @@ func TestRejectDangerous_Unix_RejectedInputs(t *testing.T) {
 
 	runRejectCases(t, []rejectTC{
 		// Sudo/su.
-		{name: "sudo_simple", cmd: "sudo ls", wantErr: true, wantSubstr: "blocked command"},
-		{name: "su_simple", cmd: "su -c id", wantErr: true, wantSubstr: "blocked command"},
-		{name: "sudo_after_semicolon", cmd: "echo x; sudo ls", wantErr: true, wantSubstr: "sudo"},
-		{name: "sudo_after_andand", cmd: "echo x && sudo ls", wantErr: true, wantSubstr: "sudo"},
-		{name: "sudo_after_oror", cmd: "echo x || sudo ls", wantErr: true, wantSubstr: "sudo"},
-		{name: "sudo_after_pipe", cmd: "echo x | sudo ls", wantErr: true, wantSubstr: "sudo"},
-		{name: "sudo_in_parens", cmd: "(sudo ls)", wantErr: true, wantSubstr: "sudo"},
-		{name: "sudo_with_path", cmd: "/usr/bin/sudo ls", wantErr: true, wantSubstr: "sudo"},
+		{name: "sudo_simple", cmd: "sudo ls -h", wantErr: true, wantSubstr: dangerousBlockedCommandSubstr},
+		{name: "su_simple", cmd: "su -c id", wantErr: true, wantSubstr: dangerousBlockedCommandSubstr},
+		{name: "sudo_after_semicolon", cmd: "echo x; sudo ls", wantErr: true, wantSubstr: dangerousSudoSubstr},
+		{name: "sudo_after_andand", cmd: "echo x && sudo ls", wantErr: true, wantSubstr: dangerousSudoSubstr},
+		{name: "sudo_after_oror", cmd: "echo x || sudo ls", wantErr: true, wantSubstr: dangerousSudoSubstr},
+		{name: "sudo_after_pipe", cmd: "echo x | sudo ls", wantErr: true, wantSubstr: dangerousSudoSubstr},
+		{name: "sudo_in_parens", cmd: "(sudo ls)", wantErr: true, wantSubstr: dangerousSudoSubstr},
+		{name: "sudo_with_path", cmd: "/usr/bin/sudo ls", wantErr: true, wantSubstr: dangerousSudoSubstr},
 
 		// Fork bomb (whitespace variations).
-		{name: "fork_bomb_classic", cmd: ":(){ :|:& };:", wantErr: true, wantSubstr: "fork bomb"},
-		{name: "fork_bomb_extra_spaces", cmd: ": ( ) {  : | : & } ; :", wantErr: true, wantSubstr: "fork bomb"},
-		{name: "fork_bomb_with_newlines", cmd: ":\n(){\n:|:&\n};:\n", wantErr: true, wantSubstr: "fork bomb"},
+		{
+			name:       "fork_bomb_classic",
+			cmd:        dangerousForkBombClassicCmd,
+			wantErr:    true,
+			wantSubstr: dangerousForkBombSubstr,
+		},
+		{
+			name:       "fork_bomb_extra_spaces",
+			cmd:        ": ( ) {  : | : & } ; :",
+			wantErr:    true,
+			wantSubstr: dangerousForkBombSubstr,
+		},
+		{
+			name:       "fork_bomb_with_newlines",
+			cmd:        ":\n(){\n:|:&\n};:\n",
+			wantErr:    true,
+			wantSubstr: dangerousForkBombSubstr,
+		},
 
 		// "rm" is ALWAYS blocked  (any target).
-		{name: "rm_simple", cmd: "rm foo", wantErr: true, wantSubstr: "blocked command"},
-		{name: "rm_rf_root", cmd: "rm -rf /", wantErr: true, wantSubstr: "blocked command"},
-		{name: "rm_fr_root_glob", cmd: "rm -fr /*", wantErr: true, wantSubstr: "rm"},
-		{name: "rm_r_root_no_force", cmd: "rm -r /", wantErr: true, wantSubstr: "rm"},
-		{name: "rm_R_root", cmd: "rm -R /", wantErr: true, wantSubstr: "rm"},
-		{name: "rm_long_recursive_root", cmd: "rm --recursive /", wantErr: true, wantSubstr: "rm"},
-		{name: "rm_recursive_with_double_dash", cmd: "rm -r -- /", wantErr: true, wantSubstr: "rm"},
-		{name: "rm_recursive_root_quoted", cmd: `rm -r "/"`, wantErr: true, wantSubstr: "rm"},
-		{name: "rm_recursive_root_glob_quoted", cmd: `rm -r '/*'`, wantErr: true, wantSubstr: "rm"},
-		{name: "rm_recursive_root_via_clean_dot", cmd: `rm -r /./`, wantErr: true, wantSubstr: "rm"},
-		{name: "rm_recursive_root_via_clean_double_slash", cmd: `rm -r //`, wantErr: true, wantSubstr: "rm"},
-		{name: "rm_recursive_root_via_clean_parent", cmd: `rm -r /tmp/..`, wantErr: true, wantSubstr: "rm"},
-		{name: "rm_recursive_root_via_clean_parent2", cmd: `rm -R /../`, wantErr: true, wantSubstr: "rm"},
+		{name: "rm_simple", cmd: "rm foo", wantErr: true, wantSubstr: dangerousBlockedCommandSubstr},
+		{name: "rm_rf_root", cmd: dangerousRmRfRootCmd, wantErr: true, wantSubstr: dangerousBlockedCommandSubstr},
+		{name: "rm_fr_root_glob", cmd: "rm -fr /*", wantErr: true, wantSubstr: dangerousRmSubstr},
+		{name: "rm_r_root_no_force", cmd: "rm -r /", wantErr: true, wantSubstr: dangerousRmSubstr},
+		{name: "rm_R_root", cmd: "rm -R /", wantErr: true, wantSubstr: dangerousRmSubstr},
+		{name: "rm_long_recursive_root", cmd: "rm --recursive /", wantErr: true, wantSubstr: dangerousRmSubstr},
+		{name: "rm_recursive_with_double_dash", cmd: "rm -r -- /", wantErr: true, wantSubstr: dangerousRmSubstr},
+		{name: "rm_recursive_root_quoted", cmd: `rm -r "/"`, wantErr: true, wantSubstr: dangerousRmSubstr},
+		{name: "rm_recursive_root_glob_quoted", cmd: `rm -r '/*'`, wantErr: true, wantSubstr: dangerousRmSubstr},
+		{name: "rm_recursive_root_via_clean_dot", cmd: `rm -r /./`, wantErr: true, wantSubstr: dangerousRmSubstr},
+		{
+			name:       "rm_recursive_root_via_clean_double_slash",
+			cmd:        `rm -r //`,
+			wantErr:    true,
+			wantSubstr: dangerousRmSubstr,
+		},
+		{
+			name:       "rm_recursive_root_via_clean_parent",
+			cmd:        `rm -r /tmp/..`,
+			wantErr:    true,
+			wantSubstr: dangerousRmSubstr,
+		},
+		{name: "rm_recursive_root_via_clean_parent2", cmd: `rm -R /../`, wantErr: true, wantSubstr: dangerousRmSubstr},
 
 		// Mkfs.
-		{name: "mkfs_plain", cmd: "mkfs /dev/sda", wantErr: true, wantSubstr: "blocked command"},
-		{name: "mkfs_variant_ext4", cmd: "mkfs.ext4 /dev/sda1", wantErr: true, wantSubstr: "blocked command"},
+		{name: "mkfs_plain", cmd: "mkfs /dev/sda", wantErr: true, wantSubstr: dangerousBlockedCommandSubstr},
+		{
+			name:       "mkfs_variant_ext4",
+			cmd:        dangerousMkfsExt4Cmd,
+			wantErr:    true,
+			wantSubstr: dangerousBlockedCommandSubstr,
+		},
 
 		// Network tools.
-		{name: "curl_blocked", cmd: "curl https://example.com", wantErr: true, wantSubstr: "blocked command"},
+		{
+			name:       "curl_blocked",
+			cmd:        "curl https://example.com",
+			wantErr:    true,
+			wantSubstr: dangerousBlockedCommandSubstr,
+		},
 
 		// Shutdown/reboot/halt/poweroff.
-		{name: "shutdown", cmd: "shutdown -h now", wantErr: true, wantSubstr: "blocked command"},
-		{name: "reboot", cmd: "reboot", wantErr: true, wantSubstr: "blocked command"},
-		{name: "halt", cmd: "halt", wantErr: true, wantSubstr: "blocked command"},
-		{name: "poweroff", cmd: "poweroff", wantErr: true, wantSubstr: "blocked command"},
+		{
+			name:       dangerousShutdownCmd,
+			cmd:        dangerousShutdownCmd + " -h now",
+			wantErr:    true,
+			wantSubstr: dangerousBlockedCommandSubstr,
+		},
+		{name: dangerousRebootCmd, cmd: dangerousRebootCmd, wantErr: true, wantSubstr: dangerousBlockedCommandSubstr},
+		{name: dangerousHaltCmd, cmd: dangerousHaltCmd, wantErr: true, wantSubstr: dangerousBlockedCommandSubstr},
+		{
+			name:       dangerousPoweroffCmd,
+			cmd:        dangerousPoweroffCmd,
+			wantErr:    true,
+			wantSubstr: dangerousBlockedCommandSubstr,
+		},
 
 		// Interactive tools.
-		{name: "vim", cmd: "vim foo.txt", wantErr: true, wantSubstr: "blocked command"},
-		{name: "less", cmd: "less /var/log/syslog", wantErr: true, wantSubstr: "blocked command"},
-		{name: "top", cmd: "top", wantErr: true, wantSubstr: "blocked command"},
-		{name: "pipeline_into_less", cmd: "echo hi | less", wantErr: true, wantSubstr: "blocked command"},
+		{name: "vim", cmd: "vim foo.txt", wantErr: true, wantSubstr: dangerousBlockedCommandSubstr},
+		{name: "less", cmd: "less /var/log/syslog", wantErr: true, wantSubstr: dangerousBlockedCommandSubstr},
+		{name: dangerousTopCmd, cmd: dangerousTopCmd, wantErr: true, wantSubstr: dangerousBlockedCommandSubstr},
+		{name: "pipeline_into_less", cmd: "echo hi | less", wantErr: true, wantSubstr: dangerousBlockedCommandSubstr},
 
 		// Backgrounding/chaining with "&".
-		{name: "background_trailing", cmd: "sleep 1 &", wantErr: true, wantSubstr: "background"},
-		{name: "background_no_space", cmd: "sleep 1&", wantErr: true, wantSubstr: "background"},
-		{name: "chaining_single_ampersand", cmd: "echo a & echo b", wantErr: true, wantSubstr: "background"},
+		{
+			name:       "background_trailing",
+			cmd:        dangerousBackgroundSleepCmd,
+			wantErr:    true,
+			wantSubstr: dangerousBackgroundSubstr,
+		},
+		{name: "background_no_space", cmd: "sleep 1&", wantErr: true, wantSubstr: dangerousBackgroundSubstr},
+		{
+			name:       "chaining_single_ampersand",
+			cmd:        "echo a & echo b",
+			wantErr:    true,
+			wantSubstr: dangerousBackgroundSubstr,
+		},
 	})
 }
 
@@ -135,15 +220,20 @@ func TestRejectDangerous_Unix_WrappersAndAssignments(t *testing.T) {
 
 	runRejectCases(t, []rejectTC{
 		// Env assignments should be skipped to find the real command.
-		{name: "assignment_then_sudo", cmd: "X=1 sudo ls", wantErr: true, wantSubstr: "sudo"},
+		{name: "assignment_then_sudo", cmd: "X=1 sudo ls", wantErr: true, wantSubstr: dangerousSudoSubstr},
 		{name: "multiple_assignments_then_su", cmd: "A=1 B=2 su -c id", wantErr: true, wantSubstr: "su"},
 		{name: "assignment_then_echo_sudo_is_safe", cmd: "X=1 echo sudo", wantErr: false},
 
 		// Unwrap env/command/builtin wrappers.
-		{name: "env_wraps_sudo", cmd: "env sudo ls", wantErr: true, wantSubstr: "sudo"},
-		{name: "env_with_flags_wraps_sudo", cmd: "env -i FOO=bar sudo ls", wantErr: true, wantSubstr: "sudo"},
-		{name: "command_wraps_sudo", cmd: "command sudo ls", wantErr: true, wantSubstr: "sudo"},
-		{name: "builtin_wraps_sudo", cmd: "builtin sudo ls", wantErr: true, wantSubstr: "sudo"},
+		{name: "env_wraps_sudo", cmd: "env sudo ls", wantErr: true, wantSubstr: dangerousSudoSubstr},
+		{
+			name:       "env_with_flags_wraps_sudo",
+			cmd:        "env -i FOO=bar sudo ls",
+			wantErr:    true,
+			wantSubstr: dangerousSudoSubstr,
+		},
+		{name: "command_wraps_sudo", cmd: "command sudo ls", wantErr: true, wantSubstr: dangerousSudoSubstr},
+		{name: "builtin_wraps_sudo", cmd: "builtin sudo ls", wantErr: true, wantSubstr: dangerousSudoSubstr},
 	})
 }
 
@@ -154,39 +244,79 @@ func TestRejectDangerous_Windows_Patterns(t *testing.T) {
 
 	runRejectCases(t, []rejectTC{
 		// Diskpart anywhere on Windows.
-		{name: "diskpart", cmd: "diskpart", wantErr: true, wantSubstr: "blocked command"},
-		{name: "diskpart_exe", cmd: "diskpart.exe", wantErr: true, wantSubstr: "blocked command"},
-		{name: "diskpart_full_path", cmd: `C:\Windows\System32\diskpart.exe`, wantErr: true, wantSubstr: "diskpart"},
-		{name: "diskpart_after_andand", cmd: "echo hi && diskpart", wantErr: true, wantSubstr: "diskpart"},
+		{
+			name:       dangerousDiskpartCmd,
+			cmd:        dangerousDiskpartCmd,
+			wantErr:    true,
+			wantSubstr: dangerousBlockedCommandSubstr,
+		},
+		{
+			name:       dangerousDiskpartCmd + "_exe",
+			cmd:        dangerousDiskpartCmd + ".exe",
+			wantErr:    true,
+			wantSubstr: dangerousBlockedCommandSubstr,
+		},
+		{
+			name:       dangerousDiskpartCmd + "_full_path",
+			cmd:        dangerousDiskpartFullPath,
+			wantErr:    true,
+			wantSubstr: dangerousDiskpartSubstr,
+		},
+		{
+			name:       dangerousDiskpartCmd + "_after_andand",
+			cmd:        "echo hi && " + dangerousDiskpartCmd,
+			wantErr:    true,
+			wantSubstr: dangerousDiskpartSubstr,
+		},
 		{name: "echo_diskpart_argument_safe", cmd: "echo diskpart", wantErr: false},
 
 		// Format.com anywhere.
-		{name: "format_com", cmd: "format.com C:", wantErr: true, wantSubstr: "blocked command"},
+		{
+			name:       dangerousFormatCmd + "_com",
+			cmd:        dangerousFormatCmd + ".com C:",
+			wantErr:    true,
+			wantSubstr: dangerousBlockedCommandSubstr,
+		},
 
 		// Format only when using cmd.exe shellName.
 		{
-			name:       "format_cmd_shell_reject",
-			cmd:        "format C:",
+			name:       dangerousFormatCmd + "_cmd_shell_reject",
+			cmd:        dangerousFormatCmd + " C:",
 			shellName:  string(ShellNameCmd),
 			wantErr:    true,
-			wantSubstr: "blocked command",
+			wantSubstr: dangerousBlockedCommandSubstr,
 		},
 		{
-			name:       "format_exe_cmd_shell_reject",
-			cmd:        "format.exe C:",
+			name:       dangerousFormatCmd + "_exe_cmd_shell_reject",
+			cmd:        dangerousFormatCmd + ".exe C:",
 			shellName:  string(ShellNameCmd),
 			wantErr:    true,
-			wantSubstr: "format",
+			wantSubstr: dangerousFormatSubstr,
 		},
-		{name: "format_powershell_allow", cmd: "format C:", shellName: "powershell", wantErr: false},
+		{
+			name:      "format_powershell_allow",
+			cmd:       dangerousFormatCmd + " C:",
+			shellName: dangerousPowerShellShellName,
+			wantErr:   false,
+		},
 
 		// Ensure we don't accidentally block "Format-Table" style cmdlets by prefix.
-		{name: "format_table_allowed", cmd: "Format-Table", shellName: "powershell", wantErr: false},
+		{name: "format_table_allowed", cmd: "Format-Table", shellName: dangerousPowerShellShellName, wantErr: false},
 
 		// Cross-platform blocks still apply on Windows too.
-		{name: "shutdown_blocked_on_windows", cmd: "shutdown /s /t 0", wantErr: true, wantSubstr: "shutdown"},
-		{name: "sudo_blocked_on_windows_too", cmd: "sudo whoami", wantErr: true, wantSubstr: "sudo"},
-		{name: "mkfs_blocked_on_windows_too", cmd: "mkfs.ext4 /dev/sda1", wantErr: true, wantSubstr: "mkfs"},
+		{
+			name:       dangerousShutdownCmd + "_blocked_on_windows",
+			cmd:        dangerousShutdownCmd + " /s /t 0",
+			wantErr:    true,
+			wantSubstr: dangerousShutdownSubstr,
+		},
+		{name: "sudo_blocked_on_windows_too", cmd: "sudo whoami", wantErr: true, wantSubstr: dangerousSudoSubstr},
+		{
+			name:       "mkfs_blocked_on_windows_too",
+			cmd:        dangerousMkfsExt4Cmd,
+			wantErr:    true,
+			wantSubstr: dangerousMkfsSubstr,
+		},
 	})
 }
 
@@ -199,9 +329,9 @@ func TestForEachSegment(t *testing.T) {
 	}{
 		{
 			name:    "sh_splits_oror_and_pipe",
-			in:      "echo x || sudo ls | cat",
+			in:      "echo x || sudo ls -a | cat",
 			dialect: dialectSh,
-			want:    []string{"echo x", "sudo ls", "cat"},
+			want:    []string{"echo x", "sudo ls -a", "cat"},
 		},
 		{
 			name:    "sh_does_not_split_inside_quotes",
@@ -217,9 +347,9 @@ func TestForEachSegment(t *testing.T) {
 		},
 		{
 			name:    "powershell_hash_comment_anywhere",
-			in:      "echo hi# rm; sudo",
+			in:      "echo hiT# rm; sudo",
 			dialect: dialectPowerShell,
-			want:    []string{"echo hi"},
+			want:    []string{"echo hiT"},
 		},
 		{
 			name:    "cmd_splits_ampersand_and_andand",
@@ -317,47 +447,47 @@ func TestRejectDangerous_HeuristicChecksToggle(t *testing.T) {
 	}{
 		{
 			name:    "fork_bomb_blocked_when_enabled",
-			cmd:     ":(){ :|:& };:",
+			cmd:     dangerousForkBombClassicCmd,
 			shell:   ShellNameSh,
 			enable:  true,
 			wantErr: true,
-			substr:  "fork bomb",
+			substr:  dangerousForkBombSubstr,
 		},
 		{
 			name:    "fork_bomb_allowed_when_disabled",
-			cmd:     ":(){ :|:& };:",
+			cmd:     dangerousForkBombClassicCmd,
 			shell:   ShellNameSh,
 			enable:  false,
 			wantErr: false,
 		},
 		{
 			name:    "background_ampersand_blocked_when_enabled",
-			cmd:     "sleep 1 &",
+			cmd:     dangerousBackgroundSleepCmd,
 			shell:   ShellNameSh,
 			enable:  true,
 			wantErr: true,
-			substr:  "background",
+			substr:  dangerousBackgroundSubstr,
 		},
 		{
 			name:    "background_ampersand_allowed_when_disabled",
-			cmd:     "sleep 1 &",
+			cmd:     dangerousBackgroundSleepCmd,
 			shell:   ShellNameSh,
 			enable:  false,
 			wantErr: false,
 		},
 		{
 			name:    "hard_block_still_blocks_even_when_heuristics_disabled",
-			cmd:     "rm -rf /",
+			cmd:     dangerousRmRfRootCmd,
 			shell:   ShellNameSh,
 			enable:  false,
 			wantErr: true,
-			substr:  "blocked command",
+			substr:  dangerousBlockedCommandSubstr,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := RejectDangerousCommand(tc.cmd, "/bin/sh", tc.shell, HardBlockedCommands, tc.enable)
+			err := RejectDangerousCommand(tc.cmd, dangerousShellPathUnix, tc.shell, HardBlockedCommands, tc.enable)
 			if tc.wantErr && err == nil {
 				t.Fatalf("expected error")
 			}
@@ -386,9 +516,9 @@ func runRejectCases(t *testing.T, cases []rejectTC) {
 			}
 			if tc.shellPath == "" {
 				if runtime.GOOS == toolutil.GOOSWindows {
-					tc.shellPath = `C:\Windows\System32\cmd.exe`
+					tc.shellPath = dangerousShellPathWindowsCmd
 				} else {
-					tc.shellPath = "/bin/sh"
+					tc.shellPath = dangerousShellPathUnix
 				}
 			}
 

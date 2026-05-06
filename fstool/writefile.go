@@ -21,7 +21,7 @@ var writeFileTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019c04cf-72ec-7eed-ab2a-45e6fb9e1a86",
 	Slug:          "writefile",
-	Version:       "v1.0.0",
+	Version:       spec.VersionOne,
 	DisplayName:   "Write file",
 	Description:   "Write a file to disk. Set createParents=true if folders dont exist. Set overwrite=true to replace the file. Text mode writes UTF-8 text. Binary mode expects base64 input and writes raw bytes.",
 	Tags:          []string{"fs"},

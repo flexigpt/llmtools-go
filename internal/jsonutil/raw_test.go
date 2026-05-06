@@ -177,7 +177,7 @@ func TestDecodeJSONRaw_Happy(t *testing.T) {
 
 func TestDecodeJSONRaw_Errors(t *testing.T) {
 	t.Parallel()
-
+	const errDecodeJSONSub = `decode JSON:`
 	tests := []struct {
 		name       string
 		raw        json.RawMessage
@@ -188,19 +188,19 @@ func TestDecodeJSONRaw_Errors(t *testing.T) {
 		{
 			name:       "unknown_field_disallowed",
 			raw:        json.RawMessage(`{"name":"x","age":1,"extra":true}`),
-			wantErrSub: `decode JSON:`,
+			wantErrSub: errDecodeJSONSub,
 			assertZero: true,
 		},
 		{
 			name:       "invalid_json",
 			raw:        json.RawMessage(`{"name":`),
-			wantErrSub: `decode JSON:`,
+			wantErrSub: errDecodeJSONSub,
 			assertZero: true,
 		},
 		{
 			name:       "wrong_type",
 			raw:        json.RawMessage(`{"name":"x","age":"not-a-number"}`),
-			wantErrSub: `decode JSON:`,
+			wantErrSub: errDecodeJSONSub,
 			assertZero: true,
 		},
 		{

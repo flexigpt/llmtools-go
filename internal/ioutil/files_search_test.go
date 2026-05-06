@@ -15,6 +15,13 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
+const (
+	searchTestContentPattern = "CONTENTPATTERN"
+	searchTestTxtPattern     = "txt"
+	searchTestHello          = "hello"
+	searchTestBigPattern     = "BIGPATTERN"
+)
+
 // Structure describing the tree used in searchFiles tests.
 type searchTestTree struct {
 	root        string
@@ -51,7 +58,7 @@ func TestSearchFilesBasic(t *testing.T) {
 		{
 			name:           "match by content only",
 			root:           tree.root,
-			pattern:        "CONTENTPATTERN",
+			pattern:        searchTestContentPattern,
 			maxResults:     0,
 			wantLen:        -1,
 			wantExactPaths: []string{tree.contentPath, tree.nestedPath},
@@ -59,14 +66,14 @@ func TestSearchFilesBasic(t *testing.T) {
 		{
 			name:       "maxResults limits number of matches",
 			root:       tree.root,
-			pattern:    "CONTENTPATTERN",
+			pattern:    searchTestContentPattern,
 			maxResults: 1,
 			allowedPaths: []string{
 				tree.contentPath,
 				tree.nestedPath,
 			},
 			wantLen:          1,
-			wantReachedLimit: ptrBool(true),
+			wantReachedLimit: new(true),
 		},
 		{
 			name:            "pattern is required",
@@ -93,25 +100,25 @@ func TestSearchFilesBasic(t *testing.T) {
 		{
 			name:             "maxResults zero treated as unlimited",
 			root:             tree.root,
-			pattern:          "txt",
+			pattern:          searchTestTxtPattern,
 			maxResults:       0,
 			wantExactPaths:   []string{tree.helloPath, tree.matchPath, tree.contentPath, tree.nestedPath},
 			wantLen:          -1,
-			wantReachedLimit: ptrBool(false),
+			wantReachedLimit: new(false),
 		},
 		{
 			name:             "negative maxResults treated as unlimited",
 			root:             tree.root,
-			pattern:          "txt",
+			pattern:          searchTestTxtPattern,
 			maxResults:       -10,
 			wantExactPaths:   []string{tree.helloPath, tree.matchPath, tree.contentPath, tree.nestedPath},
 			wantLen:          -1,
-			wantReachedLimit: ptrBool(false),
+			wantReachedLimit: new(false),
 		},
 		{
 			name:           "large files are not searched by content",
 			root:           tree.root,
-			pattern:        "BIGPATTERN",
+			pattern:        searchTestBigPattern,
 			maxResults:     0,
 			wantExactPaths: []string{},
 			wantLen:        -1,
@@ -120,11 +127,11 @@ func TestSearchFilesBasic(t *testing.T) {
 		{
 			name:             "maxResults larger than matches => reachedLimit=false",
 			root:             tree.root,
-			pattern:          "CONTENTPATTERN",
+			pattern:          searchTestContentPattern,
 			maxResults:       10,
 			wantExactPaths:   []string{tree.contentPath, tree.nestedPath},
 			wantLen:          -1,
-			wantReachedLimit: ptrBool(false),
+			wantReachedLimit: new(false),
 		},
 	}
 
@@ -176,7 +183,7 @@ func TestSearchFilesBasic(t *testing.T) {
 
 func TestSearchFilesRootDefaultUsesCWD(t *testing.T) {
 	root := t.TempDir()
-	filePath := filepath.Join(root, "cwdfile.txt")
+	filePath := filepath.Join(root, "cwdfile"+"."+searchTestTxtPattern)
 	writeFile(t, filePath, "some pattern content")
 
 	t.Chdir(root)
@@ -234,7 +241,7 @@ func TestSearchFilesConcurrency(t *testing.T) {
 			goroutines:  8,
 			iterations:  5,
 			searchRoot:  tree.root,
-			searchPat:   "CONTENTPATTERN",
+			searchPat:   searchTestContentPattern,
 			expectedSet: []string{tree.contentPath, tree.nestedPath},
 		},
 	}
@@ -290,10 +297,10 @@ func TestSearchFiles_EdgeCases(t *testing.T) {
 			setup: func(t *testing.T) (context.Context, string, string, []string) {
 				t.Helper()
 				root := t.TempDir()
-				writeFile(t, filepath.Join(root, "a.txt"), "hello")
+				writeFile(t, filepath.Join(root, "a"+"."+searchTestTxtPattern), searchTestHello)
 				ctx, cancel := context.WithCancel(t.Context())
 				cancel()
-				return ctx, root, "hello", nil
+				return ctx, root, searchTestHello, nil
 			},
 			wantErr: true,
 		},
@@ -398,7 +405,7 @@ func TestSearchFiles_AllowedRoots_SkipsSymlinkFileThatResolvesOutside(t *testing
 	outsideFile := filepath.Join(outside, "outside.txt")
 	mustWriteBytes(t, outsideFile, []byte("OUTSIDE-CONTENT"))
 
-	linkInRoot := filepath.Join(root, "link.txt")
+	linkInRoot := filepath.Join(root, "link"+"."+searchTestTxtPattern)
 	mustSymlinkOrSkip(t, outsideFile, linkInRoot)
 
 	p, err := fspolicy.New(root, []string{root}, false) // allow symlinks, but restrict roots
@@ -406,7 +413,7 @@ func TestSearchFiles_AllowedRoots_SkipsSymlinkFileThatResolvesOutside(t *testing
 		t.Fatalf("New policy: %v", err)
 	}
 
-	got, _, err := searchFiles(t.Context(), p, root, "link\\.txt", 0)
+	got, _, err := searchFiles(t.Context(), p, root, "link\\."+searchTestTxtPattern, 0)
 	if err != nil {
 		t.Fatalf("searchFiles error: %v", err)
 	}
@@ -424,14 +431,14 @@ func TestSearchFiles_RelativeRoot_ReturnsPathsPrefixedWithOriginalRootArg(t *tes
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	mustWriteBytes(t, filepath.Join(sub, "a.txt"), []byte("hello"))
+	mustWriteBytes(t, filepath.Join(sub, "a"+"."+searchTestTxtPattern), []byte(searchTestHello))
 
 	p, err := fspolicy.New("", nil, true)
 	if err != nil {
 		t.Fatalf("New policy: %v", err)
 	}
 
-	got, _, err := searchFiles(t.Context(), p, "sub", "a\\.txt", 0)
+	got, _, err := searchFiles(t.Context(), p, "sub", "a\\."+searchTestTxtPattern, 0)
 	if err != nil {
 		t.Fatalf("searchFiles error: %v", err)
 	}
@@ -476,22 +483,22 @@ func createSearchTestTree(t *testing.T) searchTestTree {
 
 	root := t.TempDir()
 
-	helloPath := filepath.Join(root, "hello.txt")
-	writeFile(t, helloPath, "hello world")
+	helloPath := filepath.Join(root, searchTestHello+"."+searchTestTxtPattern)
+	writeFile(t, helloPath, searchTestHello+" world")
 
-	matchPath := filepath.Join(root, "matchname.txt")
+	matchPath := filepath.Join(root, "matchname"+"."+searchTestTxtPattern)
 	writeFile(t, matchPath, "this file path will match; its content will not")
 
-	contentPath := filepath.Join(root, "content.txt")
-	writeFile(t, contentPath, "some CONTENTPATTERN in this file.")
+	contentPath := filepath.Join(root, "content"+"."+searchTestTxtPattern)
+	writeFile(t, contentPath, "some "+searchTestContentPattern+" in this file.")
 
 	subdir := filepath.Join(root, "subdir")
 	if err := os.MkdirAll(subdir, 0o755); err != nil {
 		t.Fatalf("failed to create subdir %q: %v", subdir, err)
 	}
 
-	nestedPath := filepath.Join(subdir, "nested.txt")
-	writeFile(t, nestedPath, "nested CONTENTPATTERN plus more text.")
+	nestedPath := filepath.Join(subdir, "nested"+"."+searchTestTxtPattern)
+	writeFile(t, nestedPath, "nested "+searchTestContentPattern+" plus more text.")
 
 	// Big file (>10MB) whose content contains BIGPATTERN but should not be read
 	// by searchFiles because of the size guard.
@@ -500,7 +507,7 @@ func createSearchTestTree(t *testing.T) searchTestTree {
 	if err != nil {
 		t.Fatalf("failed to create big file %q: %v", bigPath, err)
 	}
-	if _, err := f.WriteString("BIGPATTERN at the beginning of a big file."); err != nil {
+	if _, err := f.WriteString(searchTestBigPattern + " at the beginning of a big file."); err != nil {
 		t.Fatalf("failed to write to big file %q: %v", bigPath, err)
 	}
 	if err := f.Truncate(1*1024*1024 + 1); err != nil {

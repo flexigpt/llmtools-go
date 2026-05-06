@@ -11,6 +11,23 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
+const (
+	testScriptExt     = ".sh"
+	testScriptExtPy   = ".py"
+	testScriptHello   = "hello.sh"
+	testScriptDirect  = "exec_direct.sh"
+	testScriptVerbose = "verbose.sh"
+	testScriptSleep   = "sleep.sh"
+
+	testScriptHelloOutput  = "hello"
+	testScriptDirectOutput = "direct"
+
+	testScriptHelloContent   = "#!/bin/sh\nprintf '%s' \"hello\"\n"
+	testScriptDirectContent  = "#!/bin/sh\nprintf '%s' \"direct\"\n"
+	testScriptVerboseContent = "#!/bin/sh\ni=0; while [ $i -lt 3000 ]; do printf a; i=$((i+1)); done\n"
+	testScriptSleepContent   = "#!/bin/sh\nsleep 2\n"
+)
+
 func TestExtAllowed(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -18,12 +35,17 @@ func TestExtAllowed(t *testing.T) {
 		allowed []string
 		want    bool
 	}{
-		{name: "empty_allowed_false", ext: ".sh", allowed: nil, want: false},
-		{name: "match_exact", ext: ".sh", allowed: []string{".sh"}, want: true},
+		{name: "empty_allowed_false", ext: testScriptExt, allowed: nil, want: false},
+		{name: "match_exact", ext: testScriptExt, allowed: []string{testScriptExt}, want: true},
 		{name: "match_case_insensitive_and_trim", ext: ".Sh", allowed: []string{"  .sH "}, want: true},
-		{name: "no_match", ext: ".py", allowed: []string{".sh"}, want: false},
-		{name: "ext_empty_allowed_only_if_empty_entry_present", ext: "", allowed: []string{".sh", ""}, want: true},
-		{name: "ext_empty_not_allowed_without_empty_entry", ext: "", allowed: []string{".sh"}, want: false},
+		{name: "no_match", ext: testScriptExtPy, allowed: []string{testScriptExt}, want: false},
+		{
+			name:    "ext_empty_allowed_only_if_empty_entry_present",
+			ext:     "",
+			allowed: []string{testScriptExt, ""},
+			want:    true,
+		},
+		{name: "ext_empty_not_allowed_without_empty_entry", ext: "", allowed: []string{testScriptExt}, want: false},
 	}
 
 	for _, tc := range cases {
@@ -38,8 +60,8 @@ func TestExtAllowed(t *testing.T) {
 func TestLookupInterpreter(t *testing.T) {
 	pol := RunScriptPolicy{
 		InterpreterByExtension: map[string]RunScriptInterpreter{
-			".sh": {Shell: ShellNameSh, Mode: RunScriptModeShell},
-			"":    {Shell: ShellNameSh, Mode: RunScriptModeShell},
+			testScriptExt: {Shell: ShellNameSh, Mode: RunScriptModeShell},
+			"":            {Shell: ShellNameSh, Mode: RunScriptModeShell},
 		},
 	}
 
@@ -50,18 +72,18 @@ func TestLookupInterpreter(t *testing.T) {
 		wantOK  bool
 		wantMod RunScriptMode
 	}{
-		{name: "nil_map_no", pol: RunScriptPolicy{InterpreterByExtension: nil}, ext: ".sh", wantOK: false},
-		{name: "exact_match_lowercase", pol: pol, ext: ".sh", wantOK: true, wantMod: RunScriptModeShell},
+		{name: "nil_map_no", pol: RunScriptPolicy{InterpreterByExtension: nil}, ext: testScriptExt, wantOK: false},
+		{name: "exact_match_lowercase", pol: pol, ext: testScriptExt, wantOK: true, wantMod: RunScriptModeShell},
 		{name: "exact_match_casefold", pol: pol, ext: ".SH", wantOK: true, wantMod: RunScriptModeShell},
 		{name: "fallback_empty_key", pol: pol, ext: ".unknown", wantOK: true, wantMod: RunScriptModeShell},
 		{
 			name: "no_match_no_fallback",
 			pol: RunScriptPolicy{
 				InterpreterByExtension: map[string]RunScriptInterpreter{
-					".sh": {Shell: ShellNameSh, Mode: RunScriptModeShell},
+					testScriptExt: {Shell: ShellNameSh, Mode: RunScriptModeShell},
 				},
 			},
-			ext:    ".py",
+			ext:    testScriptExtPy,
 			wantOK: false,
 		},
 	}
@@ -88,34 +110,34 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	scriptPath := filepath.Join(scriptDir, "hello.sh")
-	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nprintf '%s' \"hello\"\n"), 0o600); err != nil {
+	scriptPath := filepath.Join(scriptDir, testScriptHello)
+	if err := os.WriteFile(scriptPath, []byte(testScriptHelloContent), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
 	// Another script for direct execution with execute bit.
-	execScriptPath := filepath.Join(scriptDir, "exec_direct.sh")
+	execScriptPath := filepath.Join(scriptDir, testScriptDirect)
 	if err := os.WriteFile( //nolint:gosec // Execution script.
 		execScriptPath,
-		[]byte("#!/bin/sh\nprintf '%s' \"direct\"\n"),
+		[]byte(testScriptDirectContent),
 		0o700,
 	); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
 	// A script that outputs lots.
-	verbosePath := filepath.Join(scriptDir, "verbose.sh")
+	verbosePath := filepath.Join(scriptDir, testScriptVerbose)
 	if err := os.WriteFile(
 		verbosePath,
-		[]byte("#!/bin/sh\ni=0; while [ $i -lt 3000 ]; do printf a; i=$((i+1)); done\n"),
+		[]byte(testScriptVerboseContent),
 		0o600,
 	); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
 	// A script that sleeps.
-	sleepPath := filepath.Join(scriptDir, "sleep.sh")
-	if err := os.WriteFile(sleepPath, []byte("#!/bin/sh\nsleep 2\n"), 0o600); err != nil {
+	sleepPath := filepath.Join(scriptDir, testScriptSleep)
+	if err := os.WriteFile(sleepPath, []byte(testScriptSleepContent), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -128,13 +150,12 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 	}
 
 	cases := []struct {
-		name        string
-		opts        []ExecToolOption
-		args        RunScriptArgs
-		needShell   bool
-		wantErrSubs []string
-		wantOK      bool
-
+		name             string
+		opts             []ExecToolOption
+		args             RunScriptArgs
+		needShell        bool
+		wantErrSubs      []string
+		wantOK           bool
 		wantStdout       string
 		wantExitCode     int
 		wantTimedOut     bool
@@ -157,9 +178,9 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 			opts: []ExecToolOption{
 				WithAllowedRoots([]string{td}),
 				WithRunScriptPolicy(RunScriptPolicy{
-					AllowedExtensions: []string{".sh"},
+					AllowedExtensions: []string{testScriptExt},
 					InterpreterByExtension: map[string]RunScriptInterpreter{
-						".sh": {Shell: ShellNameSh, Mode: RunScriptModeShell},
+						testScriptExt: {Shell: ShellNameSh, Mode: RunScriptModeShell},
 					},
 				}),
 			},
@@ -171,9 +192,9 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 			opts: []ExecToolOption{
 				WithAllowedRoots([]string{td}),
 				WithRunScriptPolicy(RunScriptPolicy{
-					AllowedExtensions: []string{".py"}, // not .sh
+					AllowedExtensions: []string{testScriptExtPy}, // not .sh
 					InterpreterByExtension: map[string]RunScriptInterpreter{
-						".sh": {Shell: ShellNameSh, Mode: RunScriptModeShell},
+						testScriptExt: {Shell: ShellNameSh, Mode: RunScriptModeShell},
 					},
 				}),
 			},
@@ -185,7 +206,7 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 			opts: []ExecToolOption{
 				WithAllowedRoots([]string{td}),
 				WithRunScriptPolicy(RunScriptPolicy{
-					AllowedExtensions:      []string{".sh"},
+					AllowedExtensions:      []string{testScriptExt},
 					InterpreterByExtension: map[string]RunScriptInterpreter{
 						// "empty" -> missing .sh mapping.
 					},
@@ -207,9 +228,9 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 			opts: []ExecToolOption{
 				WithAllowedRoots([]string{td}),
 				WithRunScriptPolicy(RunScriptPolicy{
-					AllowedExtensions: []string{".sh"},
+					AllowedExtensions: []string{testScriptExt},
 					InterpreterByExtension: map[string]RunScriptInterpreter{
-						".sh": {Shell: ShellNameSh, Mode: RunScriptModeShell},
+						testScriptExt: {Shell: ShellNameSh, Mode: RunScriptModeShell},
 					},
 					MaxArgs: 1,
 				}),
@@ -230,9 +251,9 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 			opts: []ExecToolOption{
 				WithAllowedRoots([]string{td}),
 				WithRunScriptPolicy(RunScriptPolicy{
-					AllowedExtensions: []string{".sh"},
+					AllowedExtensions: []string{testScriptExt},
 					InterpreterByExtension: map[string]RunScriptInterpreter{
-						".sh": {Shell: ShellNameSh, Mode: RunScriptModeShell},
+						testScriptExt: {Shell: ShellNameSh, Mode: RunScriptModeShell},
 					},
 					MaxArgBytes: 3,
 				}),
@@ -246,30 +267,30 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 				WithAllowedRoots([]string{td}),
 				WithWorkBaseDir(td),
 				WithRunScriptPolicy(RunScriptPolicy{
-					AllowedExtensions: []string{".sh"},
+					AllowedExtensions: []string{testScriptExt},
 					InterpreterByExtension: map[string]RunScriptInterpreter{
-						".sh": {Shell: ShellNameSh, Mode: RunScriptModeShell},
+						testScriptExt: {Shell: ShellNameSh, Mode: RunScriptModeShell},
 					},
 				}),
 			},
 			args: RunScriptArgs{
-				Path:    "hello.sh",
+				Path:    testScriptHello,
 				WorkDir: scriptDir,
 			},
 			needShell:        true,
 			wantOK:           true,
-			wantStdout:       "hello",
+			wantStdout:       testScriptHelloOutput,
 			wantExitCode:     0,
-			wantPathEndsWith: string(filepath.Separator) + "hello.sh",
+			wantPathEndsWith: string(filepath.Separator) + testScriptHello,
 		},
 		{
 			name: "invalid_interpreter_mode",
 			opts: []ExecToolOption{
 				WithAllowedRoots([]string{td}),
 				WithRunScriptPolicy(RunScriptPolicy{
-					AllowedExtensions: []string{".sh"},
+					AllowedExtensions: []string{testScriptExt},
 					InterpreterByExtension: map[string]RunScriptInterpreter{
-						".sh": {Shell: ShellNameSh, Mode: RunScriptMode("nope")},
+						testScriptExt: {Shell: ShellNameSh, Mode: RunScriptMode("nope")},
 					},
 				}),
 			},
@@ -281,9 +302,9 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 			opts: []ExecToolOption{
 				WithAllowedRoots([]string{td}),
 				WithRunScriptPolicy(RunScriptPolicy{
-					AllowedExtensions: []string{".sh"},
+					AllowedExtensions: []string{testScriptExt},
 					InterpreterByExtension: map[string]RunScriptInterpreter{
-						".sh": {Shell: ShellNameSh, Mode: RunScriptModeInterpreter, Command: "   "},
+						testScriptExt: {Shell: ShellNameSh, Mode: RunScriptModeInterpreter, Command: "   "},
 					},
 				}),
 			},
@@ -297,45 +318,45 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 			opts: []ExecToolOption{
 				WithAllowedRoots([]string{td}),
 				WithRunScriptPolicy(RunScriptPolicy{
-					AllowedExtensions: []string{".sh"},
+					AllowedExtensions: []string{testScriptExt},
 					InterpreterByExtension: map[string]RunScriptInterpreter{
-						".sh": {Shell: ShellNameSh, Mode: RunScriptModeShell},
+						testScriptExt: {Shell: ShellNameSh, Mode: RunScriptModeShell},
 					},
 				}),
 			},
 			args:             RunScriptArgs{Path: scriptPath, WorkDir: scriptDir},
 			needShell:        true,
 			wantOK:           true,
-			wantStdout:       "hello",
+			wantStdout:       testScriptHelloOutput,
 			wantExitCode:     0,
-			wantPathEndsWith: string(filepath.Separator) + "hello.sh",
+			wantPathEndsWith: string(filepath.Separator) + testScriptHello,
 		},
 		{
 			name: "mode_direct_requires_executable_script",
 			opts: []ExecToolOption{
 				WithAllowedRoots([]string{td}),
 				WithRunScriptPolicy(RunScriptPolicy{
-					AllowedExtensions: []string{".sh"},
+					AllowedExtensions: []string{testScriptExt},
 					InterpreterByExtension: map[string]RunScriptInterpreter{
-						".sh": {Shell: ShellNameSh, Mode: RunScriptModeDirect},
+						testScriptExt: {Shell: ShellNameSh, Mode: RunScriptModeDirect},
 					},
 				}),
 			},
 			args:             RunScriptArgs{Path: execScriptPath, WorkDir: scriptDir},
 			needShell:        true,
 			wantOK:           true,
-			wantStdout:       "direct",
+			wantStdout:       testScriptDirectOutput,
 			wantExitCode:     0,
-			wantPathEndsWith: string(filepath.Separator) + "exec_direct.sh",
+			wantPathEndsWith: string(filepath.Separator) + testScriptDirect,
 		},
 		{
 			name: "max_output_truncates_stdout",
 			opts: []ExecToolOption{
 				WithAllowedRoots([]string{td}),
 				WithRunScriptPolicy(RunScriptPolicy{
-					AllowedExtensions: []string{".sh"},
+					AllowedExtensions: []string{testScriptExt},
 					InterpreterByExtension: map[string]RunScriptInterpreter{
-						".sh": {Shell: ShellNameSh, Mode: RunScriptModeShell},
+						testScriptExt: {Shell: ShellNameSh, Mode: RunScriptModeShell},
 					},
 					ExecutionPolicy: ExecutionPolicy{MaxOutputBytes: 1024},
 				}),
@@ -345,16 +366,16 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 			wantOK:           true,
 			wantExitCode:     0,
 			wantTrunc:        true,
-			wantPathEndsWith: string(filepath.Separator) + "verbose.sh",
+			wantPathEndsWith: string(filepath.Separator) + testScriptVerbose,
 		},
 		{
 			name: "timeout_sets_timed_out_and_124",
 			opts: []ExecToolOption{
 				WithAllowedRoots([]string{td}),
 				WithRunScriptPolicy(RunScriptPolicy{
-					AllowedExtensions: []string{".sh"},
+					AllowedExtensions: []string{testScriptExt},
 					InterpreterByExtension: map[string]RunScriptInterpreter{
-						".sh": {Shell: ShellNameSh, Mode: RunScriptModeShell},
+						testScriptExt: {Shell: ShellNameSh, Mode: RunScriptModeShell},
 					},
 					ExecutionPolicy: ExecutionPolicy{Timeout: 150 * time.Millisecond},
 				}),
@@ -364,7 +385,7 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 			wantOK:           true,
 			wantExitCode:     124,
 			wantTimedOut:     true,
-			wantPathEndsWith: string(filepath.Separator) + "sleep.sh",
+			wantPathEndsWith: string(filepath.Separator) + testScriptSleep,
 		},
 	}
 

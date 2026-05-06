@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/flexigpt/llmtools-go/internal/executil"
+	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
@@ -21,7 +22,7 @@ var runScriptToolSpec = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019c3df0-e332-717f-85d1-3d752f9f6046",
 	Slug:          "runscript",
-	Version:       "v1.0.0",
+	Version:       spec.VersionOne,
 	DisplayName:   "Run Script",
 	Description:   "Run an existing script from disk.",
 	Tags:          []string{"exec"},
@@ -170,20 +171,28 @@ func DefaultRunScriptPolicy() RunScriptPolicy {
 		pyShell = ShellNamePowershell
 	}
 	return RunScriptPolicy{
-		AllowedExtensions: []string{".sh", ".bash", ".zsh", ".ksh", ".dash", ".ps1", ".py"},
+		AllowedExtensions: []string{
+			string(ioutil.ExtShell),
+			string(ioutil.ExtBash),
+			string(ioutil.ExtZsh),
+			string(ioutil.ExtKsh),
+			string(ioutil.ExtDash),
+			string(ioutil.ExtPS1),
+			string(ioutil.ExtPY),
+		},
 		InterpreterByExtension: map[string]RunScriptInterpreter{
 			// Shell scripts: run via the wrapper shell path as interpreter.
-			".sh":   {Shell: ShellNameSh, Mode: RunScriptModeShell},
-			".bash": {Shell: ShellNameBash, Mode: RunScriptModeShell},
-			".zsh":  {Shell: ShellNameZsh, Mode: RunScriptModeShell},
-			".ksh":  {Shell: ShellNameKsh, Mode: RunScriptModeShell},
-			".dash": {Shell: ShellNameDash, Mode: RunScriptModeShell},
+			string(ioutil.ExtShell): {Shell: ShellNameSh, Mode: RunScriptModeShell},
+			string(ioutil.ExtBash):  {Shell: ShellNameBash, Mode: RunScriptModeShell},
+			string(ioutil.ExtZsh):   {Shell: ShellNameZsh, Mode: RunScriptModeShell},
+			string(ioutil.ExtKsh):   {Shell: ShellNameKsh, Mode: RunScriptModeShell},
+			string(ioutil.ExtDash):  {Shell: ShellNameDash, Mode: RunScriptModeShell},
 
 			// PowerShell: execute the script directly via PowerShell dialect ("& 'script.ps1' ...").
-			".ps1": {Shell: ShellNamePowershell, Mode: RunScriptModeDirect},
+			string(ioutil.ExtPS1): {Shell: ShellNamePowershell, Mode: RunScriptModeDirect},
 
 			// Python: interpreter-based.
-			".py": {Shell: pyShell, Mode: RunScriptModeInterpreter, Command: pyCmd},
+			string(ioutil.ExtPY): {Shell: pyShell, Mode: RunScriptModeInterpreter, Command: pyCmd},
 		},
 		ExecutionPolicy: ExecutionPolicy{}, // inherit from ExecTool by default
 		MaxArgs:         256,

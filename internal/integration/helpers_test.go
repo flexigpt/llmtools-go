@@ -14,6 +14,14 @@ import (
 	"github.com/flexigpt/llmtools-go/texttool"
 )
 
+const (
+	integrationToolSlugReadFile     = "readfile"
+	integrationToolSlugWriteFile    = "writefile"
+	integrationToolSlugShellCommand = "shellcommand"
+	integrationEncodingText         = "text"
+	integrationEncodingBinary       = "binary"
+)
+
 type harness struct {
 	t    *testing.T
 	base string
@@ -189,12 +197,4 @@ func debugJSON(t *testing.T, v any) string {
 		return fmt.Sprintf("<json error: %v>", err)
 	}
 	return string(b)
-}
-
-func stringPtr(s string) *string {
-	return &s
-}
-
-func intPtr(i int) *int {
-	return &i
 }

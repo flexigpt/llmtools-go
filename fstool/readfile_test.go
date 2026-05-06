@@ -41,7 +41,7 @@ func TestReadFile(t *testing.T) {
 		wantBytes    []byte
 	}{
 		{
-			name: "context_canceled",
+			name: testNameContextCanceled,
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
@@ -76,58 +76,61 @@ func TestReadFile(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) ReadFileArgs {
 				t.Helper()
-				return ReadFileArgs{Path: filepath.Join(c.workBaseDir, "nope.txt")}
+				return ReadFileArgs{Path: filepath.Join(c.workBaseDir, testPathNopeTxt)}
 			},
-			wantErr: wantErrContains("does not exist"),
+			wantErr: wantErrContains(testErrDoesNotExist),
 		},
 		{
 			name: "read_text_default_encoding",
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "file.txt"), []byte("hello world"))
+				mustWriteFile(t, filepath.Join(tmp, testPathFileTxt), []byte(testContentHelloWorld))
 				return cfg{workBaseDir: tmp}
 			},
 			args: func(t *testing.T, c cfg) ReadFileArgs {
 				t.Helper()
-				return ReadFileArgs{Path: "file.txt"}
+				return ReadFileArgs{Path: testPathFileTxt}
 			},
 			wantErr:  wantErrNone,
-			wantKind: "text",
-			wantText: "hello world",
+			wantKind: testKindText,
+			wantText: testContentHelloWorld,
 		},
 		{
 			name: "read_text_encoding_trimmed_case_insensitive",
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "file.txt"), []byte("hello world"))
+				mustWriteFile(t, filepath.Join(tmp, testPathFileTxt), []byte(testContentHelloWorld))
 				return cfg{workBaseDir: tmp}
 			},
 			args: func(t *testing.T, c cfg) ReadFileArgs {
 				t.Helper()
-				return ReadFileArgs{Path: "file.txt", Encoding: "  TeXt "}
+				return ReadFileArgs{
+					Path:     testPathFileTxt,
+					Encoding: testWhitespace + testEncodingMixedCaseText + testWhitespace,
+				}
 			},
 			wantErr:  wantErrNone,
-			wantKind: "text",
-			wantText: "hello world",
+			wantKind: testKindText,
+			wantText: testContentHelloWorld,
 		},
 		{
 			name: "read_binary_file_returns_file_union",
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "file.bin"), []byte{0x00, 0x01, 0x02, 0x03})
+				mustWriteFile(t, filepath.Join(tmp, testPathFileBin), []byte{0x00, 0x01, 0x02, 0x03})
 				return cfg{workBaseDir: tmp}
 			},
 			args: func(t *testing.T, c cfg) ReadFileArgs {
 				t.Helper()
-				return ReadFileArgs{Path: "file.bin", Encoding: "binary"}
+				return ReadFileArgs{Path: testPathFileBin, Encoding: testEncodingBinary}
 			},
 			wantErr:      wantErrNone,
-			wantKind:     "file",
-			wantFileName: "file.bin",
-			wantMIMEPref: "application/",
+			wantKind:     testKindFile,
+			wantFileName: testPathFileBin,
+			wantMIMEPref: testMIMEApplicationPrefix,
 			wantBytes:    []byte{0x00, 0x01, 0x02, 0x03},
 		},
 		{
@@ -135,17 +138,17 @@ func TestReadFile(t *testing.T) {
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "image.png"), []byte{0x11, 0x22, 0x33})
+				mustWriteFile(t, filepath.Join(tmp, testPathImagePNG), []byte{0x11, 0x22, 0x33})
 				return cfg{workBaseDir: tmp}
 			},
 			args: func(t *testing.T, c cfg) ReadFileArgs {
 				t.Helper()
-				return ReadFileArgs{Path: "image.png", Encoding: "binary"}
+				return ReadFileArgs{Path: testPathImagePNG, Encoding: testEncodingBinary}
 			},
 			wantErr:      wantErrNone,
-			wantKind:     "image",
-			wantFileName: "image.png",
-			wantMIMEPref: "image/",
+			wantKind:     testKindImage,
+			wantFileName: testPathImagePNG,
+			wantMIMEPref: testMIMEImagePrefix,
 			wantBytes:    []byte{0x11, 0x22, 0x33},
 		},
 		{
@@ -153,42 +156,42 @@ func TestReadFile(t *testing.T) {
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "file.txt"), []byte("x"))
+				mustWriteFile(t, filepath.Join(tmp, testPathFileTxt), []byte(testContentX))
 				return cfg{workBaseDir: tmp}
 			},
 			args: func(t *testing.T, c cfg) ReadFileArgs {
 				t.Helper()
-				return ReadFileArgs{Path: "file.txt", Encoding: "nope"}
+				return ReadFileArgs{Path: testPathFileTxt, Encoding: testEncodingNope}
 			},
-			wantErr: wantErrContains(`encoding must be "text" or "binary"`),
+			wantErr: wantErrContains(testErrEncodingMustBeTextOrBinary),
 		},
 		{
 			name: "read_non_text_as_text_errors",
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "file.bin"), []byte{0x00, 0x01, 0x02})
+				mustWriteFile(t, filepath.Join(tmp, testPathFileBin), []byte{0x00, 0x01, 0x02})
 				return cfg{workBaseDir: tmp}
 			},
 			args: func(t *testing.T, c cfg) ReadFileArgs {
 				t.Helper()
-				return ReadFileArgs{Path: "file.bin", Encoding: "text"}
+				return ReadFileArgs{Path: testPathFileBin, Encoding: testEncodingText}
 			},
-			wantErr: wantErrContains("cannot read non-text file"),
+			wantErr: wantErrContains(testErrCannotReadNonTextFile),
 		},
 		{
 			name: "read_invalid_utf8_as_text_errors",
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "bad.txt"), []byte{0xff, 0xfe})
+				mustWriteFile(t, filepath.Join(tmp, testPathBadUtf8Txt), []byte{0xff, 0xfe})
 				return cfg{workBaseDir: tmp}
 			},
 			args: func(t *testing.T, c cfg) ReadFileArgs {
 				t.Helper()
-				return ReadFileArgs{Path: "bad.txt", Encoding: "text"}
+				return ReadFileArgs{Path: testPathBadUtf8Txt, Encoding: testEncodingText}
 			},
-			wantErr: wantErrContains("not valid UTF-8"),
+			wantErr: wantErrContains(testErrNotValidUTF8),
 		},
 		{
 			name: "symlink_file_refused_when_blockSymlinks_true",
@@ -202,13 +205,13 @@ func TestReadFile(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) ReadFileArgs {
 				t.Helper()
-				target := filepath.Join(c.workBaseDir, "target.txt")
-				mustWriteFile(t, target, []byte("ok"))
-				link := filepath.Join(c.workBaseDir, "link.txt")
+				target := filepath.Join(c.workBaseDir, testPathTargetTxt)
+				mustWriteFile(t, target, []byte(testContentOK))
+				link := filepath.Join(c.workBaseDir, testPathLinkTxt)
 				mustSymlinkOrSkip(t, target, link)
-				return ReadFileArgs{Path: "link.txt", Encoding: "text"}
+				return ReadFileArgs{Path: testPathLinkTxt, Encoding: testEncodingText}
 			},
-			wantErr: wantErrContains("symlink"),
+			wantErr: wantErrContains(testErrSymlink),
 		},
 		{
 			name: "allowedRoots_blocks_outside_file",
@@ -220,11 +223,11 @@ func TestReadFile(t *testing.T) {
 			args: func(t *testing.T, c cfg) ReadFileArgs {
 				t.Helper()
 				outside := t.TempDir()
-				p := filepath.Join(outside, "x.txt")
-				mustWriteFile(t, p, []byte("x"))
+				p := filepath.Join(outside, testPathXTxt)
+				mustWriteFile(t, p, []byte(testContentX))
 				return ReadFileArgs{Path: p}
 			},
-			wantErr: wantErrContains("outside allowed roots"),
+			wantErr: wantErrContains(testErrOutsideAllowedRoots),
 		},
 	}
 
@@ -258,14 +261,14 @@ func TestReadFile(t *testing.T) {
 			}
 
 			switch tt.wantKind {
-			case "text":
+			case testKindText:
 				if out.TextItem == nil || out.FileItem != nil || out.ImageItem != nil {
 					t.Fatalf("unexpected union shape for text: %#v", out)
 				}
 				if out.TextItem.Text != tt.wantText {
 					t.Fatalf("Text=%q want=%q", out.TextItem.Text, tt.wantText)
 				}
-			case "file":
+			case testKindFile:
 				if out.FileItem == nil || out.TextItem != nil || out.ImageItem != nil {
 					t.Fatalf("unexpected union shape for file: %#v", out)
 				}
@@ -281,7 +284,7 @@ func TestReadFile(t *testing.T) {
 						t.Fatalf("decoded bytes=%v want=%v", raw, tt.wantBytes)
 					}
 				}
-			case "image":
+			case testKindImage:
 				if out.ImageItem == nil || out.TextItem != nil || out.FileItem != nil {
 					t.Fatalf("unexpected union shape for image: %#v", out)
 				}

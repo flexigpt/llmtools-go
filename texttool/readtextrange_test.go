@@ -28,7 +28,7 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 	}{
 		{
 			name:    "no_args_returns_entire_short_file_with_defaults",
-			initial: "A\nB\nC\n",
+			initial: testTextABC,
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{Path: path}
 			},
@@ -45,7 +45,7 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
 					Path:      path,
-					StartLine: readTextRangeIntPtr(3),
+					StartLine: new(3),
 				}
 			},
 			wantStart: 3,
@@ -61,8 +61,8 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
 					Path:      path,
-					StartLine: readTextRangeIntPtr(2),
-					LineCount: readTextRangeIntPtr(2),
+					StartLine: new(2),
+					LineCount: new(2),
 				}
 			},
 			wantStart: 2,
@@ -78,8 +78,8 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
 					Path:      path,
-					StartLine: readTextRangeIntPtr(4),
-					LineCount: readTextRangeIntPtr(10),
+					StartLine: new(4),
+					LineCount: new(10),
 				}
 			},
 			wantStart: 4,
@@ -91,11 +91,11 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 		},
 		{
 			name:    "startLine_at_last_line_returns_one_line_and_eof",
-			initial: "A\nB\nC\n",
+			initial: testTextABC,
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
 					Path:      path,
-					StartLine: readTextRangeIntPtr(3),
+					StartLine: new(3),
 				}
 			},
 			wantStart: 3,
@@ -120,12 +120,12 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 		},
 		{
 			name:    "explicit_startLine_1_on_empty_file_returns_empty_and_eof",
-			initial: "",
+			initial: testTextEmpty,
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
 					Path:      path,
-					StartLine: readTextRangeIntPtr(1),
-					LineCount: readTextRangeIntPtr(10),
+					StartLine: new(1),
+					LineCount: new(10),
 				}
 			},
 			wantStart: 0,
@@ -139,7 +139,7 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
 					Path:      path,
-					LineCount: readTextRangeIntPtr(16000),
+					LineCount: new(16000),
 				}
 			},
 			wantStart: 1,
@@ -153,7 +153,9 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 			name:    "omitted_lineCount_uses_default_and_may_not_reach_eof",
 			initial: makeNLines(2001, func(i int) string { return "x" }, "\n", true),
 			args: func(path string) ReadTextRangeArgs {
-				return ReadTextRangeArgs{Path: path}
+				return ReadTextRangeArgs{
+					Path: path,
+				}
 			},
 			wantStart: 1,
 			wantEnd:   1000,
@@ -168,7 +170,7 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
 					Path:      path,
-					StartLine: readTextRangeIntPtr(1500),
+					StartLine: new(1500),
 				}
 			},
 			wantStart: 1500,
@@ -264,12 +266,12 @@ func TestReadTextRange_ErrorCases(t *testing.T) {
 		{
 			name: "startLine_must_be_ge_1",
 			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
 					Path:      path,
-					StartLine: readTextRangeIntPtr(0),
+					StartLine: new(0),
 				}
 			},
 			wantErrSub: "startLine must be >= 1",
@@ -277,12 +279,12 @@ func TestReadTextRange_ErrorCases(t *testing.T) {
 		{
 			name: "lineCount_must_be_ge_1",
 			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
 					Path:      path,
-					LineCount: readTextRangeIntPtr(0),
+					LineCount: new(0),
 				}
 			},
 			wantErrSub: "lineCount must be >= 1",
@@ -290,12 +292,12 @@ func TestReadTextRange_ErrorCases(t *testing.T) {
 		{
 			name: "lineCount_too_large",
 			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
 					Path:      path,
-					LineCount: readTextRangeIntPtr(16001),
+					LineCount: new(16001),
 				}
 			},
 			wantErrSub: "lineCount too large",
@@ -303,12 +305,12 @@ func TestReadTextRange_ErrorCases(t *testing.T) {
 		{
 			name: "startLine_out_of_bounds_for_non_empty_file",
 			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "A\nB\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAB)
 			},
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
 					Path:      path,
-					StartLine: readTextRangeIntPtr(3),
+					StartLine: new(3),
 				}
 			},
 			wantErrSub: "out of bounds for file with 2 lines",
@@ -316,20 +318,20 @@ func TestReadTextRange_ErrorCases(t *testing.T) {
 		{
 			name: "startLine_out_of_bounds_for_empty_file",
 			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextEmpty)
 			},
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{
 					Path:      path,
-					StartLine: readTextRangeIntPtr(2),
+					StartLine: new(2),
 				}
 			},
 			wantErrSub: "out of bounds for empty file",
 		},
 		{
-			name: "context_canceled",
+			name: testNameContextCanceled,
 			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) ReadTextRangeArgs {
 				return ReadTextRangeArgs{Path: path}
@@ -361,8 +363,4 @@ func TestReadTextRange_ErrorCases(t *testing.T) {
 			mustErrContains(t, err, tt.wantErrSub)
 		})
 	}
-}
-
-func readTextRangeIntPtr(v int) *int {
-	return &v
 }

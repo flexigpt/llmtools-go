@@ -9,6 +9,12 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
+const (
+	deleteTextDisambiguatedInitial = "hdr\nctx1\n\nX\nctx2\nctx1\nX\nctx3\n"
+	deleteTextDisambiguatedWant    = "hdr\nctx1\n\nctx2\nctx1\nX\nctx3\n"
+	deleteTextWhitespaceInitial    = "A\n  B  \nC\n"
+)
+
 func TestDeleteText_HappyPaths(t *testing.T) {
 	dir := newWorkDir(t)
 	policy, err := fspolicy.New("", nil, true)
@@ -26,39 +32,39 @@ func TestDeleteText_HappyPaths(t *testing.T) {
 	}{
 		{
 			name:    "delete_single_line_default_expected_1",
-			initial: "A\nB\nC\n",
+			initial: testTextABC,
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:    path,
-					OldText: stringPtr("B"),
+					OldText: new("B"),
 				}
 			},
-			wantContent:   "A\nC\n",
+			wantContent:   testTextAC,
 			wantDeletions: 1,
 			wantDeletedAt: []int{2},
 		},
 		{
 			name:    "delete_disambiguated_by_textAbove_textBelow_with_blank_gap_tolerance",
-			initial: "hdr\nctx1\n\nX\nctx2\nctx1\nX\nctx3\n",
+			initial: deleteTextDisambiguatedInitial,
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:      path,
-					OldText:   stringPtr("X"),
-					TextAbove: stringPtr("ctx1\n\n\n"),
-					TextBelow: stringPtr("\nctx2"),
+					OldText:   new("X"),
+					TextAbove: new("ctx1\n\n\n"),
+					TextBelow: new("\nctx2"),
 				}
 			},
-			wantContent:   "hdr\nctx1\n\nctx2\nctx1\nX\nctx3\n",
+			wantContent:   deleteTextDisambiguatedWant,
 			wantDeletions: 1,
 			wantDeletedAt: []int{4},
 		},
 		{
 			name:    "delete_all_lines_preserves_final_newline",
-			initial: "A\n",
+			initial: testTextAOnly,
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:    path,
-					OldText: stringPtr("A"),
+					OldText: new("A"),
 				}
 			},
 			wantContent:   "\n",
@@ -67,11 +73,11 @@ func TestDeleteText_HappyPaths(t *testing.T) {
 		},
 		{
 			name:    "preserves_crlf_newlines",
-			initial: "A\r\nB\r\n",
+			initial: testTextABCRLF,
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:    path,
-					OldText: stringPtr("A"),
+					OldText: new("A"),
 				}
 			},
 			wantContent:   "B\r\n",
@@ -80,14 +86,14 @@ func TestDeleteText_HappyPaths(t *testing.T) {
 		},
 		{
 			name:    "trimspace_matching_deletes_whitespace_padded_line",
-			initial: "A\n  B  \nC\n",
+			initial: deleteTextWhitespaceInitial,
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:    path,
-					OldText: stringPtr("B"),
+					OldText: new("B"),
 				}
 			},
-			wantContent:   "A\nC\n",
+			wantContent:   testTextAC,
 			wantDeletions: 1,
 			wantDeletedAt: []int{2},
 		},
@@ -97,50 +103,50 @@ func TestDeleteText_HappyPaths(t *testing.T) {
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:    path,
-					OldText: stringPtr("X\nY"),
+					OldText: new("X\nY"),
 				}
 			},
-			wantContent:   "A\nB\n",
+			wantContent:   testTextAB,
 			wantDeletions: 1,
 			wantDeletedAt: []int{2},
 		},
 		{
 			name:    "multiple_deletions_expected_2_reports_original_line_numbers",
-			initial: "A\nX\nB\nX\nC\n",
+			initial: testTextAXBXC,
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:          path,
-					OldText:       stringPtr("X"),
-					ExpectedCount: intPtr(2),
+					OldText:       new("X"),
+					ExpectedCount: new(2),
 				}
 			},
-			wantContent:   "A\nB\nC\n",
+			wantContent:   testTextABC,
 			wantDeletions: 2,
 			wantDeletedAt: []int{2, 4},
 		},
 		{
 			name:    "oldText_blank_line_can_be_deleted_using_explicit_newline",
-			initial: "A\n\nB\n",
+			initial: testTextAEmptyB,
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:      path,
-					OldText:   stringPtr("\n"),
-					TextAbove: stringPtr("A"),
-					TextBelow: stringPtr("B"),
+					OldText:   new("\n"),
+					TextAbove: new("A"),
+					TextBelow: new("B"),
 				}
 			},
-			wantContent:   "A\nB\n",
+			wantContent:   testTextAB,
 			wantDeletions: 1,
 			wantDeletedAt: []int{2},
 		},
 		{
 			name:    "lineHint_narrows_ambiguous_match",
-			initial: "A\nX\nB\nX\nC\n",
+			initial: testTextAXBXC,
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:     path,
-					OldText:  stringPtr("X"),
-					LineHint: intPtr(4),
+					OldText:  new("X"),
+					LineHint: new(4),
 				}
 			},
 			wantContent:   "A\nX\nB\nC\n",
@@ -210,7 +216,7 @@ func TestDeleteText_ErrorCases(t *testing.T) {
 			name: "oldText_required",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{Path: path, OldText: nil}
@@ -221,10 +227,10 @@ func TestDeleteText_ErrorCases(t *testing.T) {
 			name: "oldText_must_not_be_empty",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) DeleteTextArgs {
-				return DeleteTextArgs{Path: path, OldText: stringPtr("")}
+				return DeleteTextArgs{Path: path, OldText: new("")}
 			},
 			wantErrSub: "oldText must not be empty",
 		},
@@ -237,8 +243,8 @@ func TestDeleteText_ErrorCases(t *testing.T) {
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:      path,
-					OldText:   stringPtr("X"),
-					TextAbove: stringPtr(""),
+					OldText:   new("X"),
+					TextAbove: new(""),
 				}
 			},
 			wantErrSub: "textAbove must not be empty",
@@ -252,8 +258,8 @@ func TestDeleteText_ErrorCases(t *testing.T) {
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:      path,
-					OldText:   stringPtr("X"),
-					TextBelow: stringPtr(""),
+					OldText:   new("X"),
+					TextBelow: new(""),
 				}
 			},
 			wantErrSub: "textBelow must not be empty",
@@ -262,13 +268,13 @@ func TestDeleteText_ErrorCases(t *testing.T) {
 			name: "expectedCount_must_be_ge_1",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:          path,
-					OldText:       stringPtr("A"),
-					ExpectedCount: intPtr(0),
+					OldText:       new("A"),
+					ExpectedCount: new(0),
 				}
 			},
 			wantErrSub: "expectedCount must be >= 1",
@@ -277,16 +283,16 @@ func TestDeleteText_ErrorCases(t *testing.T) {
 			name: "lineHint_must_be_ge_1",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:     path,
-					OldText:  stringPtr("A"),
-					LineHint: intPtr(0),
+					OldText:  new("A"),
+					LineHint: new(0),
 				}
 			},
-			wantErrSub: "lineHint must be >= 1",
+			wantErrSub: testErrLineHintMustBeGe1,
 		},
 		{
 			name: "lineHint_may_only_be_used_when_expectedCount_is_1",
@@ -297,9 +303,9 @@ func TestDeleteText_ErrorCases(t *testing.T) {
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:          path,
-					OldText:       stringPtr("A"),
-					LineHint:      intPtr(1),
-					ExpectedCount: intPtr(2),
+					OldText:       new("A"),
+					LineHint:      new(1),
+					ExpectedCount: new(2),
 				}
 			},
 			wantErrSub: "lineHint may only be used when expectedCount == 1",
@@ -313,10 +319,10 @@ func TestDeleteText_ErrorCases(t *testing.T) {
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:    path,
-					OldText: stringPtr("A"),
+					OldText: new("A"),
 				}
 			},
-			wantErrSub:        "delete match count mismatch",
+			wantErrSub:        testErrDeleteMatchCountMismatch,
 			checkContentAfter: true,
 			wantContentAfter:  "A\nX\nA\nX\n",
 		},
@@ -324,18 +330,18 @@ func TestDeleteText_ErrorCases(t *testing.T) {
 			name: "lineHint_tie_does_not_break_ambiguity",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\nX\nB\nX\nC\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAXBXC)
 			},
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:     path,
-					OldText:  stringPtr("X"),
-					LineHint: intPtr(3),
+					OldText:  new("X"),
+					LineHint: new(3),
 				}
 			},
-			wantErrSub:        "delete match count mismatch",
+			wantErrSub:        testErrDeleteMatchCountMismatch,
 			checkContentAfter: true,
-			wantContentAfter:  "A\nX\nB\nX\nC\n",
+			wantContentAfter:  testTextAXBXC,
 		},
 		{
 			name: "textAbove_does_not_skip_nonblank_lines",
@@ -346,11 +352,11 @@ func TestDeleteText_ErrorCases(t *testing.T) {
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:      path,
-					OldText:   stringPtr("X"),
-					TextAbove: stringPtr("A"),
+					OldText:   new("X"),
+					TextAbove: new("A"),
 				}
 			},
-			wantErrSub:        "delete match count mismatch",
+			wantErrSub:        testErrDeleteMatchCountMismatch,
 			checkContentAfter: true,
 			wantContentAfter:  "A\nmid\nX\n",
 		},
@@ -363,8 +369,8 @@ func TestDeleteText_ErrorCases(t *testing.T) {
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:          path,
-					OldText:       stringPtr("X\nX"),
-					ExpectedCount: intPtr(2),
+					OldText:       new("X\nX"),
+					ExpectedCount: new(2),
 				}
 			},
 			wantErrSub:        "overlapping matches detected",
@@ -378,7 +384,7 @@ func TestDeleteText_ErrorCases(t *testing.T) {
 				return writeTempBytesFile(t, dir, "x-*.txt", []byte{0xff, 0xfe, 0xfd})
 			},
 			args: func(path string) DeleteTextArgs {
-				return DeleteTextArgs{Path: path, OldText: stringPtr("A")}
+				return DeleteTextArgs{Path: path, OldText: new("A")}
 			},
 			wantErrSub: "not valid UTF-8",
 		},
@@ -386,23 +392,23 @@ func TestDeleteText_ErrorCases(t *testing.T) {
 			name: "file_not_found",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return filepath.Join(dir, "nope-does-not-exist.txt")
+				return filepath.Join(dir, testMissingFileName)
 			},
 			args: func(path string) DeleteTextArgs {
-				return DeleteTextArgs{Path: path, OldText: stringPtr("A")}
+				return DeleteTextArgs{Path: path, OldText: new("A")}
 			},
 			wantAnyErr: true,
 		},
 		{
-			name: "context_canceled",
+			name: testNameContextCanceled,
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{
 					Path:    path,
-					OldText: stringPtr("A"),
+					OldText: new("A"),
 				}
 			},
 			wantIsCtx: true,

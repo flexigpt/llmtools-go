@@ -39,7 +39,7 @@ func TestListDirectory(t *testing.T) {
 		wantErr func(error) bool
 	}{
 		{
-			name: "context_canceled",
+			name: testNameContextCanceled,
 			cfg: func(t *testing.T) policyCfg {
 				t.Helper()
 				tmp := t.TempDir()
@@ -57,16 +57,16 @@ func TestListDirectory(t *testing.T) {
 			cfg: func(t *testing.T) policyCfg {
 				t.Helper()
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "a.txt"), []byte("a"))
-				mustWriteFile(t, filepath.Join(tmp, "b.md"), []byte("b"))
-				mustMkdirAll(t, filepath.Join(tmp, "subdir"))
+				mustWriteFile(t, filepath.Join(tmp, testPathATxt), []byte(testContentA))
+				mustWriteFile(t, filepath.Join(tmp, testPathBMD), []byte(testContentB))
+				mustMkdirAll(t, filepath.Join(tmp, testPathSubdir))
 				return policyCfg{workBaseDir: tmp}
 			},
 			args: func(t *testing.T, cfg policyCfg) ListDirectoryArgs {
 				t.Helper()
 				return ListDirectoryArgs{Path: cfg.workBaseDir}
 			},
-			want:    []string{"a.txt", "b.md", "subdir"},
+			want:    []string{testPathATxt, testPathBMD, testPathSubdir},
 			wantErr: wantErrNone,
 		},
 		{
@@ -74,15 +74,15 @@ func TestListDirectory(t *testing.T) {
 			cfg: func(t *testing.T) policyCfg {
 				t.Helper()
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "a.txt"), []byte("a"))
-				mustWriteFile(t, filepath.Join(tmp, "b.md"), []byte("b"))
+				mustWriteFile(t, filepath.Join(tmp, testPathATxt), []byte(testContentA))
+				mustWriteFile(t, filepath.Join(tmp, testPathBMD), []byte(testContentB))
 				return policyCfg{workBaseDir: tmp}
 			},
 			args: func(t *testing.T, cfg policyCfg) ListDirectoryArgs {
 				t.Helper()
-				return ListDirectoryArgs{Path: cfg.workBaseDir, NameGlob: "*.md"}
+				return ListDirectoryArgs{Path: cfg.workBaseDir, NameGlob: testGlobMD}
 			},
-			want:    []string{"b.md"},
+			want:    []string{testPathBMD},
 			wantErr: wantErrNone,
 		},
 		{
@@ -90,12 +90,12 @@ func TestListDirectory(t *testing.T) {
 			cfg: func(t *testing.T) policyCfg {
 				t.Helper()
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "a.txt"), []byte("a"))
+				mustWriteFile(t, filepath.Join(tmp, testPathATxt), []byte(testContentA))
 				return policyCfg{workBaseDir: tmp}
 			},
 			args: func(t *testing.T, cfg policyCfg) ListDirectoryArgs {
 				t.Helper()
-				return ListDirectoryArgs{Path: cfg.workBaseDir, NameGlob: "["}
+				return ListDirectoryArgs{Path: cfg.workBaseDir, NameGlob: testGlobInvalid}
 			},
 			wantErr: wantErrAny,
 		},
@@ -104,15 +104,15 @@ func TestListDirectory(t *testing.T) {
 			cfg: func(t *testing.T) policyCfg {
 				t.Helper()
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "a.txt"), []byte("a"))
-				mustWriteFile(t, filepath.Join(tmp, "b.md"), []byte("b"))
+				mustWriteFile(t, filepath.Join(tmp, testPathATxt), []byte(testContentA))
+				mustWriteFile(t, filepath.Join(tmp, testPathBMD), []byte(testContentB))
 				return policyCfg{workBaseDir: tmp}
 			},
 			args: func(t *testing.T, cfg policyCfg) ListDirectoryArgs {
 				t.Helper()
 				return ListDirectoryArgs{} // default "."
 			},
-			want:    []string{"a.txt", "b.md"},
+			want:    []string{testPathATxt, testPathBMD},
 			wantErr: wantErrNone,
 		},
 		{
@@ -120,13 +120,13 @@ func TestListDirectory(t *testing.T) {
 			cfg: func(t *testing.T) policyCfg {
 				t.Helper()
 				tmp := t.TempDir()
-				p := filepath.Join(tmp, "a.txt")
-				mustWriteFile(t, p, []byte("a"))
+				p := filepath.Join(tmp, testPathATxt)
+				mustWriteFile(t, p, []byte(testContentA))
 				return policyCfg{workBaseDir: tmp}
 			},
 			args: func(t *testing.T, cfg policyCfg) ListDirectoryArgs {
 				t.Helper()
-				return ListDirectoryArgs{Path: filepath.Join(cfg.workBaseDir, "a.txt")}
+				return ListDirectoryArgs{Path: filepath.Join(cfg.workBaseDir, testPathATxt)}
 			},
 			wantErr: wantErrAny,
 		},
@@ -138,20 +138,20 @@ func TestListDirectory(t *testing.T) {
 					t.Skip("symlink tests are unreliable on Windows CI")
 				}
 				tmp := t.TempDir()
-				realTxt := filepath.Join(tmp, "real")
+				realTxt := filepath.Join(tmp, testPathReal)
 				mustMkdirAll(t, realTxt)
-				mustWriteFile(t, filepath.Join(realTxt, "a.txt"), []byte("a"))
+				mustWriteFile(t, filepath.Join(realTxt, testPathATxt), []byte(testContentA))
 
-				link := filepath.Join(tmp, "linkdir")
+				link := filepath.Join(tmp, testPathLinkDir)
 				mustSymlinkOrSkip(t, realTxt, link)
 
 				return policyCfg{workBaseDir: tmp, blockSymlinks: true}
 			},
 			args: func(t *testing.T, cfg policyCfg) ListDirectoryArgs {
 				t.Helper()
-				return ListDirectoryArgs{Path: filepath.Join(cfg.workBaseDir, "linkdir")}
+				return ListDirectoryArgs{Path: filepath.Join(cfg.workBaseDir, testPathLinkDir)}
 			},
-			wantErr: wantErrContains("symlink"),
+			wantErr: wantErrContains(testErrSymlink),
 		},
 		{
 			name: "blockSymlinks_false_allows_symlink_component",
@@ -161,20 +161,20 @@ func TestListDirectory(t *testing.T) {
 					t.Skip("symlink tests are unreliable on Windows CI")
 				}
 				tmp := t.TempDir()
-				realTxt := filepath.Join(tmp, "real")
+				realTxt := filepath.Join(tmp, testPathReal)
 				mustMkdirAll(t, realTxt)
-				mustWriteFile(t, filepath.Join(realTxt, "a.txt"), []byte("a"))
+				mustWriteFile(t, filepath.Join(realTxt, testPathATxt), []byte(testContentA))
 
-				link := filepath.Join(tmp, "linkdir")
+				link := filepath.Join(tmp, testPathLinkDir)
 				mustSymlinkOrSkip(t, realTxt, link)
 
 				return policyCfg{workBaseDir: tmp, blockSymlinks: false}
 			},
 			args: func(t *testing.T, cfg policyCfg) ListDirectoryArgs {
 				t.Helper()
-				return ListDirectoryArgs{Path: filepath.Join(cfg.workBaseDir, "linkdir")}
+				return ListDirectoryArgs{Path: filepath.Join(cfg.workBaseDir, testPathLinkDir)}
 			},
-			want:    []string{"a.txt"},
+			want:    []string{testPathATxt},
 			wantErr: wantErrNone,
 		},
 		{
@@ -191,7 +191,7 @@ func TestListDirectory(t *testing.T) {
 				outside := t.TempDir()
 				return ListDirectoryArgs{Path: outside}
 			},
-			wantErr: wantErrContains("outside allowed roots"),
+			wantErr: wantErrContains(testErrOutsideAllowedRoots),
 		},
 		{
 			name: "nonexistent_dir_errors_isnotexist",
@@ -202,7 +202,7 @@ func TestListDirectory(t *testing.T) {
 			},
 			args: func(t *testing.T, cfg policyCfg) ListDirectoryArgs {
 				t.Helper()
-				return ListDirectoryArgs{Path: filepath.Join(cfg.workBaseDir, "missing")}
+				return ListDirectoryArgs{Path: filepath.Join(cfg.workBaseDir, testPathMissing)}
 			},
 			wantErr: func(err error) bool {
 				return err != nil && errors.Is(err, os.ErrNotExist)

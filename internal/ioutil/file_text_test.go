@@ -10,6 +10,10 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
+const (
+	textFileTestSizeErrSubstr = "exceeds maximum allowed size"
+)
+
 func TestTextFile_Render(t *testing.T) {
 	tests := []struct {
 		name string
@@ -127,7 +131,7 @@ func TestReadTextFileUTF8_Behavior(t *testing.T) {
 			path:        pTooBig,
 			maxBytes:    5,
 			wantErr:     ErrFileExceedsMaxSize,
-			errContains: "exceeds maximum allowed size",
+			errContains: textFileTestSizeErrSubstr,
 		},
 	}
 

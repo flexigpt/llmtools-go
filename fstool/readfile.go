@@ -23,7 +23,7 @@ var readFileTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "018fe0f4-b8cd-7e55-82d5-9df0bd70e4ba",
 	Slug:          "readfile",
-	Version:       "v1.0.0",
+	Version:       spec.VersionOne,
 	DisplayName:   "Read file",
 	Description:   "Read a local file. Text mode is for UTF-8 text-like files and PDFs (extracted content). Binary mode returns file or image output with base64 data instead of plain text.",
 	Tags:          []string{"fs", "read"},
@@ -177,7 +177,7 @@ func readFile(
 		mt = mime.TypeByExtension(ext)
 	}
 	if mt == "" {
-		mt = "application/octet-stream"
+		mt = string(ioutil.MIMEApplicationOctetStream)
 	}
 
 	if strings.HasPrefix(mt, "image/") {

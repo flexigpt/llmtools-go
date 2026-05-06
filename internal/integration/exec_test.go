@@ -13,6 +13,27 @@ import (
 
 // Shell sessions + env persistence + runscript.
 
+const (
+	execTestShellVarName     = "MYVAR"
+	execTestShellHelloValue  = "hello"
+	execTestShellByeValue    = "bye"
+	execTestShellTxtPath     = "shell.txt"
+	execTestShellFromShell   = "from-shell"
+	execTestShellScriptsDir  = "scripts"
+	execTestShellPS1FileName = "hello.ps1"
+	execTestShellSHFileName  = "hello.sh"
+	execTestShellWorldArg    = "world"
+	execTestShellWriteOutput = "Write-Output $env:" + execTestShellVarName
+	execTestShellEchoEnv     = "echo \"$" + execTestShellVarName + "\""
+	execTestShellSetContent  = "Set-Content -NoNewline -Path \"" + execTestShellTxtPath + "\" -Value \"" + execTestShellFromShell + "\""
+	execTestShellPrintf      = "printf \"%s\" \"" + execTestShellFromShell + "\" > " + execTestShellTxtPath
+	execTestShellPS1Content  = "param([string]$Name)\n" +
+		"Write-Output \"NAME=$Name\"\n" +
+		"Write-Output \"ENV=$env:" + execTestShellVarName + "\"\n"
+	execTestShellSHContent = "echo \"NAME=$1\"\n" +
+		"echo \"ENV=$" + execTestShellVarName + "\"\n"
+)
+
 func TestE2E_Exec_ShellCommand_SessionEnvWorkdir(t *testing.T) {
 	base := t.TempDir()
 	h := newHarness(t, base)
@@ -24,35 +45,34 @@ func TestE2E_Exec_ShellCommand_SessionEnvWorkdir(t *testing.T) {
 	if runtime.GOOS == toolutil.GOOSWindows {
 		shell = exectool.ShellNamePowershell
 		cmds1 = []string{
-			`Set-Content -NoNewline -Path "shell.txt" -Value "from-shell"`,
-			`Write-Output $env:MYVAR`,
+			execTestShellSetContent,
+			execTestShellWriteOutput,
 		}
 		cmds2 = []string{
-			`Write-Output $env:MYVAR`,
+			execTestShellWriteOutput,
 		}
 		cmds3 = []string{
-			`Write-Output $env:MYVAR`,
+			execTestShellWriteOutput,
 		}
-		expectEnv1 = "hello"
-		expectEnv2 = "bye"
+		expectEnv1 = execTestShellHelloValue
+		expectEnv2 = execTestShellByeValue
 	} else {
 		shell = exectool.ShellNameSh
 		cmds1 = []string{
-			`printf "%s" "from-shell" > shell.txt`,
-			`echo "$MYVAR"`,
+			execTestShellPrintf,
+			execTestShellEchoEnv,
 		}
-		cmds2 = []string{`echo "$MYVAR"`}
-		cmds3 = []string{`echo "$MYVAR"`}
-		expectEnv1 = "hello"
-		expectEnv2 = "bye"
+		cmds2 = []string{execTestShellEchoEnv}
+		cmds3 = []string{execTestShellEchoEnv}
+		expectEnv1 = execTestShellHelloValue
+		expectEnv2 = execTestShellByeValue
 	}
 
 	// 1) First call: create session + set env.
-	resp1 := callJSON[exectool.ShellCommandOut](t, h.r, "shellcommand", exectool.ShellCommandArgs{
-		Shell:     shell,
-		Commands:  cmds1,
-		Env:       map[string]string{"MYVAR": "hello"},
-		SessionID: "",
+	resp1 := callJSON[exectool.ShellCommandOut](t, h.r, integrationToolSlugShellCommand, exectool.ShellCommandArgs{
+		Shell:    shell,
+		Commands: cmds1,
+		Env:      map[string]string{execTestShellVarName: execTestShellHelloValue},
 	})
 	if strings.TrimSpace(resp1.SessionID) == "" {
 		t.Fatalf("expected sessionID, got: %s", debugJSON(t, resp1))
@@ -65,14 +85,19 @@ func TestE2E_Exec_ShellCommand_SessionEnvWorkdir(t *testing.T) {
 	}
 
 	// Verify file created via shell by reading it with readfile.
-	out := callRaw(t, h.r, "readfile", fstool.ReadFileArgs{Path: "shell.txt", Encoding: "text"})
+	out := callRaw(
+		t,
+		h.r,
+		integrationToolSlugReadFile,
+		fstool.ReadFileArgs{Path: execTestShellTxtPath, Encoding: integrationEncodingText},
+	)
 	got := requireSingleTextOutput(t, out)
-	if got != "from-shell" {
-		t.Fatalf("shell.txt content mismatch: got=%q want=%q", got, "from-shell")
+	if got != execTestShellFromShell {
+		t.Fatalf("shell.txt content mismatch: got=%q want=%q", got, execTestShellFromShell)
 	}
 
 	// 2) Second call: same session, no env provided => session env should persist.
-	resp2 := callJSON[exectool.ShellCommandOut](t, h.r, "shellcommand", exectool.ShellCommandArgs{
+	resp2 := callJSON[exectool.ShellCommandOut](t, h.r, integrationToolSlugShellCommand, exectool.ShellCommandArgs{
 		Shell:     shell,
 		Commands:  cmds2,
 		SessionID: resp1.SessionID,
@@ -82,10 +107,10 @@ func TestE2E_Exec_ShellCommand_SessionEnvWorkdir(t *testing.T) {
 	}
 
 	// 3) Third call: override env, and that override becomes part of session state.
-	resp3 := callJSON[exectool.ShellCommandOut](t, h.r, "shellcommand", exectool.ShellCommandArgs{
+	resp3 := callJSON[exectool.ShellCommandOut](t, h.r, integrationToolSlugShellCommand, exectool.ShellCommandArgs{
 		Shell:     shell,
 		Commands:  cmds2,
-		Env:       map[string]string{"MYVAR": "bye"},
+		Env:       map[string]string{execTestShellVarName: execTestShellByeValue},
 		SessionID: resp1.SessionID,
 	})
 	if !strings.Contains(resp3.Results[0].Stdout, expectEnv2) {
@@ -93,7 +118,7 @@ func TestE2E_Exec_ShellCommand_SessionEnvWorkdir(t *testing.T) {
 	}
 
 	// 4) Fourth call: no env passed => should still be "bye".
-	resp4 := callJSON[exectool.ShellCommandOut](t, h.r, "shellcommand", exectool.ShellCommandArgs{
+	resp4 := callJSON[exectool.ShellCommandOut](t, h.r, integrationToolSlugShellCommand, exectool.ShellCommandArgs{
 		Shell:     shell,
 		Commands:  cmds3,
 		SessionID: resp1.SessionID,
@@ -124,26 +149,22 @@ func TestE2E_Exec_RunScript(t *testing.T) {
 
 	h := newHarness(t, base, execOpts...)
 
-	scriptsDirRel := "scripts"
+	scriptsDirRel := execTestShellScriptsDir
 
 	if runtime.GOOS == toolutil.GOOSWindows {
-		scriptRel := filepath.Join(scriptsDirRel, "hello.ps1")
-		content := "" +
-			"param([string]$Name)\n" +
-			"Write-Output \"NAME=$Name\"\n" +
-			"Write-Output \"ENV=$env:MYVAR\"\n"
+		scriptRel := filepath.Join(scriptsDirRel, execTestShellPS1FileName)
 
-		_ = callJSON[fstool.WriteFileOut](t, h.r, "writefile", fstool.WriteFileArgs{
+		_ = callJSON[fstool.WriteFileOut](t, h.r, integrationToolSlugWriteFile, fstool.WriteFileArgs{
 			Path:          scriptRel,
-			Encoding:      "text",
-			Content:       content,
+			Encoding:      integrationEncodingText,
+			Content:       execTestShellPS1Content,
 			CreateParents: true,
 		})
 
 		res := callJSON[exectool.RunScriptOut](t, h.r, "runscript", exectool.RunScriptArgs{
-			Path:    "hello.ps1",
-			Args:    []string{"world"},
-			Env:     map[string]string{"MYVAR": "hello"},
+			Path:    execTestShellPS1FileName,
+			Args:    []string{execTestShellWorldArg},
+			Env:     map[string]string{execTestShellVarName: execTestShellHelloValue},
 			WorkDir: scriptsDirRel,
 		})
 		if res.ExitCode != 0 {
@@ -153,22 +174,19 @@ func TestE2E_Exec_RunScript(t *testing.T) {
 			t.Fatalf("unexpected stdout: %s", debugJSON(t, res))
 		}
 	} else {
-		scriptRel := filepath.Join(scriptsDirRel, "hello.sh")
-		content := "" +
-			"echo \"NAME=$1\"\n" +
-			"echo \"ENV=$MYVAR\"\n"
+		scriptRel := filepath.Join(scriptsDirRel, execTestShellSHFileName)
 
-		_ = callJSON[fstool.WriteFileOut](t, h.r, "writefile", fstool.WriteFileArgs{
+		_ = callJSON[fstool.WriteFileOut](t, h.r, integrationToolSlugWriteFile, fstool.WriteFileArgs{
 			Path:          scriptRel,
-			Encoding:      "text",
-			Content:       content,
+			Encoding:      integrationEncodingText,
+			Content:       execTestShellSHContent,
 			CreateParents: true,
 		})
 
 		res := callJSON[exectool.RunScriptOut](t, h.r, "runscript", exectool.RunScriptArgs{
-			Path:    "hello.sh",
-			Args:    []string{"world"},
-			Env:     map[string]string{"MYVAR": "hello"},
+			Path:    execTestShellSHFileName,
+			Args:    []string{execTestShellWorldArg},
+			Env:     map[string]string{execTestShellVarName: execTestShellHelloValue},
 			WorkDir: scriptsDirRel,
 		})
 		if res.ExitCode != 0 {

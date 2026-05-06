@@ -15,6 +15,38 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
+const (
+	testCommandEchoHi           = "echo hi"
+	testCommandEchoA            = "echo a"
+	testCommandEchoB            = "echo b"
+	testCommandEchoOk           = "echo ok"
+	testCommandEchoShouldNotRun = "echo should_not_run"
+	testCommandEchoShouldFail   = "echo should_fail"
+	testCommandExit7            = "exit 7"
+	testCommandPrintfHelloErr   = `printf '%s' hello; printf '%s' err_msg 1>&2`
+	testCommandPrintfFOO        = `printf '%s' "$FOO"`
+	testCommandSleep2           = `sleep 2`
+	testCommandEcho12345        = "echo_12345"
+	testCommandRMFoo            = `rm foo`
+	testCommandCurlExample      = `curl https://example.com`
+	testCommandRMRoot           = `rm -rf /`
+	testCommandNUL              = "echo hi\x00there"
+	testCommandRMNUL            = "rm\x00"
+	testCommandEmpty            = ""
+	testCommandSpaces           = "  "
+	testCommandNewline          = "\n"
+	testCommandWhitespaceOnly   = " \n\t "
+	testCommandEchoBSpaced      = " echo b "
+	testCommandPwd              = "pwd"
+	testCommandPwdAndPrintfFOO  = `pwd; printf '%s' "$FOO"` //nolint:gosec // Test creds.
+	testStdoutHello             = "hello"
+	testStdoutBar               = "bar"
+	testStdoutBaz               = "baz"
+	testStderrErrMsg            = "err_msg"
+	testEnvKeyFOO               = "FOO"
+	testBlockedEchoCommand      = "echo"
+)
+
 func TestShellCommand_AutoSession_DoesNotLeakOnError(t *testing.T) {
 	t.Helper()
 
@@ -36,31 +68,29 @@ func TestShellCommand_AutoSession_DoesNotLeakOnError(t *testing.T) {
 		},
 		{
 			name:          "workdir_does_not_exist",
-			args:          ShellCommandArgs{Commands: []string{"echo hi"}, WorkDir: nonexistent},
+			args:          ShellCommandArgs{Commands: []string{testCommandEchoHi}, WorkDir: nonexistent},
 			wantErrSubstr: "stat dir error",
 		},
 		{
 			name:          "invalid_env_map",
-			args:          ShellCommandArgs{Commands: []string{"echo hi"}, Env: map[string]string{"": "1"}},
+			args:          ShellCommandArgs{Commands: []string{testCommandEchoHi}, Env: map[string]string{"": "1"}},
 			wantErrSubstr: "env",
 		},
 		{
 			name:          "invalid_shell_name",
-			args:          ShellCommandArgs{Commands: []string{"echo hi"}, Shell: ShellName("nope")},
+			args:          ShellCommandArgs{Commands: []string{testCommandEchoHi}, Shell: ShellName("nope")},
 			wantErrSubstr: "invalid shell",
 		},
 		{
-			name:       "command_contains_nul",
-			args:       ShellCommandArgs{Commands: []string{"echo hi\x00there"}},
-			needsShell: true, // NUL check happens after selectShell()
-
+			name:          "command_contains_nul",
+			args:          ShellCommandArgs{Commands: []string{testCommandNUL}},
+			needsShell:    true, // NUL check happens after selectShell()
 			wantErrSubstr: "nul",
 		},
 		{
-			name: "workdir_outside_allowed_roots",
-			opts: []ExecToolOption{WithAllowedRoots([]string{td})},
-			args: ShellCommandArgs{Commands: []string{"echo hi"}, WorkDir: outside},
-
+			name:          "workdir_outside_allowed_roots",
+			opts:          []ExecToolOption{WithAllowedRoots([]string{td})},
+			args:          ShellCommandArgs{Commands: []string{testCommandEchoHi}, WorkDir: outside},
 			wantErrSubstr: "outside allowed roots",
 		},
 	}
@@ -96,13 +126,13 @@ func TestNormalizeBlockedCommand(t *testing.T) {
 		want       string
 		wantErrSub string
 	}{
-		{name: "empty_is_ok", in: "", want: ""},
-		{name: "whitespace_only_is_ok", in: " \n\t ", want: ""},
+		{name: "empty_is_ok", in: testCommandEmpty, want: testCommandEmpty},
+		{name: "whitespace_only_is_ok", in: testCommandWhitespaceOnly, want: testCommandEmpty},
 		{name: "lowercases_and_trims", in: " RM ", want: "rm"},
 		{name: "basenames_slash", in: "/bin/rm", want: "rm"},
 		{name: "basenames_backslash", in: `C:\Windows\System32\CURL.EXE`, want: "curl.exe"},
 		{name: "trims_trailing_separators", in: "/usr/bin/rm////", want: "rm"},
-		{name: "rejects_nul", in: "rm\x00", wantErrSub: "NUL"},
+		{name: "rejects_nul", in: testCommandRMNUL, wantErrSub: "NUL"},
 		{name: "rejects_whitespace_in_name", in: "rm -rf", wantErrSub: "whitespace"},
 	}
 
@@ -130,13 +160,19 @@ func TestNormalizeBlockedCommand(t *testing.T) {
 
 func TestNormalizedCommandList(t *testing.T) {
 	args := ShellCommandArgs{
-		Commands: []string{"", "  ", "\n", "echo a", " echo b "},
+		Commands: []string{
+			testCommandEmpty,
+			testCommandSpaces,
+			testCommandNewline,
+			testCommandEchoA,
+			testCommandEchoBSpaced,
+		},
 	}
 	got := normalizedCommandList(args)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 commands, got %d: %#v", len(got), got)
 	}
-	if got[0] != "echo a" || got[1] != " echo b " {
+	if got[0] != testCommandEchoA || got[1] != testCommandEchoBSpaced {
 		t.Fatalf("unexpected command list: %#v", got)
 	}
 }
@@ -215,7 +251,7 @@ func TestShellCommand_Run_CapturesStdoutStderr_ExitCode(t *testing.T) {
 
 	out, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
-		Commands: []string{`printf '%s' hello; printf '%s' err_msg 1>&2`},
+		Commands: []string{testCommandPrintfHelloErr},
 	})
 	if err != nil {
 		t.Fatalf("ShellCommand error: %v", err)
@@ -228,11 +264,11 @@ func TestShellCommand_Run_CapturesStdoutStderr_ExitCode(t *testing.T) {
 	if r.ExitCode != 0 {
 		t.Fatalf("expected exitCode=0, got %d (stderr=%q)", r.ExitCode, r.Stderr)
 	}
-	if r.Stdout != "hello" {
-		t.Fatalf("expected stdout=hello, got %q", r.Stdout)
+	if r.Stdout != testStdoutHello {
+		t.Fatalf("expected stdout=%s, got %q", testStdoutHello, r.Stdout)
 	}
-	if r.Stderr != "err_msg" {
-		t.Fatalf("expected stderr=err_msg, got %q", r.Stderr)
+	if r.Stderr != testStderrErrMsg {
+		t.Fatalf("expected stderr=%s, got %q", testStderrErrMsg, r.Stderr)
 	}
 	if strings.TrimSpace(r.ShellPath) == "" {
 		t.Fatalf("expected shellPath set")
@@ -248,7 +284,7 @@ func TestShellCommand_ExitCode_NonZeroAndSignaled(t *testing.T) {
 	// Exit with explicit code.
 	out, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
-		Commands: []string{`exit 7`},
+		Commands: []string{testCommandExit7},
 	})
 	if err != nil {
 		t.Fatalf("ShellCommand error: %v", err)
@@ -282,9 +318,9 @@ func TestShellCommand_Timeout_SetsTimedOutAnd124(t *testing.T) {
 
 	out, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell:     ShellNameSh,
-		Commands:  []string{`sleep 2`},
-		SessionID: "",
-		WorkDir:   "",
+		Commands:  []string{testCommandSleep2},
+		SessionID: testCommandEmpty,
+		WorkDir:   testCommandEmpty,
 		Env:       nil,
 	})
 	if err != nil {
@@ -313,7 +349,6 @@ func TestShellCommand_MaxOutput_Truncates(t *testing.T) {
 
 	out, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell: ShellNameSh,
-
 		Commands: []string{
 			// Print 3000 'a' characters using POSIX sh arithmetic.
 			`i=0; while [ $i -lt 3000 ]; do printf a; i=$((i+1)); done`,
@@ -342,8 +377,8 @@ func TestShellCommand_ExecuteParallelly_False_StopsOnFirstError(t *testing.T) {
 	out, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell: ShellNameSh,
 		Commands: []string{
-			`exit 7`,
-			`echo should_not_run`,
+			testCommandExit7,
+			testCommandEchoShouldNotRun,
 		},
 		ExecuteParallel: false,
 	})
@@ -368,8 +403,8 @@ func TestShellCommand_ExecuteParallelly_True_RunsAllCommandsEvenIfError(t *testi
 	out, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell: ShellNameSh,
 		Commands: []string{
-			`exit 7`,
-			`echo ok`,
+			testCommandExit7,
+			testCommandEchoOk,
 		},
 		ExecuteParallel: true,
 	})
@@ -391,7 +426,7 @@ func TestShellCommand_ExecuteParallelly_True_RunsAllCommandsEvenIfError(t *testi
 func TestShellCommand_RejectsNULInCommand(t *testing.T) {
 	st := newTestShellTool(t)
 	_, err := st.ShellCommand(t.Context(), ShellCommandArgs{
-		Commands: []string{"echo hi\x00there"},
+		Commands: []string{testCommandNUL},
 	})
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "nul") {
 		t.Fatalf("expected NUL error, got %v", err)
@@ -406,7 +441,7 @@ func TestShellCommand_DangerousRejected_BeforeExec(t *testing.T) {
 
 	_, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
-		Commands: []string{`rm -rf /`},
+		Commands: []string{testCommandRMRoot},
 	})
 	if err == nil {
 		t.Fatalf("expected error")
@@ -421,7 +456,7 @@ func TestShellCommand_MaxCommands_PolicyLimit(t *testing.T) {
 		MaxCommands: 1,
 	}))
 	_, err := st.ShellCommand(t.Context(), ShellCommandArgs{
-		Commands: []string{"echo a", "echo b"},
+		Commands: []string{testCommandEchoA, testCommandEchoB},
 	})
 	if err == nil || !strings.Contains(err.Error(), "too many commands") {
 		t.Fatalf("expected too many commands error, got %v", err)
@@ -433,7 +468,7 @@ func TestShellCommand_MaxCommandLength_PolicyLimit(t *testing.T) {
 		MaxCommandLength: 5,
 	}))
 	_, err := st.ShellCommand(t.Context(), ShellCommandArgs{
-		Commands: []string{"echo_12345"},
+		Commands: []string{testCommandEcho12345},
 	})
 	if err == nil || !strings.Contains(err.Error(), "command too long") {
 		t.Fatalf("expected command too long error, got %v", err)
@@ -443,20 +478,20 @@ func TestShellCommand_MaxCommandLength_PolicyLimit(t *testing.T) {
 func TestSessions_LRU_MaxSessions_EvictsOldest(t *testing.T) {
 	st := newTestShellTool(t, WithMaxSessions(1))
 
-	out1, err := st.ShellCommand(t.Context(), ShellCommandArgs{Commands: []string{"echo a"}})
+	out1, err := st.ShellCommand(t.Context(), ShellCommandArgs{Commands: []string{testCommandEchoA}})
 	if err != nil {
 		t.Fatalf("Run1 error: %v", err)
 	}
 	sid1 := out1.SessionID
 
-	_, err = st.ShellCommand(t.Context(), ShellCommandArgs{Commands: []string{"echo b"}})
+	_, err = st.ShellCommand(t.Context(), ShellCommandArgs{Commands: []string{testCommandEchoB}})
 	if err != nil {
 		t.Fatalf("Run2 error: %v", err)
 	}
 
 	_, err = st.ShellCommand(t.Context(), ShellCommandArgs{
 		SessionID: sid1,
-		Commands:  []string{"echo should_fail"},
+		Commands:  []string{testCommandEchoShouldFail},
 	})
 	if err == nil || !strings.Contains(err.Error(), "unknown sessionID") {
 		t.Fatalf("expected unknown sessionID after LRU eviction, got %v", err)
@@ -475,8 +510,8 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	out, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
 		WorkDir:  td,
-		Env:      map[string]string{"FOO": "bar"},
-		Commands: []string{"pwd"},
+		Env:      map[string]string{testEnvKeyFOO: testStdoutBar},
+		Commands: []string{testCommandPwd},
 	})
 	if err != nil {
 		t.Fatalf("ShellCommand(auto session) error: %v", err)
@@ -499,13 +534,13 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	out, err = st.ShellCommand(t.Context(), ShellCommandArgs{
 		SessionID: sid,
 		Shell:     ShellNameSh,
-		Commands:  []string{`printf '%s' "$FOO"`},
+		Commands:  []string{testCommandPrintfFOO},
 	})
 	if err != nil {
 		t.Fatalf("ShellCommand(session reuse) error: %v", err)
 	}
 	resp = out
-	if resp.Results[0].Stdout != "bar" {
+	if resp.Results[0].Stdout != testStdoutBar {
 		t.Fatalf("expected FOO=bar, got %q (stderr=%q)", resp.Results[0].Stdout, resp.Results[0].Stderr)
 	}
 	mustSameDir(t, td, resp.WorkDir)
@@ -514,27 +549,27 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	out, err = st.ShellCommand(t.Context(), ShellCommandArgs{
 		SessionID: sid,
 		Shell:     ShellNameSh,
-		Env:       map[string]string{"FOO": "baz"},
-		Commands:  []string{`printf '%s' "$FOO"`},
+		Env:       map[string]string{testEnvKeyFOO: testStdoutBaz},
+		Commands:  []string{testCommandPrintfFOO},
 	})
 	if err != nil {
 		t.Fatalf("ShellCommand(session update env) error: %v", err)
 	}
 	resp = out
-	if resp.Results[0].Stdout != "baz" {
+	if resp.Results[0].Stdout != testStdoutBaz {
 		t.Fatalf("expected FOO=baz, got %q", resp.Results[0].Stdout)
 	}
 
 	out, err = st.ShellCommand(t.Context(), ShellCommandArgs{
 		SessionID: sid,
 		Shell:     ShellNameSh,
-		Commands:  []string{`printf '%s' "$FOO"`},
+		Commands:  []string{testCommandPrintfFOO},
 	})
 	if err != nil {
 		t.Fatalf("ShellCommand(session verify env persisted) error: %v", err)
 	}
 	resp = out
-	if resp.Results[0].Stdout != "baz" {
+	if resp.Results[0].Stdout != testStdoutBaz {
 		t.Fatalf("expected FOO=baz persisted, got %q", resp.Results[0].Stdout)
 	}
 
@@ -545,7 +580,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	}
 	out, err = st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
-		Commands: []string{"pwd; printf '%s' \"$FOO\""},
+		Commands: []string{testCommandPwdAndPrintfFOO},
 	})
 	if err != nil {
 		t.Fatalf("ShellCommand(new session) error: %v", err)
@@ -555,7 +590,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 
 	// After restart, FOO should be empty (unless inherited from process env; to avoid flake,
 	// assert only that it is not "baz").
-	if strings.Contains(resp.Results[0].Stdout, "baz") {
+	if strings.Contains(resp.Results[0].Stdout, testStdoutBaz) {
 		t.Fatalf("expected new session not to have baz, got stdout=%q", resp.Results[0].Stdout)
 	}
 }
@@ -567,7 +602,7 @@ func TestShellCommand_ContextCanceledEarly(t *testing.T) {
 	cancel()
 
 	_, err := st.ShellCommand(ctx, ShellCommandArgs{
-		Commands: []string{"echo hi"},
+		Commands: []string{testCommandEchoHi},
 	})
 	if err == nil {
 		t.Fatalf("expected context error")
@@ -581,14 +616,14 @@ func TestShellCommand_Blocklist_DefaultBlocksRMAndCurl(t *testing.T) {
 	st := newTestShellTool(t)
 
 	_, err := st.ShellCommand(t.Context(), ShellCommandArgs{
-		Commands: []string{`rm foo`},
+		Commands: []string{testCommandRMFoo},
 	})
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "blocked") {
 		t.Fatalf("expected rm to be blocked, got %v", err)
 	}
 
 	_, err = st.ShellCommand(t.Context(), ShellCommandArgs{
-		Commands: []string{`curl https://example.com`},
+		Commands: []string{testCommandCurlExample},
 	})
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "blocked") {
 		t.Fatalf("expected curl to be blocked, got %v", err)
@@ -601,7 +636,7 @@ func TestShellCommand_Blocklist_NotOverridableByAllowDangerous(t *testing.T) {
 	st := newTestShellTool(t, WithExecutionPolicy(p))
 
 	_, err := st.ShellCommand(t.Context(), ShellCommandArgs{
-		Commands: []string{`rm foo`},
+		Commands: []string{testCommandRMFoo},
 	})
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "blocked") {
 		t.Fatalf("expected rm to be blocked even with AllowDangerous=true, got %v", err)
@@ -609,10 +644,10 @@ func TestShellCommand_Blocklist_NotOverridableByAllowDangerous(t *testing.T) {
 }
 
 func TestShellCommand_Blocklist_AdditionalBlocks(t *testing.T) {
-	st := newTestShellTool(t, WithBlockedCommands([]string{"echo"}))
+	st := newTestShellTool(t, WithBlockedCommands([]string{testBlockedEchoCommand}))
 
 	_, err := st.ShellCommand(t.Context(), ShellCommandArgs{
-		Commands: []string{`echo hi`},
+		Commands: []string{testCommandEchoHi},
 	})
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "blocked") {
 		t.Fatalf("expected echo to be blocked via additional blocklist, got %v", err)

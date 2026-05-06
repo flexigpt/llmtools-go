@@ -22,7 +22,7 @@ var deleteFileTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019c04ca-12ac-7176-8037-d5f0f766a735",
 	Slug:          "deletefile",
-	Version:       "v1.0.0",
+	Version:       spec.VersionOne,
 	DisplayName:   "Delete file",
 	Description:   "Safely delete a file by moving it to a trash directory. trashDir=auto will try to use the system trash when possible; otherwise falls back to a local .trash directory.",
 	Tags:          []string{"fs"},

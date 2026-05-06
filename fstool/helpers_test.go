@@ -13,6 +13,130 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
+const (
+	testNameContextCanceled                  = "context_canceled"
+	testNameAllowedRootsBlocksOutsidePath    = "allowedRoots_blocks_outside_path"
+	testNameAllowedRootsBlocksOutsideDir     = "allowedRoots_blocks_outside_dir"
+	testNameWindowsDriveRelativePathRejected = "windows_drive_relative_path_rejected"
+)
+
+const (
+	testWhitespace      = "   "
+	testPathCurrentDir  = "."
+	testPathATxt        = "a.txt"
+	testPathXTxt        = "x.txt"
+	testPathBMD         = "b.md"
+	testPathSubdir      = "subdir"
+	testPathFileTxt     = "file.txt"
+	testPathFileBin     = "file.bin"
+	testPathImagePNG    = "image.png"
+	testPathLinkTxt     = "link.txt"
+	testPathLinkDir     = "linkdir"
+	testDirLink         = "link"
+	testPathSampleTxt   = "sample.txt"
+	testPathUnknownExt  = ".unknownext"
+	testPathDriveRel    = `C:drive-relative.txt`
+	testPathAutoTxt     = "auto.txt"
+	testPathMissingTxt  = "missing.txt"
+	testPathMissing     = "missing"
+	testPathMissingRoot = "missing-root"
+	testPathSameTxt     = "same.txt"
+	testPathTargetTxt   = "target.txt"
+	testPathReal        = "real"
+	testPathTrash       = "trash"
+	testPathExistsTxt   = "exists.txt"
+	testPathOWTxt       = "ow.txt"
+	testPathBadB64Dat   = "badb64.dat"
+	testPathBadUtf8Txt  = "badutf8.txt"
+	testPathBinDat      = "bin.dat"
+	testPathTrimBin     = "trim.bin"
+	testPathStayTxt     = "stay.txt"
+	testPathOutTxt      = "out.txt"
+	testPathNope        = "nope"
+	testPathNopeTxt     = "nope.txt"
+	testPathRootFile    = "rootfile"
+	testPathNotADir     = "notadir"
+	testPathChildTxt    = "child.txt"
+	testPathCfooTxt     = "C:foo.txt"
+	testPathFooTxt      = "foo.txt"
+	testPathBarMD       = "bar.md"
+	testPathBazTxt      = "baz.txt"
+	testPathEscapeTxt   = "escape.txt"
+	testPathOutsideTxt  = "outside.txt"
+	testPathNoExt       = "noext"
+)
+
+const (
+	testGlobMD        = "*.md"
+	testGlobInvalid   = "["
+	testRegexpFooTxt  = `foo\.txt`
+	testRegexpLinkTxt = `link\.txt`
+	testQueryTxt      = "txt"
+	testQueryGoodbye  = "goodbye"
+	testQueryBaz      = "baz"
+	testQueryNeedle   = "needle"
+	testExtPNG        = "png"
+	testExtDotPNG     = ".png"
+	testExtTXT        = ".txt"
+	testExtUnknown    = testPathUnknownExt
+	testExtPDFUpper   = ".PDF"
+	testExtPDFLower   = ".pdf"
+)
+
+const (
+	testContentHello             = "hello"
+	testContentHelloWorld        = "hello world"
+	testContentGoodbyeWorld      = "goodbye world"
+	testContentBaz               = "baz content"
+	testContentKeep              = "keep"
+	testContentOne               = "one"
+	testContentTwo               = "two"
+	testContentA                 = "a"
+	testContentB                 = "b"
+	testContentX                 = "x"
+	testContentOK                = "ok"
+	testContentStay              = "stay"
+	testContentHi                = "hi"
+	testContentABC               = "abc"
+	testContentNotADir           = "not a dir"
+	testContentNeedleOutsideRoot = "needle outside root"
+	testContentInvalidBase64     = "!!!"
+)
+
+const (
+	testTrashDirAuto          = "auto"
+	testEncodingBinary        = "binary"
+	testEncodingNope          = "nope"
+	testEncodingMixedCaseText = "TeXt"
+	testEncodingText          = string(MIMEModeText)
+	testKindText              = testEncodingText
+	testKindFile              = string(ListDirectoryEntryKindFile)
+	testKindImage             = "image"
+)
+
+const (
+	testMIMEImagePNG               = "image/png"
+	testMIMETextPlainCharset       = "text/plain; charset=utf-8"
+	testMIMETextPlain              = "text/plain"
+	testMIMEApplicationOctetStream = "application/octet-stream"
+	testMIMEApplicationPrefix      = "application/"
+	testMIMEImagePrefix            = "image/"
+)
+
+const (
+	testErrInvalidPath                = "invalid path"
+	testErrOutsideAllowedRoots        = "outside allowed roots"
+	testErrSymlink                    = "symlink"
+	testErrDoesNotExist               = "does not exist"
+	testErrQueryRequired              = "query is required"
+	testErrInvalidBase64              = "invalid base64"
+	testErrCannotReadNonTextFile      = "cannot read non-text file"
+	testErrNotValidUTF8               = "not valid UTF-8"
+	testErrOverwriteFalse             = "overwrite=false"
+	testErrEncodingMustBeTextOrBinary = `encoding must be "text" or "binary"`
+	testErrDriveRelative              = "drive-relative"
+)
+
 func mustNewFSTool(t *testing.T, opts ...FSToolOption) *FSTool {
 	t.Helper()
 	ft, err := NewFSTool(opts...)
@@ -165,5 +289,4 @@ func wantErrIs(target error) func(error) bool {
 func wantErrAny(err error) bool  { return err != nil }
 func wantErrNone(err error) bool { return err == nil }
 
-func ptrInt64(v int64) *int64 { return &v }
-func ptrBool(v bool) *bool    { return &v }
+func ptrInt64(v int64) *int64 { return new(v) }

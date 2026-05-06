@@ -10,6 +10,15 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
+const (
+	fileReadTestBlankSpace          = "   "
+	fileReadTestHello               = "hello"
+	fileReadTestEncodingErrMsg      = `encoding must be "text" or "binary"`
+	fileReadTestEmptyPathName       = "empty path"
+	fileReadTestNonExistentPathName = "non-existent path"
+	fileReadTestSizeErrSubstr       = "exceeds maximum allowed size"
+)
+
 func TestReadFile(t *testing.T) {
 	dir := t.TempDir()
 
@@ -46,17 +55,17 @@ func TestReadFile(t *testing.T) {
 			path:            textPath,
 			encoding:        ReadEncoding("invalid"),
 			wantErr:         true,
-			wantErrContains: `encoding must be "text" or "binary"`,
+			wantErrContains: fileReadTestEncodingErrMsg,
 		},
 		{
 			name:            "empty encoding (zero value) is invalid",
 			path:            textPath,
 			encoding:        ReadEncoding(""),
 			wantErr:         true,
-			wantErrContains: `encoding must be "text" or "binary"`,
+			wantErrContains: fileReadTestEncodingErrMsg,
 		},
 		{
-			name:            "empty path",
+			name:            fileReadTestEmptyPathName,
 			path:            "",
 			encoding:        ReadEncodingText,
 			wantErr:         true,
@@ -64,7 +73,7 @@ func TestReadFile(t *testing.T) {
 		},
 		{
 			name:            "whitespace-only path",
-			path:            "   ",
+			path:            fileReadTestBlankSpace,
 			encoding:        ReadEncodingText,
 			wantErr:         true,
 			wantErrContains: ErrInvalidPath.Error(),
@@ -77,7 +86,7 @@ func TestReadFile(t *testing.T) {
 			wantErrContains: ErrInvalidPath.Error(),
 		},
 		{
-			name:           "non-existent path",
+			name:           fileReadTestNonExistentPathName,
 			path:           nonExistentPath,
 			encoding:       ReadEncodingText,
 			wantErr:        true,
@@ -116,7 +125,7 @@ func TestReadFile_MaxBytes(t *testing.T) {
 	dir := t.TempDir()
 
 	p := filepath.Join(dir, "data.bin")
-	data := []byte("hello") // 5 bytes
+	data := []byte(fileReadTestHello) // 5 bytes
 	mustWriteBytes(t, p, data)
 
 	tests := []struct {
@@ -131,20 +140,20 @@ func TestReadFile_MaxBytes(t *testing.T) {
 			name:     "maxBytes zero means unlimited",
 			maxBytes: 0,
 			encoding: ReadEncodingText,
-			want:     "hello",
+			want:     fileReadTestHello,
 		},
 		{
 			name:     "maxBytes exact size ok",
 			maxBytes: 5,
 			encoding: ReadEncodingText,
-			want:     "hello",
+			want:     fileReadTestHello,
 		},
 		{
 			name:        "maxBytes smaller than size errors",
 			maxBytes:    4,
 			encoding:    ReadEncodingText,
 			wantErr:     true,
-			errContains: "exceeds maximum allowed size",
+			errContains: fileReadTestSizeErrSubstr,
 		},
 		{
 			name:     "binary encoding base64",
@@ -156,7 +165,7 @@ func TestReadFile_MaxBytes(t *testing.T) {
 			name:     "negative maxBytes treated as unlimited",
 			maxBytes: -1,
 			encoding: ReadEncodingText,
-			want:     "hello",
+			want:     fileReadTestHello,
 		},
 	}
 

@@ -16,18 +16,19 @@ const (
 	insertTextFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/texttool/inserttext.InsertText"
 	whereBetween     string      = "between"
 	whereEnd         string      = "end"
+	whereStart       string      = "start"
 )
 
 var insertTextTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019c04d3-572e-7d26-b4ca-f37feb7e8368",
 	Slug:          "inserttext",
-	Version:       "v1.0.0",
+	Version:       spec.VersionOne,
 	DisplayName:   "Insert text",
 	Description: "Insert a text block into a UTF-8 text file at the start, end, or between copied surrounding text. " +
 		`Between mode requires textAbove or textBelow. When both are provided, only blank or whitespace-only lines may lie between them and insertion happens at the start of that blank gap`,
 
-	Tags: []string{"text"},
+	Tags: []string{toolTagText},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",
@@ -128,7 +129,7 @@ func insertText(
 		return nil, err
 	}
 	switch pos {
-	case "start", whereEnd:
+	case whereStart, whereEnd:
 		if args.TextAbove != nil || args.TextBelow != nil || args.LineHint != nil {
 			return nil, errors.New(`textAbove/textBelow/lineHint must be omitted when position is "start" or "end"`)
 		}
@@ -185,7 +186,7 @@ func computeInsertIndex(
 	lineHint *int,
 ) (insertAt int, textAboveMatchedAtLine, textBelowMatchedAtLine *int, err error) {
 	switch pos {
-	case "start":
+	case whereStart:
 		return 0, nil, nil, nil
 	case whereEnd:
 		return len(lines), nil, nil, nil

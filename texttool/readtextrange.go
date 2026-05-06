@@ -17,10 +17,10 @@ var readTextRangeTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019c0973-ec5d-7dad-85b2-8048e02deaab",
 	Slug:          "readtextrange",
-	Version:       "v1.0.0",
+	Version:       spec.VersionOne,
 	DisplayName:   "Read text range",
 	Description:   "Read a contiguous range of lines from a UTF-8 text file and return them with line numbers.",
-	Tags:          []string{"text"},
+	Tags:          []string{toolTagText},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",

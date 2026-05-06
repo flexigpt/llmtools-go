@@ -37,7 +37,7 @@ func TestWriteFile(t *testing.T) {
 		check   func(t *testing.T, c cfg, out *WriteFileOut)
 	}{
 		{
-			name: "context_canceled",
+			name: testNameContextCanceled,
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
@@ -46,7 +46,7 @@ func TestWriteFile(t *testing.T) {
 			ctx: canceledContext,
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
-				return WriteFileArgs{Path: "a.txt", Content: "x"}
+				return WriteFileArgs{Path: testPathATxt, Content: testContentX}
 			},
 			wantErr: wantErrIs(context.Canceled),
 		},
@@ -59,7 +59,7 @@ func TestWriteFile(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
-				return WriteFileArgs{Path: "  text.txt  ", Content: "hello"}
+				return WriteFileArgs{Path: testWhitespace + "text.txt" + testWhitespace, Content: testContentHello}
 			},
 			wantErr: wantErrNone,
 			check: func(t *testing.T, c cfg, out *WriteFileOut) {
@@ -71,8 +71,8 @@ func TestWriteFile(t *testing.T) {
 					t.Fatalf("BytesWritten=%d want=%d", out.BytesWritten, 5)
 				}
 				got := string(mustReadFile(t, filepath.Join(c.workBaseDir, "text.txt")))
-				if got != "hello" {
-					t.Fatalf("content=%q want=%q", got, "hello")
+				if got != testContentHello {
+					t.Fatalf("content=%q want=%q", got, testContentHello)
 				}
 			},
 		},
@@ -86,14 +86,14 @@ func TestWriteFile(t *testing.T) {
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
 				p := filepath.Join(c.workBaseDir, "exists.txt")
-				mustWriteFile(t, p, []byte("a"))
-				return WriteFileArgs{Path: "exists.txt", Content: "b", Overwrite: false}
+				mustWriteFile(t, p, []byte(testContentA))
+				return WriteFileArgs{Path: "exists.txt", Content: testContentB, Overwrite: false}
 			},
-			wantErr: wantErrContains("overwrite=false"),
+			wantErr: wantErrContains(testErrOverwriteFalse),
 			check: func(t *testing.T, c cfg, out *WriteFileOut) {
 				t.Helper()
 				got := string(mustReadFile(t, filepath.Join(c.workBaseDir, "exists.txt")))
-				if got != "a" {
+				if got != testContentA {
 					t.Fatalf("expected original content preserved, got=%q", got)
 				}
 			},
@@ -107,16 +107,16 @@ func TestWriteFile(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
-				p := filepath.Join(c.workBaseDir, "ow.txt")
-				mustWriteFile(t, p, []byte("a"))
-				return WriteFileArgs{Path: "ow.txt", Content: "bb", Overwrite: true}
+				p := filepath.Join(c.workBaseDir, testPathOWTxt)
+				mustWriteFile(t, p, []byte(testContentA))
+				return WriteFileArgs{Path: testPathOWTxt, Content: testContentB, Overwrite: true}
 			},
 			wantErr: wantErrNone,
 			check: func(t *testing.T, c cfg, out *WriteFileOut) {
 				t.Helper()
-				got := string(mustReadFile(t, filepath.Join(c.workBaseDir, "ow.txt")))
-				if got != "bb" {
-					t.Fatalf("content=%q want=%q", got, "bb")
+				got := string(mustReadFile(t, filepath.Join(c.workBaseDir, testPathOWTxt)))
+				if got != testContentB {
+					t.Fatalf("content=%q want=%q", got, testContentB)
 				}
 			},
 		},
@@ -132,15 +132,15 @@ func TestWriteFile(t *testing.T) {
 				raw := []byte{0x00, 0x01, 0x02, 0xff}
 				b64 := base64.StdEncoding.EncodeToString(raw)
 				return WriteFileArgs{
-					Path:     "bin.dat",
-					Encoding: "  BiNaRy ",
-					Content:  "  " + b64 + "  ",
+					Path:     testPathBinDat,
+					Encoding: testWhitespace + "BiNaRy" + testWhitespace,
+					Content:  testWhitespace + b64 + testWhitespace,
 				}
 			},
 			wantErr: wantErrNone,
 			check: func(t *testing.T, c cfg, out *WriteFileOut) {
 				t.Helper()
-				got := mustReadFile(t, filepath.Join(c.workBaseDir, "bin.dat"))
+				got := mustReadFile(t, filepath.Join(c.workBaseDir, testPathBinDat))
 				want := []byte{0x00, 0x01, 0x02, 0xff}
 				if !bytes.Equal(got, want) {
 					t.Fatalf("bytes=%v want=%v", got, want)
@@ -159,9 +159,13 @@ func TestWriteFile(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
-				return WriteFileArgs{Path: "badb64.dat", Encoding: "binary", Content: "!!!"}
+				return WriteFileArgs{
+					Path:     testPathBadB64Dat,
+					Encoding: testEncodingBinary,
+					Content:  testContentInvalidBase64,
+				}
 			},
-			wantErr: wantErrContains("invalid base64"),
+			wantErr: wantErrContains(testErrInvalidBase64),
 		},
 		{
 			name: "createParents_false_missing_parent_errors",
@@ -172,7 +176,11 @@ func TestWriteFile(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
-				return WriteFileArgs{Path: filepath.Join("nope", "a.txt"), Content: "x", CreateParents: false}
+				return WriteFileArgs{
+					Path:          filepath.Join(testPathNope, testPathATxt),
+					Content:       testContentX,
+					CreateParents: false,
+				}
 			},
 			wantErr: wantErrAny,
 		},
@@ -185,7 +193,11 @@ func TestWriteFile(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
-				return WriteFileArgs{Path: filepath.Join("a", "b", "c", "d.txt"), Content: "ok", CreateParents: true}
+				return WriteFileArgs{
+					Path:          filepath.Join("a", "b", "c", "d.txt"),
+					Content:       testContentOK,
+					CreateParents: true,
+				}
 			},
 			wantErr: wantErrNone,
 			check: func(t *testing.T, c cfg, out *WriteFileOut) {
@@ -205,7 +217,7 @@ func TestWriteFile(t *testing.T) {
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
 				p := filepath.Join("1", "2", "3", "4", "5", "6", "7", "8", "9", "f.txt")
-				return WriteFileArgs{Path: p, Content: "x", CreateParents: true}
+				return WriteFileArgs{Path: p, Content: testContentX, CreateParents: true}
 			},
 			wantErr: wantErrContains("too many parent directories"),
 			check: func(t *testing.T, c cfg, out *WriteFileOut) {
@@ -225,7 +237,7 @@ func TestWriteFile(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
-				return WriteFileArgs{Path: ".", Content: "x"}
+				return WriteFileArgs{Path: testPathCurrentDir, Content: testContentX}
 			},
 			wantErr: wantErrAny,
 		},
@@ -240,9 +252,9 @@ func TestWriteFile(t *testing.T) {
 				t.Helper()
 				// Construct a string with invalid UTF-8 bytes.
 				s := string([]byte{0xff, 0xfe})
-				return WriteFileArgs{Path: "badutf8.txt", Encoding: "text", Content: s}
+				return WriteFileArgs{Path: testPathBadUtf8Txt, Encoding: testEncodingText, Content: s}
 			},
-			wantErr: wantErrContains("not valid UTF-8"),
+			wantErr: wantErrContains(testErrNotValidUTF8),
 		},
 		{
 			name: "blockSymlinks_true_rejects_symlink_parent_component",
@@ -256,18 +268,22 @@ func TestWriteFile(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
-				realTxt := filepath.Join(c.workBaseDir, "real")
+				realTxt := filepath.Join(c.workBaseDir, testPathReal)
 				mustMkdirAll(t, realTxt)
 
-				link := filepath.Join(c.workBaseDir, "link")
+				link := filepath.Join(c.workBaseDir, testDirLink)
 				mustSymlinkOrSkip(t, realTxt, link)
 
-				return WriteFileArgs{Path: filepath.Join("link", "child.txt"), Content: "x", CreateParents: false}
+				return WriteFileArgs{
+					Path:          filepath.Join(testDirLink, testPathChildTxt),
+					Content:       testContentX,
+					CreateParents: false,
+				}
 			},
-			wantErr: wantErrContains("symlink"),
+			wantErr: wantErrContains(testErrSymlink),
 		},
 		{
-			name: "allowedRoots_blocks_outside_path",
+			name: testNameAllowedRootsBlocksOutsidePath,
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				root := t.TempDir()
@@ -276,12 +292,12 @@ func TestWriteFile(t *testing.T) {
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
 				outside := t.TempDir()
-				return WriteFileArgs{Path: filepath.Join(outside, "x.txt"), Content: "x"}
+				return WriteFileArgs{Path: filepath.Join(outside, testPathXTxt), Content: testContentX}
 			},
-			wantErr: wantErrContains("outside allowed roots"),
+			wantErr: wantErrContains(testErrOutsideAllowedRoots),
 		},
 		{
-			name: "windows_drive_relative_path_rejected",
+			name: testNameWindowsDriveRelativePathRejected,
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
@@ -292,9 +308,9 @@ func TestWriteFile(t *testing.T) {
 				if runtime.GOOS != toolutil.GOOSWindows {
 					t.Skip("windows-only behavior")
 				}
-				return WriteFileArgs{Path: `C:drive-relative.txt`, Content: "x"}
+				return WriteFileArgs{Path: testPathDriveRel, Content: testContentX}
 			},
-			wantErr: wantErrContains("drive-relative"),
+			wantErr: wantErrContains(testErrDriveRelative),
 		},
 		{
 			name: "writes_into_symlink_dir_when_blockSymlinks_false",
@@ -308,21 +324,25 @@ func TestWriteFile(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
-				realTxt := filepath.Join(c.workBaseDir, "real")
+				realTxt := filepath.Join(c.workBaseDir, testPathReal)
 				mustMkdirAll(t, realTxt)
 
-				link := filepath.Join(c.workBaseDir, "link")
+				link := filepath.Join(c.workBaseDir, testDirLink)
 				mustSymlinkOrSkip(t, realTxt, link)
 
-				return WriteFileArgs{Path: filepath.Join("link", "child.txt"), Content: "ok", CreateParents: false}
+				return WriteFileArgs{
+					Path:          filepath.Join(testDirLink, testPathChildTxt),
+					Content:       testContentOK,
+					CreateParents: false,
+				}
 			},
 			wantErr: wantErrNone,
 			check: func(t *testing.T, c cfg, out *WriteFileOut) {
 				t.Helper()
 				// Should have written into real/child.txt.
-				got := string(mustReadFile(t, filepath.Join(c.workBaseDir, "real", "child.txt")))
-				if got != "ok" {
-					t.Fatalf("content=%q want=%q", got, "ok")
+				got := string(mustReadFile(t, filepath.Join(c.workBaseDir, testPathReal, testPathChildTxt)))
+				if got != testContentOK {
+					t.Fatalf("content=%q want=%q", got, testContentOK)
 				}
 			},
 		},
@@ -335,7 +355,7 @@ func TestWriteFile(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
-				return WriteFileArgs{Path: "out.txt", Content: "x"}
+				return WriteFileArgs{Path: testPathOutTxt, Content: testContentX}
 			},
 			wantErr: wantErrNone,
 			check: func(t *testing.T, c cfg, out *WriteFileOut) {
@@ -343,7 +363,7 @@ func TestWriteFile(t *testing.T) {
 				if out == nil {
 					t.Fatalf("expected non-nil out")
 				}
-				want := canonForPolicyExpectations(filepath.Join(c.workBaseDir, "out.txt"))
+				want := canonForPolicyExpectations(filepath.Join(c.workBaseDir, testPathOutTxt))
 				if filepath.Clean(out.Path) != filepath.Clean(want) {
 					t.Fatalf("out.Path=%q want=%q", out.Path, want)
 				}
@@ -358,14 +378,14 @@ func TestWriteFile(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
-				mustWriteFile(t, filepath.Join(c.workBaseDir, "stay.txt"), []byte("stay"))
-				return WriteFileArgs{Path: "stay.txt", Content: "changed", Overwrite: false}
+				mustWriteFile(t, filepath.Join(c.workBaseDir, testPathStayTxt), []byte(testContentStay))
+				return WriteFileArgs{Path: testPathStayTxt, Content: "changed", Overwrite: false}
 			},
-			wantErr: wantErrContains("overwrite=false"),
+			wantErr: wantErrContains(testErrOverwriteFalse),
 			check: func(t *testing.T, c cfg, out *WriteFileOut) {
 				t.Helper()
-				got := string(mustReadFile(t, filepath.Join(c.workBaseDir, "stay.txt")))
-				if got != "stay" {
+				got := string(mustReadFile(t, filepath.Join(c.workBaseDir, testPathStayTxt)))
+				if got != testContentStay {
 					t.Fatalf("content modified unexpectedly: %q", got)
 				}
 			},
@@ -379,9 +399,9 @@ func TestWriteFile(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
-				return WriteFileArgs{Path: "x.txt", Encoding: "nope", Content: "x"}
+				return WriteFileArgs{Path: testPathXTxt, Encoding: testEncodingNope, Content: testContentX}
 			},
-			wantErr: wantErrContains(`encoding must be "text" or "binary"`),
+			wantErr: wantErrContains(testErrEncodingMustBeTextOrBinary),
 		},
 		{
 			name: "binary_content_whitespace_trimmed",
@@ -392,19 +412,19 @@ func TestWriteFile(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
-				raw := []byte("abc")
+				raw := []byte(testContentABC)
 				return WriteFileArgs{
-					Path:     "trim.bin",
-					Encoding: "binary",
-					Content:  "\n\t " + base64.StdEncoding.EncodeToString(raw) + " \r\n",
+					Path:     testPathTrimBin,
+					Encoding: testEncodingBinary,
+					Content:  testWhitespace + base64.StdEncoding.EncodeToString(raw) + testWhitespace,
 				}
 			},
 			wantErr: wantErrNone,
 			check: func(t *testing.T, c cfg, out *WriteFileOut) {
 				t.Helper()
-				got := mustReadFile(t, filepath.Join(c.workBaseDir, "trim.bin"))
-				if !bytes.Equal(got, []byte("abc")) {
-					t.Fatalf("got=%q want=%q", string(got), "abc")
+				got := mustReadFile(t, filepath.Join(c.workBaseDir, testPathTrimBin))
+				if !bytes.Equal(got, []byte(testContentABC)) {
+					t.Fatalf("got=%q want=%q", string(got), testContentABC)
 				}
 			},
 		},
@@ -418,7 +438,11 @@ func TestWriteFile(t *testing.T) {
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
 				// Missing parent with createParents=false.
-				return WriteFileArgs{Path: filepath.Join("nope", "x.txt"), Content: "x", CreateParents: false}
+				return WriteFileArgs{
+					Path:          filepath.Join(testPathNope, testPathXTxt),
+					Content:       testContentX,
+					CreateParents: false,
+				}
 			},
 			wantErr: wantErrAny,
 			check: func(t *testing.T, c cfg, out *WriteFileOut) {
@@ -439,7 +463,7 @@ func TestWriteFile(t *testing.T) {
 					t.Skip("this case is for non-windows only")
 				}
 				// On unix, "C:foo" is just a filename with colon; should be allowed.
-				return WriteFileArgs{Path: "C:foo.txt", Content: "ok"}
+				return WriteFileArgs{Path: testPathCfooTxt, Content: testContentOK}
 			},
 			wantErr: func(err error) bool {
 				if runtime.GOOS == toolutil.GOOSWindows {
@@ -452,9 +476,9 @@ func TestWriteFile(t *testing.T) {
 				if runtime.GOOS == toolutil.GOOSWindows {
 					return
 				}
-				got := string(mustReadFile(t, filepath.Join(c.workBaseDir, "C:foo.txt")))
-				if got != "ok" {
-					t.Fatalf("content=%q want=%q", got, "ok")
+				got := string(mustReadFile(t, filepath.Join(c.workBaseDir, testPathCfooTxt)))
+				if got != testContentOK {
+					t.Fatalf("content=%q want=%q", got, testContentOK)
 				}
 			},
 		},

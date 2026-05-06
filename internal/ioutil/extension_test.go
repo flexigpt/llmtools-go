@@ -9,16 +9,24 @@ import (
 	"testing"
 )
 
+const (
+	extTestTxt                 = "txt"
+	extTestBlankSpace          = "   "
+	extTestInvalidPathName     = "invalid path"
+	extTestEmptyPathName       = "empty path"
+	extTestNonExistentPathName = "non-existent path"
+)
+
 func TestGetNormalizedExt(t *testing.T) {
 	tests := []struct {
 		in   string
 		want FileExt
 	}{
-		{"txt", ExtTxt},
+		{extTestTxt, ExtTxt},
 		{".TXT", ExtTxt},
 		{"  .Md  ", ExtMd},
 		{"", FileExt("")},
-		{"   ", FileExt("")},
+		{extTestBlankSpace, FileExt("")},
 	}
 
 	for _, tc := range tests {
@@ -33,17 +41,17 @@ func TestGetNormalizedExt(t *testing.T) {
 func TestGetBaseMIME(t *testing.T) {
 	tests := []struct {
 		in   MIMEType
-		want string
+		want MIMEType
 	}{
 		{MIMEEmpty, ""},
 		{" Text/Plain; Charset=UTF-8 ", "text/plain"},
-		{"application/json", "application/json"},
-		{"IMAGE/PNG", "image/png"},
+		{MIMEApplicationJSON, MIMEApplicationJSON},
+		{MIMEImagePNG, MIMEImagePNG},
 	}
 
 	for _, tc := range tests {
 		t.Run(string(tc.in), func(t *testing.T) {
-			if got := GetBaseMIME(tc.in); got != tc.want {
+			if got := GetBaseMIME(tc.in); got != string(tc.want) {
 				t.Fatalf("GetBaseMIME(%q)=%q want=%q", tc.in, got, tc.want)
 			}
 		})
@@ -96,7 +104,7 @@ func TestMIMEFromExtensionString_InternalAndStdlibFallback(t *testing.T) {
 		},
 		{
 			name:      "blank ext invalid",
-			ext:       "   ",
+			ext:       extTestBlankSpace,
 			want:      MIMEEmpty,
 			wantErrIs: ErrInvalidPath,
 		},
@@ -157,7 +165,7 @@ func TestMIMEForLocalFile_ExtensionVsSniff(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	fakeTxtIsPng := filepath.Join(dir, "fake.txt")
+	fakeTxtIsPng := filepath.Join(dir, "fake"+"."+extTestTxt)
 	if err := os.WriteFile(fakeTxtIsPng, pngHeader, 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -172,8 +180,8 @@ func TestMIMEForLocalFile_ExtensionVsSniff(t *testing.T) {
 		wantNotExist bool
 	}{
 		{
-			name:    "invalid path",
-			path:    "   ",
+			name:    extTestInvalidPathName,
+			path:    extTestBlankSpace,
 			wantErr: true,
 		},
 		{
@@ -251,13 +259,13 @@ func TestMIMEForLocalFile_ExtensionVsSniff(t *testing.T) {
 func TestSniffFileMIME(t *testing.T) {
 	dir := t.TempDir()
 
-	emptyPath := filepath.Join(dir, "empty.txt")
+	emptyPath := filepath.Join(dir, "empty"+"."+extTestTxt)
 	mustWriteBytes(t, emptyPath, []byte{})
 
-	textPath := filepath.Join(dir, "text.txt")
+	textPath := filepath.Join(dir, "text"+"."+extTestTxt)
 	writeFile(t, textPath, "Hello, world!\n")
 
-	utf8Path := filepath.Join(dir, "utf8.txt")
+	utf8Path := filepath.Join(dir, "utf8"+"."+extTestTxt)
 	writeFile(t, utf8Path, "Привет, мир!\n") // UTF-8 text
 
 	binaryPath := filepath.Join(dir, "binary.png")
@@ -270,20 +278,20 @@ func TestSniffFileMIME(t *testing.T) {
 	tests := []struct {
 		name            string
 		path            string
-		wantMIME        string
+		wantMIME        MIMEType
 		wantIsText      bool
 		wantErr         bool
 		wantErrContains string
 		wantIsNotExist  bool
 	}{
 		{
-			name:            "empty path",
+			name:            extTestEmptyPathName,
 			path:            "",
 			wantErr:         true,
 			wantErrContains: "invalid path",
 		},
 		{
-			name:           "non-existent path",
+			name:           extTestNonExistentPathName,
 			path:           nonExistentPath,
 			wantErr:        true,
 			wantIsNotExist: true,
@@ -291,25 +299,25 @@ func TestSniffFileMIME(t *testing.T) {
 		{
 			name:       "empty file treated as text/plain",
 			path:       emptyPath,
-			wantMIME:   "text/plain; charset=utf-8",
+			wantMIME:   MIMETextPlain,
 			wantIsText: true,
 		},
 		{
 			name:       "ASCII text file",
 			path:       textPath,
-			wantMIME:   "text/plain; charset=utf-8",
+			wantMIME:   MIMETextPlain,
 			wantIsText: true,
 		},
 		{
 			name:       "UTF-8 text file",
 			path:       utf8Path,
-			wantMIME:   "text/plain; charset=utf-8",
+			wantMIME:   MIMETextPlain,
 			wantIsText: true,
 		},
 		{
 			name:       "binary PNG file",
 			path:       binaryPath,
-			wantMIME:   "image/png",
+			wantMIME:   MIMEImagePNG,
 			wantIsText: false,
 		},
 	}
@@ -335,7 +343,7 @@ func TestSniffFileMIME(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if tc.wantMIME != "" && m != MIMEType(tc.wantMIME) {
+			if tc.wantMIME != "" && m != tc.wantMIME {
 				t.Errorf("MIME = %q, want %q", m, tc.wantMIME)
 			}
 			isText := mode == ExtensionModeText

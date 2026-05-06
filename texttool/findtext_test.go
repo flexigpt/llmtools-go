@@ -17,7 +17,7 @@ func TestFindText_HappyPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	const hit3 = "hit ghit fhit\n"
+
 	tests := []struct {
 		name        string
 		initial     string
@@ -136,11 +136,11 @@ func TestFindText_HappyPaths(t *testing.T) {
 		},
 		{
 			name:    "multiple_matches_on_same_line_have_distinct_columns",
-			initial: hit3,
+			initial: testTextHitTrio,
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:         path,
-					Query:        "hit",
+					Query:        testQueryHit,
 					ContextLines: 1,
 					MaxMatches:   10,
 				}
@@ -158,17 +158,17 @@ func TestFindText_HappyPaths(t *testing.T) {
 					if len(m.Context) != 1 {
 						t.Fatalf("match %d context len: want 1 got %d", i, len(m.Context))
 					}
-					assertContextLine(t, m.Context[0], 1, strings.TrimSpace(hit3))
+					assertContextLine(t, m.Context[0], 1, strings.TrimSpace(testTextHitTrio))
 				}
 			},
 		},
 		{
 			name:    "maxMatches_enforced_and_reachedMaxMatches_set",
-			initial: hit3,
+			initial: testTextHitTrio,
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:         path,
-					Query:        "hit",
+					Query:        testQueryHit,
 					ContextLines: 1,
 					MaxMatches:   2,
 				}
@@ -191,7 +191,7 @@ func TestFindText_HappyPaths(t *testing.T) {
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:         path,
-					Query:        "hit",
+					Query:        testQueryHit,
 					ContextLines: 1,
 					MaxMatches:   0,
 				}
@@ -209,11 +209,11 @@ func TestFindText_HappyPaths(t *testing.T) {
 		},
 		{
 			name:    "non_empty_file_no_matches_returns_empty",
-			initial: "A\nB\n",
+			initial: testTextAB,
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:         path,
-					Query:        "NOPE",
+					Query:        testQueryNope,
 					ContextLines: 1,
 					MaxMatches:   10,
 				}
@@ -223,11 +223,11 @@ func TestFindText_HappyPaths(t *testing.T) {
 		},
 		{
 			name:    "empty_file_returns_empty_deterministically",
-			initial: "",
+			initial: testTextEmpty,
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:         path,
-					Query:        "x",
+					Query:        testQueryLowerX,
 					ContextLines: 1,
 					MaxMatches:   10,
 				}
@@ -279,7 +279,7 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			name: "invalid_queryType",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
@@ -294,7 +294,7 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			name: "substring_requires_query",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
@@ -309,12 +309,12 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			name: "regex_requires_query",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:      path,
-					QueryType: "regex",
+					QueryType: findTypeRegex,
 					Query:     " \n\t ",
 				}
 			},
@@ -324,12 +324,12 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			name: "regex_compile_error",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:      path,
-					QueryType: "regex",
+					QueryType: findTypeRegex,
 					Query:     "(",
 				}
 			},
@@ -339,12 +339,12 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			name: "regex_zero_length_matches_only",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
 					Path:      path,
-					QueryType: "regex",
+					QueryType: findTypeRegex,
 					Query:     "^",
 				}
 			},
@@ -354,7 +354,7 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			name: "contextLines_too_large",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
@@ -369,7 +369,7 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			name: "maxMatches_too_large",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
@@ -406,7 +406,7 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			name: "file_not_found",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return dir + string(filepathSep()) + "nope-does-not-exist.txt"
+				return dir + string(filepathSep()) + testMissingFileName
 			},
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{
@@ -437,7 +437,7 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 				if runtime.GOOS == toolutil.GOOSWindows {
 					t.Skip("symlink behavior is platform/privilege-dependent on Windows")
 				}
-				target := writeTempTextFile(t, dir, "target-*.txt", "A\n")
+				target := writeTempTextFile(t, dir, "target-*.txt", testTextAOnly)
 				link := dir + string(filepathSep()) + "link-find.txt"
 				if err := osSymlink(target, link); err != nil {
 					t.Skipf("os.Symlink not available: %v", err)
@@ -457,10 +457,10 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 			wantErrSub: "symlink",
 		},
 		{
-			name: "context_canceled",
+			name: testNameContextCanceled,
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "x-*.txt", testTextAOnly)
 			},
 			args: func(path string) FindTextArgs {
 				return FindTextArgs{

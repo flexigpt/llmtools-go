@@ -20,7 +20,7 @@ var listDirectoryTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "018fe0f4-b8cd-7e55-82d5-9df0bd70e4bb",
 	Slug:          "listdirectory",
-	Version:       "v1.0.0",
+	Version:       spec.VersionOne,
 	DisplayName:   "List directory",
 	Description:   "List immediate entries in a directory. Dot-prefixed files and directories are excluded by default. You can optionally filter by basename glob and entry kind.",
 	Tags:          []string{"fs", "list"},

@@ -39,17 +39,17 @@ func TestStatPath(t *testing.T) {
 		wantModTime bool
 	}{
 		{
-			name: "context_canceled",
+			name: testNameContextCanceled,
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "sample.txt"), []byte("hi"))
+				mustWriteFile(t, filepath.Join(tmp, testPathSampleTxt), []byte(testContentHi))
 				return cfg{workBaseDir: tmp}
 			},
 			ctx: canceledContext,
 			args: func(t *testing.T, c cfg) StatPathArgs {
 				t.Helper()
-				return StatPathArgs{Path: "sample.txt"}
+				return StatPathArgs{Path: testPathSampleTxt}
 			},
 			wantErr: wantErrIs(context.Canceled),
 		},
@@ -58,17 +58,17 @@ func TestStatPath(t *testing.T) {
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "sample.txt"), []byte("hi"))
+				mustWriteFile(t, filepath.Join(tmp, testPathSampleTxt), []byte(testContentHi))
 				return cfg{workBaseDir: tmp}
 			},
 			args: func(t *testing.T, c cfg) StatPathArgs {
 				t.Helper()
-				return StatPathArgs{Path: "sample.txt"}
+				return StatPathArgs{Path: testPathSampleTxt}
 			},
 			wantErr:     wantErrNone,
-			wantExists:  ptrBool(true),
-			wantIsDir:   ptrBool(false),
-			wantName:    "sample.txt",
+			wantExists:  new(true),
+			wantIsDir:   new(false),
+			wantName:    testPathSampleTxt,
 			wantSize:    ptrInt64(2),
 			wantModTime: true,
 		},
@@ -81,11 +81,11 @@ func TestStatPath(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) StatPathArgs {
 				t.Helper()
-				return StatPathArgs{Path: "."}
+				return StatPathArgs{Path: testPathCurrentDir}
 			},
 			wantErr:    wantErrNone,
-			wantExists: ptrBool(true),
-			wantIsDir:  ptrBool(true),
+			wantExists: new(true),
+			wantIsDir:  new(true),
 		},
 		{
 			name: "missing_path_exists_false_no_error",
@@ -96,11 +96,11 @@ func TestStatPath(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) StatPathArgs {
 				t.Helper()
-				return StatPathArgs{Path: "missing.txt"}
+				return StatPathArgs{Path: testPathMissingTxt}
 			},
 			wantErr:    wantErrNone,
-			wantExists: ptrBool(false),
-			wantIsDir:  ptrBool(false),
+			wantExists: new(false),
+			wantIsDir:  new(false),
 		},
 		{
 			name: "empty_path_errors",
@@ -111,9 +111,9 @@ func TestStatPath(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) StatPathArgs {
 				t.Helper()
-				return StatPathArgs{Path: "   "}
+				return StatPathArgs{Path: testWhitespace}
 			},
-			wantErr: wantErrContains("invalid path"),
+			wantErr: wantErrContains(testErrInvalidPath),
 		},
 		{
 			name: "symlink_path_followed_when_blockSymlinks_false",
@@ -123,17 +123,17 @@ func TestStatPath(t *testing.T) {
 					t.Skip("symlink tests are unreliable on Windows CI")
 				}
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "target.txt"), []byte("hi"))
-				mustSymlinkOrSkip(t, filepath.Join(tmp, "target.txt"), filepath.Join(tmp, "link.txt"))
+				mustWriteFile(t, filepath.Join(tmp, testPathTargetTxt), []byte(testContentHi))
+				mustSymlinkOrSkip(t, filepath.Join(tmp, testPathTargetTxt), filepath.Join(tmp, testPathLinkTxt))
 				return cfg{workBaseDir: tmp, blockSymlinks: false}
 			},
 			args: func(t *testing.T, c cfg) StatPathArgs {
 				t.Helper()
-				return StatPathArgs{Path: "link.txt"}
+				return StatPathArgs{Path: testPathLinkTxt}
 			},
 			wantErr:    wantErrNone,
-			wantExists: ptrBool(true),
-			wantIsDir:  ptrBool(false),
+			wantExists: new(true),
+			wantIsDir:  new(false),
 		},
 		{
 			name: "symlink_path_refused_when_blockSymlinks_true",
@@ -143,18 +143,18 @@ func TestStatPath(t *testing.T) {
 					t.Skip("symlink tests are unreliable on Windows CI")
 				}
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "target.txt"), []byte("hi"))
-				mustSymlinkOrSkip(t, filepath.Join(tmp, "target.txt"), filepath.Join(tmp, "link.txt"))
+				mustWriteFile(t, filepath.Join(tmp, testPathTargetTxt), []byte(testContentHi))
+				mustSymlinkOrSkip(t, filepath.Join(tmp, testPathTargetTxt), filepath.Join(tmp, testPathLinkTxt))
 				return cfg{workBaseDir: tmp, blockSymlinks: true}
 			},
 			args: func(t *testing.T, c cfg) StatPathArgs {
 				t.Helper()
-				return StatPathArgs{Path: "link.txt"}
+				return StatPathArgs{Path: testPathLinkTxt}
 			},
-			wantErr: wantErrContains("symlink"),
+			wantErr: wantErrContains(testErrSymlink),
 		},
 		{
-			name: "allowedRoots_blocks_outside_path",
+			name: testNameAllowedRootsBlocksOutsidePath,
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				root := t.TempDir()
@@ -165,10 +165,10 @@ func TestStatPath(t *testing.T) {
 				outside := t.TempDir()
 				return StatPathArgs{Path: outside}
 			},
-			wantErr: wantErrContains("outside allowed roots"),
+			wantErr: wantErrContains(testErrOutsideAllowedRoots),
 		},
 		{
-			name: "windows_drive_relative_path_rejected",
+			name: testNameWindowsDriveRelativePathRejected,
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
@@ -179,9 +179,9 @@ func TestStatPath(t *testing.T) {
 				if runtime.GOOS != toolutil.GOOSWindows {
 					t.Skip("windows-only behavior")
 				}
-				return StatPathArgs{Path: `C:drive-relative.txt`}
+				return StatPathArgs{Path: testPathDriveRel}
 			},
-			wantErr: wantErrContains("drive-relative"),
+			wantErr: wantErrContains(testErrDriveRelative),
 		},
 	}
 

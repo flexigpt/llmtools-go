@@ -5,6 +5,11 @@ import (
 	"testing"
 )
 
+const (
+	textUtilsTestMatchLine = "match"
+	textUtilsTestAfterLine = "after"
+)
+
 func TestNormalizeLineBlockInput(t *testing.T) {
 	tests := []struct {
 		name string
@@ -100,10 +105,10 @@ func TestFindTrimmedAdjacentBlockMatches(t *testing.T) {
 	lines := []string{
 		"HEADER",
 		" before ",
-		"match",
-		" after ",
-		"match",
-		"after",
+		textUtilsTestMatchLine,
+		" " + textUtilsTestAfterLine + " ",
+		textUtilsTestMatchLine,
+		textUtilsTestAfterLine,
 	}
 
 	tests := []struct {
@@ -115,7 +120,7 @@ func TestFindTrimmedAdjacentBlockMatches(t *testing.T) {
 	}{
 		{
 			name:   "match only",
-			match:  []string{"match"},
+			match:  []string{textUtilsTestMatchLine},
 			before: nil,
 			after:  nil,
 			want:   []int{2, 4},
@@ -123,22 +128,22 @@ func TestFindTrimmedAdjacentBlockMatches(t *testing.T) {
 		{
 			name:   "before+match+after must be adjacent",
 			before: []string{"before"},
-			match:  []string{"match"},
-			after:  []string{"after"},
+			match:  []string{textUtilsTestMatchLine},
+			after:  []string{textUtilsTestAfterLine},
 			want:   []int{2},
 		},
 		{
 			name:   "before required but not present => none",
 			before: []string{"nope"},
-			match:  []string{"match"},
-			after:  []string{"after"},
+			match:  []string{textUtilsTestMatchLine},
+			after:  []string{textUtilsTestAfterLine},
 			want:   nil,
 		},
 		{
 			name:   "empty match => nil",
 			before: []string{"before"},
 			match:  nil,
-			after:  []string{"after"},
+			after:  []string{textUtilsTestAfterLine},
 			want:   nil,
 		},
 	}

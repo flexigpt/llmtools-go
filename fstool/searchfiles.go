@@ -21,7 +21,7 @@ var searchFilesTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "018fe0f4-b8cd-7e55-82d5-9df0bd70e4bc",
 	Slug:          "searchfiles",
-	Version:       "v1.0.0",
+	Version:       spec.VersionOne,
 	DisplayName:   "Search files (content or path)",
 	Description: "Recursively search files by path, file content, or both. " +
 		"Dot-prefixed files and directories are excluded by default. Content search only checks small (< 1MB) UTF-8 text-like files.",

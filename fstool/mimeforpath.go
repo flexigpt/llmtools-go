@@ -15,7 +15,7 @@ var mimeForPathTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019bf910-2645-7965-bd9e-006831eabbc3",
 	Slug:          "mimeforpath",
-	Version:       "v1.0.0",
+	Version:       spec.VersionOne,
 	DisplayName:   "Detect MIME for path",
 	Description:   "Best-effort MIME type detection for a filesystem path. Uses the extension if reliable; otherwise sniffs the file bytes.",
 	Tags:          []string{"fs", "mime"},

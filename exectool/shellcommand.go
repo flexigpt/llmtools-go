@@ -30,7 +30,7 @@ var shellCommandToolSpec = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019bfeda-33f2-7315-9007-de55935d2302",
 	Slug:          "shellcommand",
-	Version:       "v1.0.0",
+	Version:       spec.VersionOne,
 	DisplayName:   "Shell Command",
 	Description:   "Execute local shell commands (cross-platform). Supports session-like persistence for workdir/env.",
 	Tags:          []string{"exec"},

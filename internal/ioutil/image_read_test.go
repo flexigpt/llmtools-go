@@ -17,6 +17,11 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
+const (
+	imageReadTestPNGFormat     = "png"
+	imageReadTestSizeErrSubstr = "exceeds maximum allowed size"
+)
+
 func TestReadImage(t *testing.T) {
 	dir := t.TempDir()
 
@@ -30,7 +35,7 @@ func TestReadImage(t *testing.T) {
 	}
 	pngBytes := buf.Bytes()
 
-	imgPath := filepath.Join(dir, "img.png")
+	imgPath := filepath.Join(dir, "img"+"."+imageReadTestPNGFormat)
 	mustWriteBytes(t, imgPath, pngBytes)
 
 	tests := []struct {
@@ -62,7 +67,7 @@ func TestReadImage(t *testing.T) {
 		},
 		{
 			name:       "nonexistent returns Exists=false and no error",
-			path:       filepath.Join(dir, "missing.png"),
+			path:       filepath.Join(dir, "missing"+"."+imageReadTestPNGFormat),
 			wantExists: false,
 			wantIsDir:  false,
 		},
@@ -82,7 +87,7 @@ func TestReadImage(t *testing.T) {
 			wantIsDir:  false,
 			wantW:      2,
 			wantH:      3,
-			wantFmt:    "png",
+			wantFmt:    imageReadTestPNGFormat,
 			wantMIME:   MIMEImagePNG,
 			wantB64:    false,
 		},
@@ -96,7 +101,7 @@ func TestReadImage(t *testing.T) {
 			wantIsDir:  false,
 			wantW:      2,
 			wantH:      3,
-			wantFmt:    "png",
+			wantFmt:    imageReadTestPNGFormat,
 			wantMIME:   MIMEImagePNG,
 			wantB64:    true,
 		},
@@ -107,7 +112,7 @@ func TestReadImage(t *testing.T) {
 			maxBytes:    int64(len(pngBytes) - 1),
 			wantErr:     true,
 			wantErrIs:   ErrFileExceedsMaxSize,
-			errContains: "exceeds maximum allowed size",
+			errContains: imageReadTestSizeErrSubstr,
 		},
 		{
 			name:       "includeBase64=true accepts exact maxBytes",
@@ -118,7 +123,7 @@ func TestReadImage(t *testing.T) {
 			wantIsDir:  false,
 			wantW:      2,
 			wantH:      3,
-			wantFmt:    "png",
+			wantFmt:    imageReadTestPNGFormat,
 			wantMIME:   MIMEImagePNG,
 			wantB64:    true,
 		},
@@ -138,7 +143,7 @@ func TestReadImage(t *testing.T) {
 		},
 		{
 			name:        "symlink file rejected (if supported)",
-			path:        filepath.Join(dir, "link.png"),
+			path:        filepath.Join(dir, "link"+"."+imageReadTestPNGFormat),
 			includeB64:  false,
 			maxBytes:    0,
 			wantErr:     true,
@@ -151,7 +156,7 @@ func TestReadImage(t *testing.T) {
 	mustWriteBytes(t, filepath.Join(dir, "corrupt.bin"), []byte("not an image"))
 	mustWriteBytes(t, filepath.Join(dir, "corrupt2.bin"), []byte("still not an image"))
 	if runtime.GOOS != toolutil.GOOSWindows {
-		mustSymlinkOrSkip(t, imgPath, filepath.Join(dir, "link.png"))
+		mustSymlinkOrSkip(t, imgPath, filepath.Join(dir, "link"+"."+imageReadTestPNGFormat))
 	}
 
 	for _, tc := range tests {

@@ -8,6 +8,30 @@ import (
 	"unicode/utf8"
 )
 
+const (
+	testTextAOnly   = "A\n"
+	testTextAB      = "A\nB\n"
+	testTextAC      = "A\nC\n"
+	testTextAXB     = "A\nX\nB\n"
+	testTextABC     = "A\nB\nC\n"
+	testTextAEmptyB = "A\n\nB\n"
+	testTextABCRLF  = "A\r\nB\r\n"
+	testTextAXBXC   = "A\nX\nB\nX\nC\n"
+	testTextAXYC    = "A\nX\nY\nC\n"
+	testTextHitTrio = "hit ghit fhit\n"
+	testTextEmpty   = ""
+
+	testNameContextCanceled = "context_canceled"
+
+	testErrLineHintMustBeGe1         = "lineHint must be >= 1"
+	testErrDeleteMatchCountMismatch  = "delete match count mismatch"
+	testErrReplaceMatchCountMismatch = "replace match count mismatch"
+	testQueryHit                     = "hit"
+	testQueryNope                    = "NOPE"
+	testQueryLowerX                  = "x"
+	testMissingFileName              = "nope-does-not-exist.txt"
+)
+
 // Small OS wrappers to keep this file stdlib-only without extra imports in header
 // (and to avoid unused imports in non-symlink environments).
 func filepathSep() rune { r, _ := utf8.DecodeRuneInString(string(os.PathSeparator)); return r }
@@ -112,12 +136,4 @@ func makeNLines(n int, line func(i int) string, sep string, finalNewline bool) s
 		}
 	}
 	return sb.String()
-}
-
-func stringPtr(s string) *string {
-	return &s
-}
-
-func intPtr(v int) *int {
-	return &v
 }

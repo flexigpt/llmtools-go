@@ -21,11 +21,11 @@ var findTextTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019c04d3-fba2-7a49-b1ed-8bdee5055db4",
 	Slug:          "findtext",
-	Version:       "v1.0.0",
+	Version:       spec.VersionOne,
 	DisplayName:   "Find text matches",
 	Description: "Find substring or regex matches in a text file and return exact " +
 		"line/column ranges with surrounding context. Multi-line search works by including newlines in query",
-	Tags: []string{"text"},
+	Tags: []string{toolTagText},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",

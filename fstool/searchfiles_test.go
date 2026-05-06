@@ -27,10 +27,10 @@ func TestSearchFiles(t *testing.T) {
 
 	seedTree := func(t *testing.T, root string) {
 		t.Helper()
-		mustWriteFile(t, filepath.Join(root, "foo.txt"), []byte("hello world"))
-		mustWriteFile(t, filepath.Join(root, "bar.md"), []byte("goodbye world"))
+		mustWriteFile(t, filepath.Join(root, testPathFooTxt), []byte(testContentHelloWorld))
+		mustWriteFile(t, filepath.Join(root, testPathBarMD), []byte(testContentGoodbyeWorld))
 		mustMkdirAll(t, filepath.Join(root, "sub"))
-		mustWriteFile(t, filepath.Join(root, "sub", "baz.txt"), []byte("baz content"))
+		mustWriteFile(t, filepath.Join(root, "sub", testPathBazTxt), []byte(testContentBaz))
 	}
 
 	tests := []struct {
@@ -45,7 +45,7 @@ func TestSearchFiles(t *testing.T) {
 		wantMatchCountLen bool
 	}{
 		{
-			name: "context_canceled",
+			name: testNameContextCanceled,
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
@@ -55,7 +55,7 @@ func TestSearchFiles(t *testing.T) {
 			ctx: canceledContext,
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Query: "txt"}
+				return SearchFilesArgs{Root: testPathCurrentDir, Query: testQueryTxt}
 			},
 			wantErr: wantErrIs(context.Canceled),
 		},
@@ -69,9 +69,9 @@ func TestSearchFiles(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: "."}
+				return SearchFilesArgs{Root: testPathCurrentDir}
 			},
-			wantErr: wantErrContains("query is required"),
+			wantErr: wantErrContains(testErrQueryRequired),
 		},
 		{
 			name: "invalid_regexp_errors",
@@ -83,7 +83,7 @@ func TestSearchFiles(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Query: "[", Regexp: true}
+				return SearchFilesArgs{Root: testPathCurrentDir, Query: testGlobInvalid, Regexp: true}
 			},
 			wantErr: wantErrAny,
 		},
@@ -97,10 +97,10 @@ func TestSearchFiles(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Query: `foo\.txt`, Regexp: true}
+				return SearchFilesArgs{Root: testPathCurrentDir, Query: testRegexpFooTxt, Regexp: true}
 			},
 			wantErr:           wantErrNone,
-			wantMatches:       []string{"foo.txt"},
+			wantMatches:       []string{testPathFooTxt},
 			wantMatchCountLen: true,
 		},
 		{
@@ -113,10 +113,10 @@ func TestSearchFiles(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Query: "goodbye"}
+				return SearchFilesArgs{Root: testPathCurrentDir, Query: testQueryGoodbye}
 			},
 			wantErr:           wantErrNone,
-			wantMatches:       []string{"bar.md"},
+			wantMatches:       []string{testPathBarMD},
 			wantMatchCountLen: true,
 		},
 		{
@@ -129,10 +129,10 @@ func TestSearchFiles(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Query: "baz"}
+				return SearchFilesArgs{Root: testPathCurrentDir, Query: testQueryBaz}
 			},
 			wantErr:           wantErrNone,
-			wantMatches:       []string{filepath.Join("sub", "baz.txt")},
+			wantMatches:       []string{filepath.Join("sub", testPathBazTxt)},
 			wantMatchCountLen: true,
 		},
 		{
@@ -145,7 +145,7 @@ func TestSearchFiles(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Query: "txt", MaxResults: 1}
+				return SearchFilesArgs{Root: testPathCurrentDir, Query: testQueryTxt, MaxResults: 1}
 			},
 			wantErr:           wantErrNone,
 			wantReachedMax:    true,
@@ -161,15 +161,15 @@ func TestSearchFiles(t *testing.T) {
 				tmp := t.TempDir()
 				seedTree(t, tmp)
 
-				target := filepath.Join(tmp, "foo.txt")
-				link := filepath.Join(tmp, "link.txt")
+				target := filepath.Join(tmp, testPathFooTxt)
+				link := filepath.Join(tmp, testPathLinkTxt)
 				mustSymlinkOrSkip(t, target, link)
 
 				return cfg{workBaseDir: tmp, blockSymlinks: true}
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Query: `link\.txt`, Regexp: true}
+				return SearchFilesArgs{Root: testPathCurrentDir, Query: testRegexpLinkTxt, Regexp: true}
 			},
 			wantErr:           wantErrNone,
 			wantMatches:       []string{}, // should skip symlink
@@ -186,17 +186,17 @@ func TestSearchFiles(t *testing.T) {
 				seedTree(t, root)
 
 				outside := t.TempDir()
-				outsideFile := filepath.Join(outside, "outside.txt")
-				mustWriteFile(t, outsideFile, []byte("needle outside root"))
+				outsideFile := filepath.Join(outside, testPathOutsideTxt)
+				mustWriteFile(t, outsideFile, []byte(testContentNeedleOutsideRoot))
 
-				link := filepath.Join(root, "escape.txt")
+				link := filepath.Join(root, testPathEscapeTxt)
 				mustSymlinkOrSkip(t, outsideFile, link)
 
 				return cfg{workBaseDir: root, allowedRoots: []string{root}, blockSymlinks: false}
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: ".", Query: "needle"}
+				return SearchFilesArgs{Root: testPathCurrentDir, Query: testQueryNeedle}
 			},
 			wantErr:           wantErrNone,
 			wantMatches:       []string{}, // escaped symlink should be skipped by per-file ResolvePath check
@@ -208,12 +208,12 @@ func TestSearchFiles(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
 				seedTree(t, tmp)
-				mustWriteFile(t, filepath.Join(tmp, "notadir"), []byte("x"))
+				mustWriteFile(t, filepath.Join(tmp, testPathNotADir), []byte(testContentX))
 				return cfg{workBaseDir: tmp}
 			},
 			args: func(t *testing.T, c cfg) SearchFilesArgs {
 				t.Helper()
-				return SearchFilesArgs{Root: "notadir", Query: "x"}
+				return SearchFilesArgs{Root: testPathNotADir, Query: testContentX}
 			},
 			wantErr: wantErrAny,
 		},
@@ -229,9 +229,9 @@ func TestSearchFiles(t *testing.T) {
 				t.Helper()
 				outside := t.TempDir()
 				seedTree(t, outside)
-				return SearchFilesArgs{Root: outside, Query: "txt"}
+				return SearchFilesArgs{Root: outside, Query: testQueryTxt}
 			},
-			wantErr: wantErrContains("outside allowed roots"),
+			wantErr: wantErrContains(testErrOutsideAllowedRoots),
 		},
 	}
 

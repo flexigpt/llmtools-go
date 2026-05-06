@@ -12,6 +12,7 @@ const (
 
 	// SchemaVersion  - Current  schema version.
 	SchemaVersion = "2026-01-01"
+	VersionOne    = "v1.0.0"
 )
 
 var SchemaStartTime = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)

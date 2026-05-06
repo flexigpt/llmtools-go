@@ -11,6 +11,8 @@ import (
 	"testing"
 )
 
+const errInvalidBaseDirStr = "invalid work base dir"
+
 func TestNew_CanonicalizesSortsAndDefaultsBase(t *testing.T) {
 	t.Parallel()
 
@@ -63,13 +65,13 @@ func TestNew_Errors(t *testing.T) {
 			base:    filepath.Join(tmp, "nope"),
 			roots:   []string{root},
 			wantIs:  os.ErrNotExist,
-			wantSub: "invalid work base dir",
+			wantSub: errInvalidBaseDirStr,
 		},
 		{
 			name:    "base_is_file",
 			base:    filePath,
 			roots:   []string{root},
-			wantSub: "invalid work base dir",
+			wantSub: errInvalidBaseDirStr,
 		},
 		{
 			name:    "allowed_root_is_file",
@@ -95,7 +97,7 @@ func TestNew_Errors(t *testing.T) {
 			name:    "base_contains_nul",
 			base:    root + "\x00",
 			roots:   []string{root},
-			wantSub: "invalid work base dir",
+			wantSub: errInvalidBaseDirStr,
 		},
 	}
 

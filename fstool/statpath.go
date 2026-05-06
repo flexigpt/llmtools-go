@@ -15,7 +15,7 @@ var statPathTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "018fe0f4-b8cd-7e55-82d5-9df0bd70e4bd",
 	Slug:          "statpath",
-	Version:       "v1.0.0",
+	Version:       spec.VersionOne,
 	DisplayName:   "Inspect path",
 	Description:   "Return size, timestamps, and basic metadata for a file-system path without modifying it.",
 	Tags:          []string{"fs", "stat"},

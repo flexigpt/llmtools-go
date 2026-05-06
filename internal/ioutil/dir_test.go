@@ -15,11 +15,24 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
+const (
+	dirTestTxtPattern      = "txt"
+	dirTestFileAName       = "a" + "." + dirTestTxtPattern
+	dirTestFileBName       = "b.log"
+	dirTestSubdirName      = "subdir"
+	dirTestXFileName       = "x" + "." + dirTestTxtPattern
+	dirTestDirName         = "dir"
+	dirTestBlankPath       = "   "
+	dirTestTxtGlob         = "*." + dirTestTxtPattern
+	dirTestInvalidGlob     = "["
+	dirTestSyntaxErrSubstr = "syntax error in pattern"
+)
+
 func TestListDirectory(t *testing.T) {
 	root := t.TempDir()
-	mustWriteFile(t, root, "b.log", 1)
-	mustWriteFile(t, root, "a.txt", 1)
-	if err := os.Mkdir(filepath.Join(root, "subdir"), 0o755); err != nil {
+	mustWriteFile(t, root, dirTestFileBName, 1)
+	mustWriteFile(t, root, dirTestFileAName, 1)
+	if err := os.Mkdir(filepath.Join(root, dirTestSubdirName), 0o755); err != nil {
 		t.Fatalf("failed to mkdir subdir: %v", err)
 	}
 
@@ -36,18 +49,18 @@ func TestListDirectory(t *testing.T) {
 			name:    "no pattern returns all entries (already sorted by function)",
 			dir:     root,
 			pattern: "",
-			want:    []string{"a.txt", "b.log", "subdir"},
+			want:    []string{dirTestFileAName, dirTestFileBName, dirTestSubdirName},
 		},
 		{
 			name:    "pattern filters entries",
 			dir:     root,
-			pattern: "*.txt",
-			want:    []string{"a.txt"},
+			pattern: dirTestTxtGlob,
+			want:    []string{dirTestFileAName},
 		},
 		{
 			name:      "invalid glob returns filepath.ErrBadPattern",
 			dir:       root,
-			pattern:   "[",
+			pattern:   dirTestInvalidGlob,
 			wantErrIs: filepath.ErrBadPattern,
 		},
 		{
@@ -71,7 +84,7 @@ func TestListDirectory(t *testing.T) {
 			},
 			dir:     "",
 			pattern: "",
-			want:    []string{"a.txt", "b.log", "subdir"},
+			want:    []string{dirTestFileAName, dirTestFileBName, dirTestSubdirName},
 		},
 	}
 	for _, tc := range tests {
@@ -129,8 +142,8 @@ func TestListDirectory_DefaultPathDot(t *testing.T) {
 	t.Chdir(tmp)
 
 	// Create some entries in the current directory.
-	mustWriteFile(t, tmp, "x.txt", 1)
-	if err := os.Mkdir(filepath.Join(tmp, "dir"), 0o755); err != nil {
+	mustWriteFile(t, tmp, dirTestXFileName, 1)
+	if err := os.Mkdir(filepath.Join(tmp, dirTestDirName), 0o755); err != nil {
 		t.Fatalf("failed to mkdir: %v", err)
 	}
 	policy, err := fspolicy.New("", nil, true)
@@ -149,7 +162,7 @@ func TestListDirectory_DefaultPathDot(t *testing.T) {
 	}
 
 	// We only check that the created entries are present; there might be others.
-	wantSet := map[string]bool{"x.txt": true, "dir": true}
+	wantSet := map[string]bool{dirTestXFileName: true, dirTestDirName: true}
 	for name := range wantSet {
 		found := slices.Contains(got, name)
 		if !found {
@@ -160,9 +173,9 @@ func TestListDirectory_DefaultPathDot(t *testing.T) {
 
 func TestListDirectory_Additional(t *testing.T) {
 	root := t.TempDir()
-	mustWriteFile(t, root, "a.txt", 1)
-	mustWriteFile(t, root, "b.log", 1)
-	if err := os.Mkdir(filepath.Join(root, "subdir"), 0o755); err != nil {
+	mustWriteFile(t, root, dirTestFileAName, 1)
+	mustWriteFile(t, root, dirTestFileBName, 1)
+	if err := os.Mkdir(filepath.Join(root, dirTestSubdirName), 0o755); err != nil {
 		t.Fatalf("mkdir subdir: %v", err)
 	}
 
@@ -185,9 +198,9 @@ func TestListDirectory_Additional(t *testing.T) {
 		{
 			name:        "invalid glob pattern returns error",
 			dir:         root,
-			pattern:     "[",
+			pattern:     dirTestInvalidGlob,
 			wantErr:     true,
-			errContains: "syntax error in pattern",
+			errContains: dirTestSyntaxErrSubstr,
 		},
 		{
 			name:    "pattern matches none returns empty slice",
@@ -199,13 +212,13 @@ func TestListDirectory_Additional(t *testing.T) {
 			name:    "pattern can match directories too",
 			dir:     root,
 			pattern: "sub*",
-			want:    []string{"subdir"},
+			want:    []string{dirTestSubdirName},
 		},
 		{
 			name:    "basic no pattern includes files and dirs",
 			dir:     root,
 			pattern: "",
-			want:    []string{"a.txt", "b.log", "subdir"},
+			want:    []string{dirTestFileAName, dirTestFileBName, dirTestSubdirName},
 		},
 	}
 
@@ -278,11 +291,11 @@ func TestListDirectoryNormalized_SortsAndFiltersAndErrors(t *testing.T) {
 		want          []string
 		wantErrSubstr string
 	}{
-		{name: "empty_dir_invalid", dir: "   ", wantErrSubstr: "invalid"},
+		{name: "empty_dir_invalid", dir: dirTestBlankPath, wantErrSubstr: "invalid"},
 		{name: "nonexistent_dir_errors", dir: filepath.Join(td, "nope"), wantErrSubstr: "read dir error"},
 		{name: "no_pattern_lists_all_sorted", dir: td, pattern: "", want: []string{"a.txt", "b.txt", "dir1"}},
 		{name: "pattern_filters", dir: td, pattern: "*.txt", want: []string{"a.txt", "b.txt"}},
-		{name: "invalid_glob_errors", dir: td, pattern: "[", wantErrSubstr: "syntax"},
+		{name: "invalid_glob_errors", dir: td, pattern: dirTestInvalidGlob, wantErrSubstr: "syntax"},
 	}
 
 	for _, tc := range cases {
@@ -318,7 +331,7 @@ func TestUniquePathInDir(t *testing.T) {
 	mustWriteBytes(t, notADir, []byte("x"))
 
 	// Create a collision for the plain base name.
-	base := "a.txt"
+	base := dirTestFileAName
 	mustWriteBytes(t, filepath.Join(tmpDir, base), []byte("x"))
 
 	tests := []struct {
@@ -353,14 +366,14 @@ func TestUniquePathInDir(t *testing.T) {
 		},
 		{
 			name:      "rejects_empty_dir",
-			dir:       "   ",
-			base:      "x.txt",
+			dir:       dirTestBlankPath,
+			base:      dirTestXFileName,
 			wantErrIs: ErrInvalidPath,
 		},
 		{
 			name:      "rejects_empty_base",
 			dir:       tmpDir,
-			base:      "   ",
+			base:      dirTestBlankPath,
 			wantErrIs: ErrInvalidPath,
 		},
 		{
@@ -372,13 +385,13 @@ func TestUniquePathInDir(t *testing.T) {
 		{
 			name:      "errors_if_dir_missing",
 			dir:       missingDir,
-			base:      "x.txt",
+			base:      dirTestXFileName,
 			wantErrIs: os.ErrNotExist,
 		},
 		{
 			name: "errors_if_dir_is_file",
 			dir:  notADir,
-			base: "x.txt",
+			base: dirTestXFileName,
 			check: func(t *testing.T, got string) {
 				t.Helper()
 				_ = got

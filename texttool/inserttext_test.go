@@ -3,10 +3,16 @@ package texttool
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+)
+
+const (
+	insertTextAnchorTrimSpaceInitial = "a\n  ANCHOR  \nb\n"
+	insertTextExactBoundaryInitial   = "## Intro\nParagraph\n## Usage\nParagraph\n"
+	insertTextBoundaryDriftInitial   = "<!-- A END -->\n\n## Section B\n"
+	insertTextAnchorListInitial      = "ANCHOR\nx\nANCHOR\ny\n"
 )
 
 func TestInsertText_HappyPaths(t *testing.T) {
@@ -32,10 +38,10 @@ func TestInsertText_HappyPaths(t *testing.T) {
 	}{
 		{
 			name:    "position_end_inserts_at_end_preserves_final_newline",
-			initial: "A\nB\n",
+			initial: testTextAB,
 			args: InsertTextArgs{
-				Position: "end",
-				Text:     stringPtr("X"),
+				Position: whereEnd,
+				Text:     new("X"),
 			},
 			want: want{
 				content:           "A\nB\nX\n",
@@ -45,10 +51,10 @@ func TestInsertText_HappyPaths(t *testing.T) {
 		},
 		{
 			name:    "position_start_inserts_at_start",
-			initial: "A\nB\nC\n",
+			initial: testTextABC,
 			args: InsertTextArgs{
-				Position: "start",
-				Text:     stringPtr("X"),
+				Position: whereStart,
+				Text:     new("X"),
 			},
 			want: want{
 				content:           "X\nA\nB\nC\n",
@@ -58,107 +64,107 @@ func TestInsertText_HappyPaths(t *testing.T) {
 		},
 		{
 			name:    "between_with_textBelow_inserts_before_matching_block_trimspace_match",
-			initial: "a\n  ANCHOR  \nb\n",
+			initial: insertTextAnchorTrimSpaceInitial,
 			args: InsertTextArgs{
-				Position:  "between",
-				Text:      stringPtr("X"),
-				TextBelow: stringPtr("ANCHOR"),
+				Position:  whereBetween,
+				Text:      new("X"),
+				TextBelow: new("ANCHOR"),
 			},
 			want: want{
 				content:               "a\nX\n  ANCHOR  \nb\n",
 				insertedAtLine:        2,
 				insertedLineCount:     1,
-				textBelowMatchedAtPtr: intPtr(2),
+				textBelowMatchedAtPtr: new(2),
 			},
 		},
 		{
 			name:    "between_with_textAbove_inserts_after_matching_block_trimspace_match",
-			initial: "a\n  ANCHOR  \nb\n",
+			initial: insertTextAnchorTrimSpaceInitial,
 			args: InsertTextArgs{
-				Position:  "between",
-				Text:      stringPtr("X"),
-				TextAbove: stringPtr("ANCHOR"),
+				Position:  whereBetween,
+				Text:      new("X"),
+				TextAbove: new("ANCHOR"),
 			},
 			want: want{
 				content:               "a\n  ANCHOR  \nX\nb\n",
 				insertedAtLine:        3,
 				insertedLineCount:     1,
-				textAboveMatchedAtPtr: intPtr(2),
+				textAboveMatchedAtPtr: new(2),
 			},
 		},
 		{
 			name:    "between_with_textAbove_and_textBelow_inserts_at_exact_boundary",
-			initial: "## Intro\nParagraph\n## Usage\nParagraph\n",
+			initial: insertTextExactBoundaryInitial,
 			args: InsertTextArgs{
-				Position:  "between",
-				Text:      stringPtr("Inserted"),
-				TextAbove: stringPtr("## Usage"),
-				TextBelow: stringPtr("Paragraph"),
+				Position:  whereBetween,
+				Text:      new("Inserted"),
+				TextAbove: new("## Usage"),
+				TextBelow: new("Paragraph"),
 			},
 			want: want{
 				content:               "## Intro\nParagraph\n## Usage\nInserted\nParagraph\n",
 				insertedAtLine:        4,
 				insertedLineCount:     1,
-				textAboveMatchedAtPtr: intPtr(3),
-				textBelowMatchedAtPtr: intPtr(4),
+				textAboveMatchedAtPtr: new(3),
+				textBelowMatchedAtPtr: new(4),
 			},
 		},
 		{
 			name:    "between_with_blank_gap_inserts_at_start_of_gap",
-			initial: "A\n\nB\n",
+			initial: testTextAEmptyB,
 			args: InsertTextArgs{
-				Position:  "between",
-				Text:      stringPtr("X"),
-				TextAbove: stringPtr("A"),
-				TextBelow: stringPtr("B"),
+				Position:  whereBetween,
+				Text:      new("X"),
+				TextAbove: new("A"),
+				TextBelow: new("B"),
 			},
 			want: want{
 				content:               "A\nX\n\nB\n",
 				insertedAtLine:        2,
 				insertedLineCount:     1,
-				textAboveMatchedAtPtr: intPtr(1),
-				textBelowMatchedAtPtr: intPtr(3),
+				textAboveMatchedAtPtr: new(1),
+				textBelowMatchedAtPtr: new(3),
 			},
 		},
 		{
 			name:    "between_tolerates_blank_line_drift_on_boundary_blocks",
-			initial: "<!-- A END -->\n\n## Section B\n",
+			initial: insertTextBoundaryDriftInitial,
 			args: InsertTextArgs{
-				Position:  "between",
-				Text:      stringPtr("\nInserted after A"),
-				TextAbove: stringPtr("<!-- A END -->\n\n"),
-				TextBelow: stringPtr("\n## Section B"),
+				Position:  whereBetween,
+				Text:      new("\nInserted after A"),
+				TextAbove: new("<!-- A END -->\n\n"),
+				TextBelow: new("\n## Section B"),
 			},
 			want: want{
 				content:               "<!-- A END -->\n\nInserted after A\n\n## Section B\n",
 				insertedAtLine:        2,
 				insertedLineCount:     2,
-				textAboveMatchedAtPtr: intPtr(1),
-				textBelowMatchedAtPtr: intPtr(3),
+				textAboveMatchedAtPtr: new(1),
+				textBelowMatchedAtPtr: new(3),
 			},
 		},
 		{
 			name:    "between_lineHint_narrows_ambiguous_location",
-			initial: "ANCHOR\nx\nANCHOR\ny\n",
+			initial: insertTextAnchorListInitial,
 			args: InsertTextArgs{
-				Position:  "between",
-				Text:      stringPtr("X"),
-				TextBelow: stringPtr("ANCHOR"),
-				LineHint:  intPtr(3),
+				Position:  whereBetween,
+				Text:      new("X"),
+				TextBelow: new("ANCHOR"),
+				LineHint:  new(3),
 			},
 			want: want{
 				content:               "ANCHOR\nx\nX\nANCHOR\ny\n",
 				insertedAtLine:        3,
 				insertedLineCount:     1,
-				textBelowMatchedAtPtr: intPtr(3),
+				textBelowMatchedAtPtr: new(3),
 			},
 		},
 		{
 			name:    "text_with_embedded_newlines_splits_into_multiple_lines",
-			initial: "A\nB\n",
+			initial: testTextAB,
 			args: InsertTextArgs{
-				Position: "end",
-				Text:     stringPtr("X\nY"),
+				Position: whereEnd,
+				Text:     new("X\nY"),
 			},
 			want: want{
 				content:           "A\nB\nX\nY\n",
@@ -168,10 +174,10 @@ func TestInsertText_HappyPaths(t *testing.T) {
 		},
 		{
 			name:    "preserves_crlf_newlines_and_final_newline",
-			initial: "A\r\nB\r\n",
+			initial: testTextABCRLF,
 			args: InsertTextArgs{
-				Position: "start",
-				Text:     stringPtr("X"),
+				Position: whereStart,
+				Text:     new("X"),
 			},
 			want: want{
 				content:           "X\r\nA\r\nB\r\n",
@@ -181,10 +187,10 @@ func TestInsertText_HappyPaths(t *testing.T) {
 		},
 		{
 			name:    "empty_file_no_final_newline_preserved",
-			initial: "",
+			initial: testTextEmpty,
 			args: InsertTextArgs{
-				Position: "end",
-				Text:     stringPtr("A"),
+				Position: whereEnd,
+				Text:     new("A"),
 			},
 			want: want{
 				content:           "A",
@@ -196,8 +202,8 @@ func TestInsertText_HappyPaths(t *testing.T) {
 			name:    "file_with_single_empty_line_and_final_newline_keeps_final_newline",
 			initial: "\n",
 			args: InsertTextArgs{
-				Position: "start",
-				Text:     stringPtr("A"),
+				Position: whereStart,
+				Text:     new("A"),
 			},
 			want: want{
 				content:           "A\n\n",
@@ -209,8 +215,8 @@ func TestInsertText_HappyPaths(t *testing.T) {
 			name:    "non_empty_file_without_final_newline_preserved",
 			initial: "A",
 			args: InsertTextArgs{
-				Position: "end",
-				Text:     stringPtr("B"),
+				Position: whereEnd,
+				Text:     new("B"),
 			},
 			want: want{
 				content:           "A\nB",
@@ -296,12 +302,12 @@ func TestInsertText_ErrorCases(t *testing.T) {
 		{
 			name: "text_required",
 			setupFile: func() string {
-				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "ins-*.txt", testTextAOnly)
 			},
 			args: func(path string) InsertTextArgs {
 				return InsertTextArgs{
 					Path:     path,
-					Position: "end",
+					Position: whereEnd,
 				}
 			},
 			wantErrSub: "text is required",
@@ -309,12 +315,12 @@ func TestInsertText_ErrorCases(t *testing.T) {
 		{
 			name: "position_required",
 			setupFile: func() string {
-				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "ins-*.txt", testTextAOnly)
 			},
 			args: func(path string) InsertTextArgs {
 				return InsertTextArgs{
 					Path: path,
-					Text: stringPtr("X"),
+					Text: new("X"),
 				}
 			},
 			wantErrSub: "position is required",
@@ -322,13 +328,13 @@ func TestInsertText_ErrorCases(t *testing.T) {
 		{
 			name: "invalid_position",
 			setupFile: func() string {
-				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "ins-*.txt", testTextAOnly)
 			},
 			args: func(path string) InsertTextArgs {
 				return InsertTextArgs{
 					Path:     path,
 					Position: "middle",
-					Text:     stringPtr("X"),
+					Text:     new("X"),
 				}
 			},
 			wantErrSub: "invalid position value",
@@ -336,14 +342,14 @@ func TestInsertText_ErrorCases(t *testing.T) {
 		{
 			name: "boundary_fields_forbidden_when_position_end",
 			setupFile: func() string {
-				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "ins-*.txt", testTextAOnly)
 			},
 			args: func(path string) InsertTextArgs {
 				return InsertTextArgs{
 					Path:      path,
-					Position:  "end",
-					Text:      stringPtr("X"),
-					TextBelow: stringPtr("A"),
+					Position:  whereEnd,
+					Text:      new("X"),
+					TextBelow: new("A"),
 				}
 			},
 			wantErrSub: `textAbove/textBelow/lineHint must be omitted`,
@@ -351,13 +357,13 @@ func TestInsertText_ErrorCases(t *testing.T) {
 		{
 			name: "between_requires_textAbove_or_textBelow",
 			setupFile: func() string {
-				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "ins-*.txt", testTextAOnly)
 			},
 			args: func(path string) InsertTextArgs {
 				return InsertTextArgs{
 					Path:     path,
-					Position: "between",
-					Text:     stringPtr("X"),
+					Position: whereBetween,
+					Text:     new("X"),
 				}
 			},
 			wantErrSub: `requires textAbove or textBelow`,
@@ -365,30 +371,30 @@ func TestInsertText_ErrorCases(t *testing.T) {
 		{
 			name: "lineHint_must_be_positive",
 			setupFile: func() string {
-				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "ins-*.txt", testTextAOnly)
 			},
 			args: func(path string) InsertTextArgs {
 				return InsertTextArgs{
 					Path:      path,
-					Position:  "between",
-					Text:      stringPtr("X"),
-					TextBelow: stringPtr("A"),
-					LineHint:  intPtr(0),
+					Position:  whereBetween,
+					Text:      new("X"),
+					TextBelow: new("A"),
+					LineHint:  new(0),
 				}
 			},
-			wantErrSub: "lineHint must be >= 1",
+			wantErrSub: testErrLineHintMustBeGe1,
 		},
 		{
 			name: "insertion_point_no_match",
 			setupFile: func() string {
-				return writeTempTextFile(t, dir, "ins-*.txt", "A\nB\n")
+				return writeTempTextFile(t, dir, "ins-*.txt", testTextAB)
 			},
 			args: func(path string) InsertTextArgs {
 				return InsertTextArgs{
 					Path:      path,
-					Position:  "between",
-					Text:      stringPtr("X"),
-					TextBelow: stringPtr("NOPE"),
+					Position:  whereBetween,
+					Text:      new("X"),
+					TextBelow: new("NOPE"),
 				}
 			},
 			wantErrSub: "no insertion point matched",
@@ -401,26 +407,25 @@ func TestInsertText_ErrorCases(t *testing.T) {
 			args: func(path string) InsertTextArgs {
 				return InsertTextArgs{
 					Path:      path,
-					Position:  "between",
-					Text:      stringPtr("X"),
-					TextAbove: stringPtr("A"),
-					TextBelow: stringPtr("B"),
+					Position:  whereBetween,
+					Text:      new("X"),
+					TextAbove: new("A"),
+					TextBelow: new("B"),
 				}
 			},
 			wantErrSub: "no insertion point matched",
 		},
-
 		{
 			name: "insertion_point_ambiguous_match",
 			setupFile: func() string {
-				return writeTempTextFile(t, dir, "ins-*.txt", "ANCHOR\nx\nANCHOR\n")
+				return writeTempTextFile(t, dir, "ins-*.txt", insertTextAnchorListInitial)
 			},
 			args: func(path string) InsertTextArgs {
 				return InsertTextArgs{
 					Path:      path,
-					Position:  "between",
-					Text:      stringPtr("X"),
-					TextBelow: stringPtr("ANCHOR"),
+					Position:  whereBetween,
+					Text:      new("X"),
+					TextBelow: new("ANCHOR"),
 				}
 			},
 			wantErrSub: "ambiguous insertion point",
@@ -428,30 +433,30 @@ func TestInsertText_ErrorCases(t *testing.T) {
 		{
 			name: "position_end_error_does_not_modify_file",
 			setupFile: func() string {
-				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "ins-*.txt", testTextAOnly)
 			},
 			args: func(path string) InsertTextArgs {
 				return InsertTextArgs{
 					Path:      path,
-					Position:  "end",
-					Text:      stringPtr("X"),
-					TextAbove: stringPtr("A"),
+					Position:  whereEnd,
+					Text:      new("X"),
+					TextAbove: new("A"),
 				}
 			},
 			wantErrSub:        `textAbove/textBelow/lineHint must be omitted`,
 			checkContentAfter: true,
-			wantContentAfter:  "A\n",
+			wantContentAfter:  testTextAOnly,
 		},
 		{
-			name: "context_canceled",
+			name: testNameContextCanceled,
 			setupFile: func() string {
-				return writeTempTextFile(t, dir, "ins-*.txt", "A\n")
+				return writeTempTextFile(t, dir, "ins-*.txt", testTextAOnly)
 			},
 			args: func(path string) InsertTextArgs {
 				return InsertTextArgs{
 					Path:     path,
-					Position: "end",
-					Text:     stringPtr("X"),
+					Position: whereEnd,
+					Text:     new("X"),
 				}
 			},
 			wantIsCtx: true,
@@ -471,7 +476,7 @@ func TestInsertText_ErrorCases(t *testing.T) {
 			}
 
 			_, err := insertText(ctx, args, policy)
-			if strings.Contains(tt.name, "context_canceled") {
+			if tt.wantIsCtx {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)
 				}

@@ -5,6 +5,17 @@ import (
 	"testing"
 )
 
+const (
+	argvEcho        = "echo"
+	argvHi          = "hi"
+	argvHelloWorld  = "hello world"
+	argvFooBar      = "foo'bar"
+	argvNUL         = "a\x00b"
+	argvProgramPath = `C:\Program Files\app.exe`
+	argvXY          = "x y"
+	argvAB          = "a'b"
+)
+
 func TestCommandFromArgv_ValidationAndDialects(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -22,55 +33,55 @@ func TestCommandFromArgv_ValidationAndDialects(t *testing.T) {
 		{
 			name:          "invalid_shell_auto",
 			shell:         ShellNameAuto,
-			argv:          []string{"echo", "hi"},
+			argv:          []string{argvEcho, argvHi},
 			wantErrSubstr: "invalid args",
 		},
 		{
 			name:          "cmd_not_supported",
 			shell:         ShellNameCmd,
-			argv:          []string{"echo", "hi"},
+			argv:          []string{argvEcho, argvHi},
 			wantErrSubstr: "does not support cmd.exe",
 		},
 		{
 			name:  "sh_quotes_all_args_posix_single_quote",
 			shell: ShellNameSh,
-			argv:  []string{"echo", "hello world"},
+			argv:  []string{argvEcho, argvHelloWorld},
 			want:  "'echo' 'hello world'",
 		},
 		{
 			name:  "sh_quotes_empty_arg",
 			shell: ShellNameSh,
-			argv:  []string{"echo", ""},
+			argv:  []string{argvEcho, ""},
 			want:  "'echo' ''",
 		},
 		{
 			name:  "sh_escapes_single_quotes_posix_strategy",
 			shell: ShellNameSh,
-			argv:  []string{"echo", "foo'bar"},
+			argv:  []string{argvEcho, argvFooBar},
 			want:  "'echo' 'foo'\"'\"'bar'",
 		},
 		{
 			name:          "sh_rejects_nul_in_arg",
 			shell:         ShellNameSh,
-			argv:          []string{"echo", "a\x00b"},
+			argv:          []string{argvEcho, argvNUL},
 			wantErrSubstr: "nul",
 		},
 		{
 			name:  "powershell_prefixes_call_operator_and_quotes",
 			shell: ShellNamePwsh,
-			argv:  []string{"C:\\Program Files\\app.exe", "x y"},
+			argv:  []string{argvProgramPath, argvXY},
 			want:  "& 'C:\\Program Files\\app.exe' 'x y'",
 		},
 		{
 			name:  "powershell_escapes_single_quote_by_doubling",
 			shell: ShellNamePwsh,
-			argv:  []string{"echo", "a'b"},
+			argv:  []string{argvEcho, argvAB},
 			want:  "& 'echo' 'a''b'",
 		},
 		{
 			name:          "powershell_rejects_nul_in_arg",
 			shell:         ShellNamePowershell,
-			argv:          []string{"echo", "a\x00b"},
+			argv:          []string{argvEcho, argvNUL},
 			wantErrSubstr: "nul",
 		},
 	}

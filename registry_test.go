@@ -13,6 +13,8 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
+const errInvalidInputStr = "invalid input"
+
 func TestNewRegistry_Options(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -379,19 +381,19 @@ func TestRegisterTypedAsTextTool_StrictDecode_And_TextWrapping(t *testing.T) {
 			name:            "unknown field rejected",
 			in:              json.RawMessage(`{"a":1,"b":2}`),
 			fn:              func(_ context.Context, a args) (ret, error) { return ret{Sum: a.A}, nil },
-			wantErrContains: "invalid input",
+			wantErrContains: errInvalidInputStr,
 		},
 		{
 			name:            "trailing data rejected",
 			in:              json.RawMessage(`{"a":1} {"a":2}`),
 			fn:              func(_ context.Context, a args) (ret, error) { return ret{Sum: a.A}, nil },
-			wantErrContains: "invalid input",
+			wantErrContains: errInvalidInputStr,
 		},
 		{
 			name:            "invalid JSON rejected",
 			in:              json.RawMessage(`{"a":`),
 			fn:              func(_ context.Context, a args) (ret, error) { return ret{Sum: a.A}, nil },
-			wantErrContains: "invalid input",
+			wantErrContains: errInvalidInputStr,
 		},
 	}
 
@@ -481,12 +483,12 @@ func TestRegisterOutputsTool_StrictDecode(t *testing.T) {
 		{
 			name:            "unknown field rejected",
 			in:              json.RawMessage(`{"a":7,"b":1}`),
-			wantErrContains: "invalid input",
+			wantErrContains: errInvalidInputStr,
 		},
 		{
 			name:            "trailing data rejected",
 			in:              json.RawMessage(`{"a":7} true`),
-			wantErrContains: "invalid input",
+			wantErrContains: errInvalidInputStr,
 		},
 	}
 

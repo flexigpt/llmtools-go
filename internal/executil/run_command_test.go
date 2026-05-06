@@ -13,6 +13,12 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
+const (
+	runShellPathUnix = "/bin/sh"
+	runEchoHi        = "echo hi"
+	runAbcdBytes     = "abcd"
+)
+
 func TestUnixSpecific_ProcessGroupAndExitCodeHelpers(t *testing.T) {
 	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-specific")
@@ -54,9 +60,9 @@ func TestDeriveExecArgs(t *testing.T) {
 	}{
 		{
 			name: "sh_like_uses_dash_c",
-			sel:  SelectedShell{Name: ShellNameSh, Path: "/bin/sh"},
-			cmd:  "echo hi",
-			want: []string{"/bin/sh", "-c", "echo hi"},
+			sel:  SelectedShell{Name: ShellNameSh, Path: runShellPathUnix},
+			cmd:  runEchoHi,
+			want: []string{runShellPathUnix, "-c", runEchoHi},
 		},
 		{
 			name: "powershell_uses_no_profile_non_interactive",
@@ -66,15 +72,15 @@ func TestDeriveExecArgs(t *testing.T) {
 		},
 		{
 			name: "cmd_uses_d_s_c",
-			sel:  SelectedShell{Name: ShellNameCmd, Path: "cmd"},
-			cmd:  "echo hi",
-			want: []string{"cmd", "/d", "/s", "/c", "echo hi"},
+			sel:  SelectedShell{Name: ShellNameCmd, Path: string(ShellNameCmd)},
+			cmd:  runEchoHi,
+			want: []string{string(ShellNameCmd), "/d", "/s", "/c", runEchoHi},
 		},
 		{
 			name: "unknown_defaults_to_dash_c",
 			sel:  SelectedShell{Name: ShellName("weird"), Path: "weirdsh"},
-			cmd:  "echo hi",
-			want: []string{"weirdsh", "-c", "echo hi"},
+			cmd:  runEchoHi,
+			want: []string{"weirdsh", "-c", runEchoHi},
 		},
 	}
 
@@ -155,7 +161,7 @@ func TestCappedWriter_RingWrapAndOverwrite(t *testing.T) {
 			name:           "no_overflow_no_trunc",
 			cap:            5,
 			writes:         []string{"ab", "cd"},
-			wantBytes:      "abcd",
+			wantBytes:      runAbcdBytes,
 			wantTruncated:  false,
 			wantTotalBytes: 4,
 		},

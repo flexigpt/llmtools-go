@@ -46,7 +46,7 @@ func TestMIMEForPath(t *testing.T) {
 		wantNorm   string
 	}{
 		{
-			name: "context_canceled",
+			name: testNameContextCanceled,
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
@@ -68,9 +68,9 @@ func TestMIMEForPath(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) MIMEForPathArgs {
 				t.Helper()
-				return MIMEForPathArgs{Path: "   "}
+				return MIMEForPathArgs{Path: testWhitespace}
 			},
-			wantErr: wantErrContains("invalid path"),
+			wantErr: wantErrContains(testErrInvalidPath),
 		},
 		{
 			name: "nonexistent_known_extension_uses_extension_no_io",
@@ -81,14 +81,14 @@ func TestMIMEForPath(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) MIMEForPathArgs {
 				t.Helper()
-				return MIMEForPathArgs{Path: filepath.Join(c.workBaseDir, "missing.PDF")}
+				return MIMEForPathArgs{Path: filepath.Join(c.workBaseDir, "missing"+testExtPDFUpper)}
 			},
 			wantErr:    wantErrNone,
 			wantMethod: MIMEDetectMethodExtension,
 			wantMIME:   "application/pdf",
 			wantMode:   MIMEModeDocument,
-			wantExt:    ".PDF",
-			wantNorm:   ".pdf",
+			wantExt:    testExtPDFUpper,
+			wantNorm:   testExtPDFLower,
 		},
 		{
 			name: "nonexistent_unknown_extension_errors_isnotexist",
@@ -99,7 +99,7 @@ func TestMIMEForPath(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) MIMEForPathArgs {
 				t.Helper()
-				return MIMEForPathArgs{Path: filepath.Join(c.workBaseDir, "missing.unknownext")}
+				return MIMEForPathArgs{Path: filepath.Join(c.workBaseDir, "missing"+testExtUnknown)}
 			},
 			wantErr: func(err error) bool { return err != nil && errors.Is(err, os.ErrNotExist) },
 		},
@@ -108,16 +108,16 @@ func TestMIMEForPath(t *testing.T) {
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
-				mustWriteFile(t, filepath.Join(tmp, "noext"), []byte("hello\n"))
+				mustWriteFile(t, filepath.Join(tmp, testPathNoExt), []byte("hello\n"))
 				return cfg{workBaseDir: tmp}
 			},
 			args: func(t *testing.T, c cfg) MIMEForPathArgs {
 				t.Helper()
-				return MIMEForPathArgs{Path: filepath.Join(c.workBaseDir, "noext")}
+				return MIMEForPathArgs{Path: filepath.Join(c.workBaseDir, testPathNoExt)}
 			},
 			wantErr:    wantErrNone,
 			wantMethod: MIMEDetectMethodSniff,
-			wantMIME:   "text/plain; charset=utf-8",
+			wantMIME:   testMIMETextPlainCharset,
 			wantMode:   MIMEModeText,
 			wantExt:    "",
 			wantNorm:   "",
@@ -136,7 +136,7 @@ func TestMIMEForPath(t *testing.T) {
 			},
 			wantErr:    wantErrNone,
 			wantMethod: MIMEDetectMethodSniff,
-			wantMIME:   "image/png",
+			wantMIME:   testMIMEImagePNG,
 			wantMode:   MIMEModeImage,
 			wantExt:    ".bin",
 			wantNorm:   ".bin",
@@ -155,7 +155,7 @@ func TestMIMEForPath(t *testing.T) {
 			wantErr: wantErrAny,
 		},
 		{
-			name: "allowedRoots_blocks_outside_path",
+			name: testNameAllowedRootsBlocksOutsidePath,
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				root := t.TempDir()
@@ -164,9 +164,9 @@ func TestMIMEForPath(t *testing.T) {
 			args: func(t *testing.T, c cfg) MIMEForPathArgs {
 				t.Helper()
 				outside := t.TempDir()
-				return MIMEForPathArgs{Path: filepath.Join(outside, "x.txt")}
+				return MIMEForPathArgs{Path: filepath.Join(outside, testPathXTxt)}
 			},
-			wantErr: wantErrContains("outside allowed roots"),
+			wantErr: wantErrContains(testErrOutsideAllowedRoots),
 		},
 		{
 			name: "symlink_sniff_allowed_when_blockSymlinks_false",
@@ -180,17 +180,17 @@ func TestMIMEForPath(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) MIMEForPathArgs {
 				t.Helper()
-				target := filepath.Join(c.workBaseDir, "target.unknownext")
+				target := filepath.Join(c.workBaseDir, "target"+testExtUnknown)
 				mustWriteFile(t, target, []byte("hello\n"))
-				link := filepath.Join(c.workBaseDir, "link.unknownext")
+				link := filepath.Join(c.workBaseDir, "link"+testExtUnknown)
 				mustSymlinkOrSkip(t, target, link)
 				return MIMEForPathArgs{Path: link}
 			},
 			wantErr:    wantErrNone,
 			wantMethod: MIMEDetectMethodSniff,
 			wantMode:   MIMEModeText,
-			wantExt:    ".unknownext",
-			wantNorm:   ".unknownext",
+			wantExt:    testExtUnknown,
+			wantNorm:   testExtUnknown,
 		},
 		{
 			name: "symlink_sniff_refused_when_blockSymlinks_true",
@@ -204,16 +204,16 @@ func TestMIMEForPath(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) MIMEForPathArgs {
 				t.Helper()
-				target := filepath.Join(c.workBaseDir, "target.unknownext")
+				target := filepath.Join(c.workBaseDir, "target"+testExtUnknown)
 				mustWriteFile(t, target, []byte("hello\n"))
-				link := filepath.Join(c.workBaseDir, "link.unknownext")
+				link := filepath.Join(c.workBaseDir, "link"+testExtUnknown)
 				mustSymlinkOrSkip(t, target, link)
 				return MIMEForPathArgs{Path: link}
 			},
-			wantErr: wantErrContains("symlink"),
+			wantErr: wantErrContains(testErrSymlink),
 		},
 		{
-			name: "windows_drive_relative_path_rejected",
+			name: testNameWindowsDriveRelativePathRejected,
 			cfg: func(t *testing.T) cfg {
 				t.Helper()
 				tmp := t.TempDir()
@@ -224,9 +224,9 @@ func TestMIMEForPath(t *testing.T) {
 				if runtime.GOOS != toolutil.GOOSWindows {
 					t.Skip("windows-only behavior")
 				}
-				return MIMEForPathArgs{Path: `C:drive-relative.txt`}
+				return MIMEForPathArgs{Path: testPathDriveRel}
 			},
-			wantErr: wantErrContains("drive-relative"),
+			wantErr: wantErrContains(testErrDriveRelative),
 		},
 	}
 

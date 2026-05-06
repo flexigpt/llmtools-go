@@ -16,7 +16,7 @@ var readImageTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019bf894-a7e4-7f19-8e7d-8e2297f4f799",
 	Slug:          "readimage",
-	Version:       "v1.0.0",
+	Version:       spec.VersionOne,
 	DisplayName:   "Read image",
 	Description:   "Read intrinsic metadata for a local image file, optionally including base64-encoded contents.",
 	Tags:          []string{"image", "file"},

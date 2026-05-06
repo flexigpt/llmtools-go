@@ -12,6 +12,12 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
+const (
+	statPathTestEmptyPathName       = "empty path"
+	statPathTestInvalidPathName     = "invalid path"
+	statPathTestNonExistentPathName = "non-existent path"
+)
+
 func TestStatPath(t *testing.T) {
 	dir := t.TempDir()
 
@@ -41,13 +47,13 @@ func TestStatPath(t *testing.T) {
 		wantErrContains string
 	}{
 		{
-			name:            "empty path",
+			name:            statPathTestEmptyPathName,
 			path:            "",
 			wantErr:         true,
-			wantErrContains: "invalid path",
+			wantErrContains: statPathTestInvalidPathName,
 		},
 		{
-			name:       "non-existent path",
+			name:       statPathTestNonExistentPathName,
 			path:       nonExistentPath,
 			wantExists: false,
 			wantIsDir:  false,

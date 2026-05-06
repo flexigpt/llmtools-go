@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/ioutil"
@@ -17,13 +18,13 @@ var deleteTextTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019c04d3-354f-73dc-909c-1b79f73d0f55",
 	Slug:          "deletetext",
-	Version:       "v1.0.0",
+	Version:       spec.VersionOne,
 	DisplayName:   "Delete text",
 	Description: "Delete a text block from a UTF-8 text file. Matching compares TrimSpace(line). " +
 		"Use textAbove and/or textBelow only to locate the intended occurrence. " +
 		"Use lineHint only when expectedCount is 1. " +
 		"The tool fails unless the number of matches equals expectedCount.",
-	Tags: []string{"text"},
+	Tags: []string{toolTagText},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",
@@ -182,11 +183,11 @@ func deleteText(
 		)
 	}
 
-	for i := len(matchIdxs) - 1; i >= 0; i-- {
+	for _, v := range slices.Backward(matchIdxs) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		start := matchIdxs[i]
+		start := v
 		end := start + len(oldText)
 		tf.Lines = replaceTextBlockLinesSlice(tf.Lines, start, end, nil)
 	}

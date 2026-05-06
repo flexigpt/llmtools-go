@@ -104,5 +104,3 @@ func canceledContext(ctx context.Context) context.Context {
 	cancel()
 	return ctx
 }
-
-func ptrBool(b bool) *bool { return &b }

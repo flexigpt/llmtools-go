@@ -16,7 +16,7 @@ var mimeForExtensionTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019bf911-3dca-73df-9b1c-4f5e7254a89e",
 	Slug:          "mimeforextension",
-	Version:       "v1.0.0",
+	Version:       spec.VersionOne,
 	DisplayName:   "Detect MIME for extension",
 	Description:   "Return the best-known MIME type for an extension (accepts both 'png' and '.png'). Falls back to application/octet-stream when unknown.",
 	Tags:          []string{"mime"},

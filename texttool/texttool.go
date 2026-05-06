@@ -13,6 +13,7 @@ const (
 	maybeStartLineTolerance          = 3
 	maxAmbiguityDiagnosticCandidates = 5
 	ambiguityDiagnosticContextLines  = 1
+	toolTagText                      = "text"
 )
 
 type textToolConfig struct {
