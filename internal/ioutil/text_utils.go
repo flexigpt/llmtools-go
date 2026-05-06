@@ -90,6 +90,12 @@ type InsertionPointMatch struct {
 	BelowStart *int
 }
 
+// FindTrimmedInsertionPointMatches returns the 0-based insertion indices from
+// FindTrimmedInsertionPointMatchCandidates.
+func FindTrimmedInsertionPointMatches(lines, above, below []string) []int {
+	return InsertionPointMatchIndices(FindTrimmedInsertionPointMatchCandidates(lines, above, below))
+}
+
 // InsertionPointMatchIndices returns the 0-based insertion indices from matches.
 func InsertionPointMatchIndices(matches []InsertionPointMatch) []int {
 	if len(matches) == 0 {
@@ -193,12 +199,6 @@ func FindTrimmedInsertionPointMatchCandidates(lines, above, below []string) []In
 		}
 		return matches
 	}
-}
-
-// FindTrimmedInsertionPointMatches returns the 0-based insertion indices from
-// FindTrimmedInsertionPointMatchCandidates.
-func FindTrimmedInsertionPointMatches(lines, above, below []string) []int {
-	return InsertionPointMatchIndices(FindTrimmedInsertionPointMatchCandidates(lines, above, below))
 }
 
 func trimTrailingBoundaryBlankLines(lines []string) []string {

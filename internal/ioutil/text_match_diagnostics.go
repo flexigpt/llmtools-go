@@ -48,17 +48,6 @@ type blockMatchDiagnostic struct {
 	MaybeStartLine              *MaybeStartLineDiagnostic       `json:"maybeStartLine,omitempty"`
 }
 
-func OneBasedLineNumbers(idxs []int) []int {
-	if len(idxs) == 0 {
-		return nil
-	}
-	out := make([]int, len(idxs))
-	for i, idx := range idxs {
-		out[i] = idx + 1
-	}
-	return out
-}
-
 // NarrowIndicesByLineHint applies a soft 1-based line hint to 0-based indices.
 //
 // Behavior:
@@ -280,6 +269,17 @@ func BuildBlockMatchDiagnosticJSON(
 		return fmt.Sprintf("candidateStartLines=%v", OneBasedLineNumbers(matchIdxs))
 	}
 	return string(b)
+}
+
+func OneBasedLineNumbers(idxs []int) []int {
+	if len(idxs) == 0 {
+		return nil
+	}
+	out := make([]int, len(idxs))
+	for i, idx := range idxs {
+		out[i] = idx + 1
+	}
+	return out
 }
 
 func cloneStringSlice(in []string) []string {

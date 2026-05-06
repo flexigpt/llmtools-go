@@ -36,64 +36,6 @@ var (
 
 var errHostSpawnUnavailable = errors.New("host spawn not available")
 
-// IsFlatpak reports whether the current process runs inside a Flatpak sandbox.
-// The result is cached after the first call.
-func IsFlatpak() bool {
-	flatpakDetectOnce.Do(func() {
-		_, err := os.Stat("/.flatpak-info")
-		flatpakDetected = err == nil
-		if flatpakDetected {
-			logutil.Info("executil: Flatpak sandbox detected")
-		}
-	})
-	return flatpakDetected
-}
-
-// HostSpawnAvailable reports whether flatpak-spawn --host can be used to run
-// commands on the host.  Returns false when not inside Flatpak or the probe
-// command fails.  The result is cached after the first probe.
-func HostSpawnAvailable(ctx context.Context) bool {
-	if !IsFlatpak() {
-		return false
-	}
-	hostSpawnProbeOnce.Do(func() {
-		p, err := exec.LookPath("flatpak-spawn")
-		if err != nil {
-			logutil.Warn("executil: flatpak-spawn not found: host commands will run inside the sandbox", "err", err)
-			return
-		}
-		hostSpawnBin = p
-
-		ctxTimed, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-
-		if err := exec.CommandContext(ctxTimed, p, "--host", "true").Run(); err != nil {
-			logutil.Warn(
-				"executil: flatpak-spawn --host probe failed: ensure --talk-name=org.freedesktop.Flatpak is in finish-args",
-				"err",
-				err,
-			)
-			return
-		}
-		hostSpawnOK = true
-		logutil.Info("executil: flatpak-spawn --host available commands will execute on the host")
-	})
-	return hostSpawnOK
-}
-
-// HostExec runs a command on the host via flatpak-spawn --host and returns its
-// stdout.  Returns an error when host spawn is unavailable or the command fails.
-func HostExec(ctx context.Context, args ...string) ([]byte, error) {
-	if !HostSpawnAvailable(ctx) {
-		return nil, errHostSpawnUnavailable
-	}
-	full := make([]string, 0, 2+len(args))
-	full = append(full, hostSpawnBin, "--host")
-	full = append(full, args...)
-	//nolint:gosec // Host discovery hand-crafted.
-	return exec.CommandContext(ctx, full[0], full[1:]...).Output()
-}
-
 // PrependHostSpawn wraps args with ["flatpak-spawn","--host",...] when host
 // spawn is available.  Returns the original slice unchanged otherwise.
 // The second return value indicates whether wrapping was applied.
@@ -203,6 +145,64 @@ func ResolveHostAutoShell(ctx context.Context) (SelectedShell, bool) {
 	}
 
 	return SelectedShell{}, false
+}
+
+// HostExec runs a command on the host via flatpak-spawn --host and returns its
+// stdout.  Returns an error when host spawn is unavailable or the command fails.
+func HostExec(ctx context.Context, args ...string) ([]byte, error) {
+	if !HostSpawnAvailable(ctx) {
+		return nil, errHostSpawnUnavailable
+	}
+	full := make([]string, 0, 2+len(args))
+	full = append(full, hostSpawnBin, "--host")
+	full = append(full, args...)
+	//nolint:gosec // Host discovery hand-crafted.
+	return exec.CommandContext(ctx, full[0], full[1:]...).Output()
+}
+
+// HostSpawnAvailable reports whether flatpak-spawn --host can be used to run
+// commands on the host.  Returns false when not inside Flatpak or the probe
+// command fails.  The result is cached after the first probe.
+func HostSpawnAvailable(ctx context.Context) bool {
+	if !IsFlatpak() {
+		return false
+	}
+	hostSpawnProbeOnce.Do(func() {
+		p, err := exec.LookPath("flatpak-spawn")
+		if err != nil {
+			logutil.Warn("executil: flatpak-spawn not found: host commands will run inside the sandbox", "err", err)
+			return
+		}
+		hostSpawnBin = p
+
+		ctxTimed, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		if err := exec.CommandContext(ctxTimed, p, "--host", "true").Run(); err != nil {
+			logutil.Warn(
+				"executil: flatpak-spawn --host probe failed: ensure --talk-name=org.freedesktop.Flatpak is in finish-args",
+				"err",
+				err,
+			)
+			return
+		}
+		hostSpawnOK = true
+		logutil.Info("executil: flatpak-spawn --host available commands will execute on the host")
+	})
+	return hostSpawnOK
+}
+
+// IsFlatpak reports whether the current process runs inside a Flatpak sandbox.
+// The result is cached after the first call.
+func IsFlatpak() bool {
+	flatpakDetectOnce.Do(func() {
+		_, err := os.Stat("/.flatpak-info")
+		flatpakDetected = err == nil
+		if flatpakDetected {
+			logutil.Info("executil: Flatpak sandbox detected")
+		}
+	})
+	return flatpakDetected
 }
 
 // hostShellFromPath extracts a SelectedShell from a host shell absolute path.
