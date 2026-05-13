@@ -25,8 +25,23 @@ func (h *processGroupHandle) close() {
 }
 
 func configureProcessGroup(cmd *exec.Cmd) {
-	// Put the child in its own process group so we can kill the whole tree.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Use Setsid (new session) rather than Setpgid (new process group only).
+	//
+	// Both approaches make PGID == child PID so kill(-child_pid, sig) reaches
+	// the entire process tree.  Setsid additionally detaches from any
+	// controlling terminal.
+	//
+	// Why this matters: with Setpgid the child remains in the parent's session.
+	// If the parent has a controlling terminal the child is a background process
+	// group; interactive shells (zsh/bash invoked with -i during bootstrap to
+	// source .zshrc/.bashrc) call tcsetpgrp() to manage job control.  The kernel
+	// delivers SIGTTOU to a background process that attempts tcsetpgrp(), which
+	// stops the shell by default.  The bootstrap timeout then fires, SIGKILL is
+	// sent, and RunManagedCombinedOutput returns "signal: killed".
+	//
+	// With Setsid the new session has no controlling terminal; tcgetpgrp()
+	// returns ENOTTY so the shell disables job control and runs normally.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }
 
 func killProcessGroup(cmd *exec.Cmd) {

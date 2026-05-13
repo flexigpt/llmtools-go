@@ -135,21 +135,21 @@ func bootstrapCommandArgs(sel executil.SelectedShell) ([]string, error) {
 	switch sel.Name {
 	case ShellNameBash, ShellNameZsh:
 		cmd := fmt.Sprintf(
-			"printf '%%s\\n' '%s'; command env; printf '%%s\\n' '%s'",
+			"printf '%%s\\n' '%s'; env; printf '%%s\\n' '%s'",
 			bootstrapEnvBeginMarker,
 			bootstrapEnvEndMarker,
 		)
 		return []string{sel.Path, "-lic", cmd}, nil
 	case ShellNameFish:
 		cmd := fmt.Sprintf(
-			"printf '%%s\\n' '%s'; command env; printf '%%s\\n' '%s'",
+			"printf '%%s\\n' '%s'; env; printf '%%s\\n' '%s'",
 			bootstrapEnvBeginMarker,
 			bootstrapEnvEndMarker,
 		)
 		return []string{sel.Path, "-l", "-i", "-c", cmd}, nil
 	case ShellNameSh, ShellNameDash:
 		cmd := fmt.Sprintf(
-			"printf '%%s\\n' '%s'; command env; printf '%%s\\n' '%s'",
+			"printf '%%s\\n' '%s'; env; printf '%%s\\n' '%s'",
 			bootstrapEnvBeginMarker,
 			bootstrapEnvEndMarker,
 		)
@@ -159,7 +159,7 @@ func bootstrapCommandArgs(sel executil.SelectedShell) ([]string, error) {
 		return []string{sel.Path, "-c", cmd}, nil
 	case ShellNameKsh:
 		cmd := fmt.Sprintf(
-			"printf '%%s\\n' '%s'; command env; printf '%%s\\n' '%s'",
+			"printf '%%s\\n' '%s'; env; printf '%%s\\n' '%s'",
 			bootstrapEnvBeginMarker,
 			bootstrapEnvEndMarker,
 		)

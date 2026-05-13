@@ -24,7 +24,7 @@ func TestUnixSpecific_ProcessGroupAndExitCodeHelpers(t *testing.T) {
 		t.Skip("unix-specific")
 	}
 
-	// "configureProcessGroup" should set Setpgid=true.
+	// "configureProcessGroup" should populate SysProcAttr (Setsid=true on Unix).
 	cmd := exec.CommandContext(t.Context(), "sh", "-c", "exit 0")
 	configureProcessGroup(cmd)
 	if cmd.SysProcAttr == nil {

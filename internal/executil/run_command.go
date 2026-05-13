@@ -65,8 +65,6 @@ func RunOneShellCommand(
 			return ShellCommandExecResult{}, prepErr
 		}
 
-		cmd.Stdout = stdoutW
-		cmd.Stderr = stderrW
 		start = time.Now()
 		runErr = cmd.Start()
 	}
@@ -200,13 +198,10 @@ func (s *managedCommandState) cancel(cmd *exec.Cmd) error {
 	s.mu.Lock()
 	s.cancelled = true
 	pg := s.pg
-	if pg != nil {
-		err := pg.terminate(cmd)
-		s.mu.Unlock()
-		return err
-	}
 	s.mu.Unlock()
-
+	if pg != nil {
+		return pg.terminate(cmd)
+	}
 	killProcessGroup(cmd)
 	return nil
 }
