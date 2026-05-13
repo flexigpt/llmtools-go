@@ -137,6 +137,17 @@ func (sess *ShellSession) GetEffectiveEnvWithBase(baseEnv, overrides map[string]
 		}
 	}
 
+	// Apply platform-specific fresh environment overlays.
+	//
+	// Windows:
+	//   Reads Machine/User env from registry so MSI-installed tools become
+	//   visible without restarting the assistant process.
+	//
+	// macOS:
+	//   Reads /etc/paths and /etc/paths.d so installer-added PATH entries become
+	//   visible without recreating ExecTool.
+	applyPlatformEnvOverlay(envMap)
+
 	// Then session env.
 	if sess != nil {
 		sess.mu.RLock()

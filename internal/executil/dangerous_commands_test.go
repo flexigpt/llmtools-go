@@ -20,7 +20,6 @@ const (
 	dangerousDiskpartSubstr       = "diskpart"
 	dangerousShutdownSubstr       = "shutdown"
 
-	dangerousEchoHi              = "echo hi"
 	dangerousForkBombClassicCmd  = ":(){ :|:& };:"
 	dangerousBackgroundSleepCmd  = "sleep 1 &"
 	dangerousRmRfRootCmd         = "rm -rf /"
