@@ -408,6 +408,62 @@ func runScript(
 
 	scriptArg := runScriptPathArgForShell(sel.Name, scriptAbs)
 
+	// On Windows, RunScriptModeDirect with ShellNameCmd (.cmd/.bat files) must
+	// bypass CommandFromArgv.  The normal path double-quotes the script path
+	// inside the /c command string; exec.Command's EscapeArg then escapes those
+	// double-quotes as \", causing cmd.exe to see \"C:\path\s.cmd\" and fail.
+	//
+	// RunOneCmdBatchScript passes the path and args as separate exec arguments,
+	// so EscapeArg applies exactly one layer of quoting – which is what cmd.exe
+	// expects from its own command-line parser.
+	if runtime.GOOS == toolutil.GOOSWindows &&
+		sel.Name == ShellNameCmd &&
+		interp.Mode == RunScriptModeDirect {
+
+		execPol := mergeExecutionPolicy(defaultExecPol, pol.ExecutionPolicy)
+		timeout := effectiveTimeout(execPol)
+		maxOut := effectiveMaxOutputBytes(execPol)
+		maxCmdLen := effectiveMaxCommandLength(execPol)
+
+		// Build a plain check string for the safety/blocklist check.
+		checkStr := scriptAbs
+		if len(args.Args) > 0 {
+			checkStr += " " + strings.Join(args.Args, " ")
+		}
+		if maxCmdLen > 0 && len(checkStr) > maxCmdLen {
+			return nil, fmt.Errorf(
+				"constructed command too long (%d bytes; max %d)",
+				len(checkStr), maxCmdLen,
+			)
+		}
+		if err := executil.RejectDangerousCommand(
+			checkStr, sel.Path, sel.Name, blocked, !execPol.AllowDangerous,
+		); err != nil {
+			return nil, err
+		}
+
+		res, runErr := executil.RunOneCmdBatchScript(
+			ctx, sel, scriptAbs, args.Args, workdirAbs, env, timeout, maxOut,
+		)
+		if runErr != nil {
+			return &RunScriptOut{ //nolint:nilerr // Deliberate exitcode conversion.
+				Path:     scriptAbs,
+				ExitCode: 127,
+				Stderr:   runErr.Error(),
+			}, nil
+		}
+		return &RunScriptOut{
+			Path:            scriptAbs,
+			ExitCode:        res.ExitCode,
+			Stdout:          res.Stdout,
+			Stderr:          res.Stderr,
+			TimedOut:        res.TimedOut,
+			DurationMS:      res.DurationMS,
+			StdoutTruncated: res.StdoutTruncated,
+			StderrTruncated: res.StderrTruncated,
+		}, nil
+	}
+
 	// Build argv based on mode.
 	var argv []string
 	switch interp.Mode {

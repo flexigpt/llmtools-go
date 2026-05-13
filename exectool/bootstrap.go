@@ -173,7 +173,7 @@ func bootstrapCommandArgs(sel executil.SelectedShell) ([]string, error) {
 		return []string{sel.Path, "-NoLogo", "-NonInteractive", "-Command", cmd}, nil
 	case ShellNameCmd:
 		cmd := fmt.Sprintf("echo %s & set & echo %s", bootstrapEnvBeginMarker, bootstrapEnvEndMarker)
-		return []string{sel.Path, "/d", "/s", "/c", cmd}, nil
+		return []string{sel.Path, "/d", "/s", "/v:off", "/c", cmd}, nil
 	default:
 		return nil, fmt.Errorf("unsupported shell for bootstrap: %s", sel.Name)
 	}

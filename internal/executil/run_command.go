@@ -7,6 +7,7 @@ import (
 	"io"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,118 @@ import (
 )
 
 const managedCommandWaitDelay = 5 * time.Second
+
+// RunOneCmdBatchScript executes a Windows batch script (.cmd or .bat) via
+// cmd.exe, passing the script path and every argument as a SEPARATE argument
+// to exec.Command rather than embedding them in a /c command string.
+//
+// Background: the normal RunOneShellCommand path calls CommandFromArgv for the
+// cmd dialect, which wraps the script path in cmd-style double-quotes
+// ("C:\path\s.cmd").  When exec.Command (via syscall.EscapeArg) receives a
+// string that already contains '"' it escapes them as \", producing "\"C:\path\s.cmd\"" in the raw Windows process
+// command line. "cmd.exe" with /s strips the outer pair of double-quotes, leaving the literal
+// \"C:\path\s.cmd\" which it cannot resolve to a file.
+//
+// By passing scriptPath and scriptArgs as separate exec.Command arguments,
+// each is handled independently by EscapeArg:
+//
+//   - A path without spaces is left unchanged → cmd.exe sees it directly.
+//   - A path with spaces is wrapped in a single "…" → without /s, Windows
+//     condition 1 (exactly two quotes, whitespace between, points at a
+//     real executable) preserves the quotes and cmd.exe resolves the path.
+//
+// Known limitation: a path-with-spaces combined with at least one
+// arg-with-spaces produces four or more quote characters in the cmd.exe
+// command line, causing condition 1 to fail and condition 2 (strip first/last
+// quote) to garble the command.  This edge case requires SysProcAttr.CmdLine
+// construction to fix correctly and is left for a future change.
+func RunOneCmdBatchScript(
+	parent context.Context,
+	cmdShell SelectedShell,
+	scriptPath string,
+	scriptArgs []string,
+	workdir string,
+	env []string,
+	timeout time.Duration,
+	maxOut int64,
+) (ShellCommandExecResult, error) {
+	ctx := parent
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(parent, timeout)
+		defer cancel()
+	}
+
+	// "cmd.exe" /d /v:off /c <scriptPath> [scriptArgs...]
+	//     /d  – disable AutoRun registry keys,
+	//     /v:off – disable delayed variable expansion (prevents !VAR! surprises),
+	//     /c  – run command then exit
+	// NO /s: without /s, Windows condition 1 applies for paths with spaces
+	//         (quotes are preserved when there are exactly two quote chars,
+	//          whitespace between them, and the string names a real file).
+	baseArgs := make([]string, 0, 5+len(scriptArgs))
+	baseArgs = append(baseArgs, cmdShell.Path, "/d", "/v:off", "/c", scriptPath)
+	baseArgs = append(baseArgs, scriptArgs...)
+
+	execArgs := baseArgs
+	execEnv := env
+	useHostSpawn := HostSpawnAvailable(ctx)
+	if useHostSpawn {
+		execArgs = buildHostSpawnArgs(baseArgs, filterEnvForHostSpawn(env), workdir)
+		execEnv = nil
+	}
+
+	stdoutW := newCappedWriter(maxOut)
+	stderrW := newCappedWriter(maxOut)
+	cmd, state, prepErr := prepareManagedCommand(ctx, execArgs, workdir, execEnv, stdoutW, stderrW)
+	if prepErr != nil {
+		return ShellCommandExecResult{}, prepErr
+	}
+
+	start := time.Now()
+	runErr := cmd.Start()
+	if runErr != nil && useHostSpawn {
+		logutil.WarnContext(ctx, "executil: host-spawn start failed; retrying direct", "err", runErr)
+		stdoutW = newCappedWriter(maxOut)
+		stderrW = newCappedWriter(maxOut)
+		cmd, state, prepErr = prepareManagedCommand(ctx, baseArgs, workdir, env, stdoutW, stderrW)
+		if prepErr != nil {
+			return ShellCommandExecResult{}, prepErr
+		}
+		start = time.Now()
+		runErr = cmd.Start()
+	}
+	if runErr != nil {
+		return ShellCommandExecResult{}, runErr
+	}
+
+	state.afterStart(ctx, cmd)
+	defer state.close()
+
+	waitErr := cmd.Wait()
+	dur := time.Since(start)
+	timedOut := state.wasCancelled() && errors.Is(ctx.Err(), context.DeadlineExceeded)
+	exitCode := exitCodeFromWait(waitErr, timedOut)
+
+	displayCmd := scriptPath
+	if len(scriptArgs) > 0 {
+		displayCmd += " " + strings.Join(scriptArgs, " ")
+	}
+
+	return ShellCommandExecResult{
+		Command:         displayCmd,
+		WorkDir:         workdir,
+		Shell:           cmdShell.Name,
+		ShellPath:       cmdShell.Path,
+		ExitCode:        exitCode,
+		TimedOut:        timedOut,
+		DurationMS:      dur.Milliseconds(),
+		Stdout:          safeUTF8(stdoutW.Bytes()),
+		Stderr:          safeUTF8(stderrW.Bytes()),
+		StdoutTruncated: stdoutW.Truncated(),
+		StderrTruncated: stderrW.Truncated(),
+	}, nil
+}
 
 func RunOneShellCommand(
 	parent context.Context,
