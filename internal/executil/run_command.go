@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"math"
+	"io"
 	"os/exec"
 	"sync"
 	"time"
 
 	"github.com/flexigpt/llmtools-go/internal/logutil"
 )
+
+const managedCommandWaitDelay = 5 * time.Second
 
 func RunOneShellCommand(
 	parent context.Context,
@@ -39,29 +41,28 @@ func RunOneShellCommand(
 		execEnv = nil // env is forwarded via --env= flags to the host command
 	}
 
-	cmd := exec.CommandContext(ctx, execArgs[0], execArgs[1:]...) //nolint:gosec // Exec shell command.
-
-	cmd.Dir = workdir
-	cmd.Env = execEnv
-
-	configureProcessGroup(cmd)
-
 	stdoutW := newCappedWriter(maxOut)
 	stderrW := newCappedWriter(maxOut)
-	cmd.Stdout = stdoutW
-	cmd.Stderr = stderrW
+	cmd, state, prepErr := prepareManagedCommand(ctx, execArgs, workdir, execEnv, stdoutW, stderrW)
+	if prepErr != nil {
+		return ShellCommandExecResult{}, prepErr
+	}
 
 	start := time.Now()
 	runErr := cmd.Start()
+
 	// Fallback: if host-spawn itself failed to start, retry direct execution.
 	if runErr != nil && useHostSpawn {
 		logutil.WarnContext(ctx, "executil: host-spawn start failed; retrying with direct execution", "err", runErr)
-		cmd = exec.CommandContext(ctx, shellArgs[0], shellArgs[1:]...) //nolint:gosec // Fallback direct.
-		cmd.Dir = workdir
-		cmd.Env = env
-		configureProcessGroup(cmd)
+
 		stdoutW = newCappedWriter(maxOut)
 		stderrW = newCappedWriter(maxOut)
+
+		cmd, state, prepErr = prepareManagedCommand(ctx, shellArgs, workdir, env, stdoutW, stderrW)
+		if prepErr != nil {
+			return ShellCommandExecResult{}, prepErr
+		}
+
 		cmd.Stdout = stdoutW
 		cmd.Stderr = stderrW
 		start = time.Now()
@@ -72,33 +73,13 @@ func RunOneShellCommand(
 		return ShellCommandExecResult{}, runErr
 	}
 
-	// Wait in a goroutine so we can react to ctx cancellation/timeouts.
-	waitCh := make(chan error, 1)
-	go func() {
-		waitCh <- cmd.Wait()
-	}()
+	state.afterStart(ctx, cmd)
+	defer state.close()
 
-	killedByCtx := false
-	var waitErr error
-
-	select {
-	case waitErr = <-waitCh:
-		// Process completed before context cancellation/timeout.
-	case <-ctx.Done():
-		// If process already finished, do not kill.
-		select {
-		case waitErr = <-waitCh:
-			// Finished.
-		default:
-			killedByCtx = true
-			killProcessGroup(cmd)
-			waitErr = <-waitCh
-		}
-	}
+	waitErr := cmd.Wait()
 	dur := time.Since(start)
 
-	// Only mark timed out if we actually killed because ctx fired due to deadline.
-	timedOut := killedByCtx && errors.Is(ctx.Err(), context.DeadlineExceeded)
+	timedOut := state.wasCancelled() && errors.Is(ctx.Err(), context.DeadlineExceeded)
 
 	exitCode := exitCodeFromWait(waitErr, timedOut)
 
@@ -120,8 +101,133 @@ func RunOneShellCommand(
 	}, nil
 }
 
+// RunManagedCombinedOutput is like exec.Cmd.CombinedOutput, but uses the same
+// process-tree isolation, hidden-window behavior, cancellation, and WaitDelay
+// semantics as RunOneShellCommand.
+func RunManagedCombinedOutput(ctx context.Context, args []string, workdir string, env []string) ([]byte, error) {
+	var out lockedBuffer
+	cmd, state, err := prepareManagedCommand(ctx, args, workdir, env, &out, &out)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	state.afterStart(ctx, cmd)
+	defer state.close()
+
+	err = cmd.Wait()
+	return out.Bytes(), err
+}
+
+type managedCommandState struct {
+	mu        sync.Mutex
+	pg        *processGroupHandle
+	cancelled bool
+}
+
+func prepareManagedCommand(
+	ctx context.Context,
+	args []string,
+	workdir string,
+	env []string,
+	stdout io.Writer,
+	stderr io.Writer,
+) (*exec.Cmd, *managedCommandState, error) {
+	if len(args) == 0 {
+		return nil, nil, errors.New("empty command args")
+	}
+
+	//nolint:gosec // The caller intentionally constructs the shell/process invocation.
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.Dir = workdir
+	cmd.Env = env
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	configureProcessGroup(cmd)
+
+	state := &managedCommandState{}
+
+	// Important: override CommandContext's default Cancel.
+	// The default kills only the immediate shell process. On Windows this can
+	// orphan grandchildren such as go.exe/node.exe, and those grandchildren can
+	// keep inherited stdout/stderr pipe handles open, making Wait hang.
+	cmd.Cancel = func() error {
+		return state.cancel(cmd)
+	}
+
+	// Bound Wait if descendants keep inherited pipe handles open.
+	cmd.WaitDelay = managedCommandWaitDelay
+
+	return cmd, state, nil
+}
+
+func (s *managedCommandState) afterStart(ctx context.Context, cmd *exec.Cmd) {
+	pg, err := afterProcessStart(cmd)
+	if err != nil {
+		logutil.WarnContext(
+			ctx,
+			"executil: process-tree isolation setup failed; using fallback cancellation",
+			"err",
+			err,
+		)
+	}
+	if pg == nil {
+		return
+	}
+
+	s.mu.Lock()
+	if s.pg != nil {
+		s.mu.Unlock()
+		pg.close()
+		return
+	}
+	s.pg = pg
+	alreadyCancelled := s.cancelled
+	s.mu.Unlock()
+
+	if alreadyCancelled {
+		_ = s.cancel(cmd)
+	}
+}
+
+func (s *managedCommandState) cancel(cmd *exec.Cmd) error {
+	s.mu.Lock()
+	s.cancelled = true
+	pg := s.pg
+	if pg != nil {
+		err := pg.terminate(cmd)
+		s.mu.Unlock()
+		return err
+	}
+	s.mu.Unlock()
+
+	killProcessGroup(cmd)
+	return nil
+}
+
+func (s *managedCommandState) close() {
+	s.mu.Lock()
+	pg := s.pg
+	s.pg = nil
+	s.mu.Unlock()
+
+	if pg != nil {
+		pg.close()
+	}
+}
+
+func (s *managedCommandState) wasCancelled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cancelled
+}
+
 func exitCodeFromWait(waitErr error, timedOut bool) int {
-	if timedOut && waitErr != nil {
+	if timedOut {
 		return 124 // conventional timeout exit code
 	}
 	if waitErr == nil {
@@ -133,105 +239,6 @@ func exitCodeFromWait(waitErr error, timedOut bool) int {
 	}
 
 	return 127 // Spawn/other failure
-}
-
-type cappedWriter struct {
-	mu        sync.Mutex
-	capBytes  int
-	buf       []byte // fixed size capBytes
-	start     int    // ring start
-	n         int    // number of valid bytes in ring
-	total     int64
-	truncated bool
-}
-
-func newCappedWriter(capBytes int64) *cappedWriter {
-	if capBytes < MinOutputBytes {
-		capBytes = MinOutputBytes
-	}
-	if capBytes > HardMaxOutputBytes {
-		capBytes = HardMaxOutputBytes
-	}
-
-	// Avoid int overflow / huge allocations even if misconfigured.
-	if capBytes > int64(math.MaxInt) {
-		capBytes = int64(math.MaxInt)
-	}
-	cb := int(capBytes)
-	return &cappedWriter{
-		capBytes: cb,
-		buf:      make([]byte, cb),
-	}
-}
-
-func (w *cappedWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.total += int64(len(p))
-
-	if len(p) == 0 || w.capBytes <= 0 {
-		return len(p), nil
-	}
-
-	// Tail-capture semantics:
-	// Keep the last capBytes bytes written across all writes.
-	if len(p) >= w.capBytes {
-		copy(w.buf, p[len(p)-w.capBytes:])
-		w.start = 0
-		w.n = w.capBytes
-		w.truncated = true
-		return len(p), nil
-	}
-
-	// If we would exceed capacity, drop from the front (advance start).
-	overflow := (w.n + len(p)) - w.capBytes
-	if overflow > 0 {
-		w.start = (w.start + overflow) % w.capBytes
-		w.n -= overflow
-		w.truncated = true
-	}
-
-	// Append at end position.
-	end := (w.start + w.n) % w.capBytes
-	// Copy with wrap.
-	first := min(len(p), w.capBytes-end)
-	copy(w.buf[end:end+first], p[:first])
-	if first < len(p) {
-		copy(w.buf[0:len(p)-first], p[first:])
-	}
-	w.n += len(p)
-	return len(p), nil
-}
-
-func (w *cappedWriter) Bytes() []byte {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.n == 0 {
-		return nil
-	}
-	out := make([]byte, w.n)
-	if w.start+w.n <= w.capBytes {
-		copy(out, w.buf[w.start:w.start+w.n])
-		return out
-	}
-	// Wrapped.
-	n1 := w.capBytes - w.start
-	copy(out, w.buf[w.start:])
-	copy(out[n1:], w.buf[:w.n-n1])
-	return out
-}
-
-func (w *cappedWriter) TotalBytes() int64 {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.total
-}
-
-func (w *cappedWriter) Truncated() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.truncated
 }
 
 func safeUTF8(b []byte) string {

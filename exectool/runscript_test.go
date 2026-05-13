@@ -102,6 +102,7 @@ func TestLookupInterpreter(t *testing.T) {
 }
 
 func TestRunScript_ValidationsAndResolution(t *testing.T) {
+	t.Parallel()
 	td := t.TempDir()
 	outside := t.TempDir()
 
@@ -391,6 +392,7 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			et, err := NewExecTool(tc.opts...)
 			if err != nil {
 				if len(tc.wantErrSubs) > 0 {

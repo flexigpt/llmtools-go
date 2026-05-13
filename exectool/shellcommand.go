@@ -495,12 +495,9 @@ func resolveShell(ctx context.Context, name string) (executil.SelectedShell, err
 		}
 		return executil.SelectedShell{Name: ShellNamePwsh, Path: p}, nil
 	case ShellNamePowershell:
-		if p, _ := exec.LookPath("pwsh"); p != "" {
-			return executil.SelectedShell{Name: ShellNamePwsh, Path: p}, nil
-		}
 		p, err := exec.LookPath("powershell")
 		if err != nil {
-			return executil.SelectedShell{}, errors.New("powershell requested but neither pwsh nor powershell found")
+			return executil.SelectedShell{}, errors.New("powershell requested but not found")
 		}
 		return executil.SelectedShell{Name: ShellNamePowershell, Path: p}, nil
 	case ShellNameCmd:

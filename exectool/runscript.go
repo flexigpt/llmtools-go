@@ -166,9 +166,11 @@ func (p *RunScriptPolicy) Clone() *RunScriptPolicy {
 func DefaultRunScriptPolicy() RunScriptPolicy {
 	pyCmd := "python3"
 	pyShell := ShellNameSh
+	psShell := ShellNamePwsh
 	if runtime.GOOS == toolutil.GOOSWindows {
 		pyCmd = "python"
 		pyShell = ShellNamePowershell
+		psShell = ShellNamePowershell
 	}
 	return RunScriptPolicy{
 		AllowedExtensions: []string{
@@ -189,7 +191,7 @@ func DefaultRunScriptPolicy() RunScriptPolicy {
 			string(ioutil.ExtDash):  {Shell: ShellNameDash, Mode: RunScriptModeShell},
 
 			// PowerShell: execute the script directly via PowerShell dialect ("& 'script.ps1' ...").
-			string(ioutil.ExtPS1): {Shell: ShellNamePowershell, Mode: RunScriptModeDirect},
+			string(ioutil.ExtPS1): {Shell: psShell, Mode: RunScriptModeDirect},
 
 			// Python: interpreter-based.
 			string(ioutil.ExtPY): {Shell: pyShell, Mode: RunScriptModeInterpreter, Command: pyCmd},

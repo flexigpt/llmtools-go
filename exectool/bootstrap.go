@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"runtime"
 	"strings"
 
@@ -56,28 +55,34 @@ func bootstrapBaseEnv(ctx context.Context, sel executil.SelectedShell) (map[stri
 	// the user's real login shell, PATH, and tool-manager vars are captured.
 	if executil.HostSpawnAvailable(ctx) {
 		hostArgs, _ := executil.PrependHostSpawn(ctx, args)
-		//nolint:gosec // Bootstrap hand-crafted.
-		cmd := exec.CommandContext(ctx, hostArgs[0], hostArgs[1:]...)
-		if out, err := cmd.CombinedOutput(); err == nil {
-			if env, parseErr := parseAndFilterBootstrapEnv(string(out)); parseErr == nil {
-				return env, nil
-			} else {
+		out, err := executil.RunManagedCombinedOutput(ctx, hostArgs, "", nil)
+		if env, parseErr := parseAndFilterBootstrapEnv(string(out)); parseErr == nil {
+			if err != nil {
+				logutil.WarnContext(ctx, "exectool: bootstrap via host-spawn returned error but env parsed", "err", err)
+			}
+			return env, nil
+		} else {
+			if err == nil {
 				logutil.WarnContext(
 					ctx,
 					"exectool: bootstrap parse via host-spawn failed: retrying direct",
 					"err",
 					parseErr,
 				)
+			} else {
+				logutil.WarnContext(ctx, "exectool: bootstrap exec via host-spawn failed: retrying direct", "err", err)
 			}
-		} else {
-			logutil.WarnContext(ctx, "exectool: bootstrap exec via host-spawn failed: retrying direct", "err", err)
 		}
 	}
 
 	// Direct execution (non-Flatpak, or host-spawn fallback).
-	//nolint:gosec // Bootstrap hand crafted.
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	out, err := cmd.CombinedOutput()
+	out, err := executil.RunManagedCombinedOutput(ctx, args, "", nil)
+	if env, parseErr := parseAndFilterBootstrapEnv(string(out)); parseErr == nil {
+		if err != nil {
+			logutil.WarnContext(ctx, "exectool: bootstrap returned error but env parsed", "err", err)
+		}
+		return env, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap env via %s failed: %w", sel.Name, err)
 	}
@@ -131,7 +136,7 @@ func bootstrapCommandArgs(sel executil.SelectedShell) ([]string, error) {
 			bootstrapEnvBeginMarker,
 			bootstrapEnvEndMarker,
 		)
-		return []string{sel.Path, "-NoLogo", "-Command", cmd}, nil
+		return []string{sel.Path, "-NoLogo", "-NonInteractive", "-Command", cmd}, nil
 	case ShellNameCmd:
 		cmd := fmt.Sprintf("echo %s & set & echo %s", bootstrapEnvBeginMarker, bootstrapEnvEndMarker)
 		return []string{sel.Path, "/d", "/s", "/c", cmd}, nil
@@ -217,8 +222,31 @@ func filterBootstrappedEnv(raw map[string]string) map[string]string {
 			"CONDA_PREFIX":            {},
 			"CONDA_DEFAULT_ENV":       {},
 			"CONDA_EXE":               {},
+			"GOPROXY":                 {},
+			"GOPRIVATE":               {},
+			"GONOPROXY":               {},
+			"GONOSUMDB":               {},
+			"GOSUMDB":                 {},
+			"GOFLAGS":                 {},
+			"GOTOOLCHAIN":             {},
+			"GOINSECURE":              {},
+			"GOVCS":                   {},
+			"HTTP_PROXY":              {},
+			"HTTPS_PROXY":             {},
+			"NO_PROXY":                {},
+			"ALL_PROXY":               {},
+			"GIT_TERMINAL_PROMPT":     {},
+			"GIT_ASKPASS":             {},
+			"GIT_SSH":                 {},
+			"GIT_SSH_COMMAND":         {},
+			"SSH_AUTH_SOCK":           {},
+			"SSL_CERT_FILE":           {},
+			"SSL_CERT_DIR":            {},
 		}
-		prefixes := []string{"ASDF_", "PYENV_", "RBENV_", "NVM_", "VOLTA_", "SDKMAN_", "CONDA_"}
+		prefixes := []string{
+			"ASDF_", "PYENV_", "RBENV_", "NVM_", "VOLTA_", "SDKMAN_", "CONDA_",
+			"GIT_",
+		}
 		for k, v := range raw {
 			ck := strings.ToUpper(strings.TrimSpace(k))
 			if _, ok := exact[ck]; ok || hasAnyPrefix(ck, prefixes) {
@@ -229,36 +257,63 @@ func filterBootstrappedEnv(raw map[string]string) map[string]string {
 	}
 
 	exact := map[string]struct{}{
-		"PATH":              {},
-		"HOME":              {},
-		"USER":              {},
-		"LOGNAME":           {},
-		"SHELL":             {},
-		"TMPDIR":            {},
-		"TMP":               {},
-		"TEMP":              {},
-		"LANG":              {},
-		"LC_ALL":            {},
-		"LC_CTYPE":          {},
-		"TERM":              {},
-		"COLORTERM":         {},
-		"XDG_CONFIG_HOME":   {},
-		"XDG_CACHE_HOME":    {},
-		"XDG_DATA_HOME":     {},
-		"GOBIN":             {},
-		"GOPATH":            {},
-		"GOROOT":            {},
-		"JAVA_HOME":         {},
-		"PNPM_HOME":         {},
-		"BUN_INSTALL":       {},
-		"CARGO_HOME":        {},
-		"RUSTUP_HOME":       {},
-		"VIRTUAL_ENV":       {},
-		"CONDA_PREFIX":      {},
-		"CONDA_DEFAULT_ENV": {},
-		"CONDA_EXE":         {},
+		"PATH":                {},
+		"HOME":                {},
+		"USER":                {},
+		"LOGNAME":             {},
+		"SHELL":               {},
+		"TMPDIR":              {},
+		"TMP":                 {},
+		"TEMP":                {},
+		"LANG":                {},
+		"LC_ALL":              {},
+		"LC_CTYPE":            {},
+		"TERM":                {},
+		"COLORTERM":           {},
+		"XDG_CONFIG_HOME":     {},
+		"XDG_CACHE_HOME":      {},
+		"XDG_DATA_HOME":       {},
+		"GOBIN":               {},
+		"GOPATH":              {},
+		"GOROOT":              {},
+		"JAVA_HOME":           {},
+		"PNPM_HOME":           {},
+		"BUN_INSTALL":         {},
+		"CARGO_HOME":          {},
+		"RUSTUP_HOME":         {},
+		"VIRTUAL_ENV":         {},
+		"CONDA_PREFIX":        {},
+		"CONDA_DEFAULT_ENV":   {},
+		"CONDA_EXE":           {},
+		"GOPROXY":             {},
+		"GOPRIVATE":           {},
+		"GONOPROXY":           {},
+		"GONOSUMDB":           {},
+		"GOSUMDB":             {},
+		"GOFLAGS":             {},
+		"GOTOOLCHAIN":         {},
+		"GOINSECURE":          {},
+		"GOVCS":               {},
+		"HTTP_PROXY":          {},
+		"HTTPS_PROXY":         {},
+		"NO_PROXY":            {},
+		"ALL_PROXY":           {},
+		"http_proxy":          {},
+		"https_proxy":         {},
+		"no_proxy":            {},
+		"all_proxy":           {},
+		"GIT_TERMINAL_PROMPT": {},
+		"GIT_ASKPASS":         {},
+		"GIT_SSH":             {},
+		"GIT_SSH_COMMAND":     {},
+		"SSH_AUTH_SOCK":       {},
+		"SSL_CERT_FILE":       {},
+		"SSL_CERT_DIR":        {},
 	}
-	prefixes := []string{"ASDF_", "PYENV_", "RBENV_", "NVM_", "VOLTA_", "SDKMAN_", "LC_", "CONDA_"}
+	prefixes := []string{
+		"ASDF_", "PYENV_", "RBENV_", "NVM_", "VOLTA_", "SDKMAN_", "LC_", "CONDA_",
+		"GIT_",
+	}
 	for k, v := range raw {
 		ck := strings.TrimSpace(k)
 		if _, ok := exact[ck]; ok || hasAnyPrefix(ck, prefixes) {

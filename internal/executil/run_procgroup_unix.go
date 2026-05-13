@@ -10,6 +10,20 @@ import (
 	"time"
 )
 
+type processGroupHandle struct{}
+
+func afterProcessStart(cmd *exec.Cmd) (*processGroupHandle, error) {
+	return &processGroupHandle{}, nil
+}
+
+func (h *processGroupHandle) terminate(cmd *exec.Cmd) error {
+	killProcessGroup(cmd)
+	return nil
+}
+
+func (h *processGroupHandle) close() {
+}
+
 func configureProcessGroup(cmd *exec.Cmd) {
 	// Put the child in its own process group so we can kill the whole tree.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
