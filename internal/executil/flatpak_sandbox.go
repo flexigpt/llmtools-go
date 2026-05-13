@@ -36,15 +36,30 @@ var (
 
 var errHostSpawnUnavailable = errors.New("host spawn not available")
 
-// PrependHostSpawn wraps args with ["flatpak-spawn","--host",...] when host
-// spawn is available.  Returns the original slice unchanged otherwise.
-// The second return value indicates whether wrapping was applied.
+// PrependHostSpawn wraps args with a robust flatpak-spawn invocation:
+//
+//	--host         run on host
+//	--watch-bus    host child is killed if the sandbox parent dies
+//	--directory=…  set a sane cwd on host (defaults to $HOME on host)
+//	--clear-env    do not leak sandbox env into host
+//	--env=KEY=VAL  forward a filtered subset (PATH-related, locale, etc.)
 func PrependHostSpawn(ctx context.Context, args []string) ([]string, bool) {
 	if !HostSpawnAvailable(ctx) || len(args) == 0 {
 		return args, false
 	}
-	out := make([]string, 0, 2+len(args))
-	out = append(out, hostSpawnBin, "--host")
+
+	envList := filterEnvForHostSpawn(os.Environ())
+
+	out := make([]string, 0, 6+len(envList)+len(args))
+	out = append(out, hostSpawnBin, "--host", "--watch-bus", "--clear-env")
+
+	if home := os.Getenv("HOME"); strings.TrimSpace(home) != "" {
+		out = append(out, "--directory="+home)
+	}
+	for _, kv := range envList {
+		out = append(out, "--env="+kv)
+	}
+
 	out = append(out, args...)
 	return out, true
 }
@@ -112,11 +127,20 @@ func isSandboxInternalVar(key string) bool {
 // flatpak-spawn --host.  Falls back through $SHELL, getent, and common
 // shell probes.
 func ResolveHostAutoShell(ctx context.Context) (SelectedShell, bool) {
-	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	if ctx == nil {
+		ctx = context.Background() //nolint:contextcheck // Need independent cancellations.
+	}
+	// Per-probe budget. Total budget is bounded by the caller's ctx; this
+	// prevents one slow probe from starving the fallbacks.
+	const perProbe = 1500 * time.Millisecond
 
+	hostExecBounded := func(args ...string) ([]byte, error) {
+		pctx, pcancel := context.WithTimeout(ctx, perProbe)
+		defer pcancel()
+		return HostExec(pctx, args...)
+	}
 	// 1. Host's $SHELL.
-	if out, err := HostExec(tctx, "sh", "-c", "echo $SHELL"); err == nil {
+	if out, err := hostExecBounded("sh", "-c", "echo $SHELL"); err == nil {
 		if sel, ok := hostShellFromPath(strings.TrimSpace(string(out))); ok {
 			return sel, true
 		}
@@ -126,7 +150,7 @@ func ResolveHostAutoShell(ctx context.Context) (SelectedShell, bool) {
 	if u, err := user.Current(); err == nil && u != nil {
 		username := strings.TrimSpace(u.Username)
 		if username != "" {
-			if out, err := HostExec(tctx, "getent", "passwd", username); err == nil {
+			if out, err := hostExecBounded("getent", "passwd", username); err == nil {
 				line := strings.TrimSpace(string(out))
 				parts := strings.Split(line, ":")
 				if len(parts) >= 7 {
@@ -140,7 +164,7 @@ func ResolveHostAutoShell(ctx context.Context) (SelectedShell, bool) {
 
 	// 3. Probe common shells on the host.
 	for _, name := range []string{"bash", "zsh", "sh"} {
-		if out, err := HostExec(tctx, "sh", "-c", "command -v "+name); err == nil {
+		if out, err := hostExecBounded("sh", "-c", "command -v "+name); err == nil {
 			if sel, ok := hostShellFromPath(strings.TrimSpace(string(out))); ok {
 				return sel, true
 			}
@@ -178,10 +202,11 @@ func HostSpawnAvailable(ctx context.Context) bool {
 		}
 		hostSpawnBin = p
 
-		ctxTimed, cancel := context.WithTimeout(ctx, 5*time.Second)
+		// Hard cap probe so it can never consume bootstrap budget.
+		ctxTimed, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		if err := exec.CommandContext(ctxTimed, p, "--host", "true").Run(); err != nil {
+		if err := exec.CommandContext(ctxTimed, p, "--host", "--watch-bus", "true").Run(); err != nil {
 			logutil.Warn(
 				"executil: flatpak-spawn --host probe failed: ensure --talk-name=org.freedesktop.Flatpak is in finish-args",
 				"err",

@@ -15,7 +15,10 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
-const defaultBootstrapTimeout = 10 * time.Second
+const (
+	defaultBootstrapDetectionTimeout = 3 * time.Second
+	defaultBootstrapEnvTimeout       = 8 * time.Second
+)
 
 // BootstrappedDefaults contains best-effort host-derived defaults suitable for ExecTool setup.
 type BootstrappedDefaults struct {
@@ -252,7 +255,7 @@ func (et *ExecTool) bootstrapUnsetDefaults() {
 		return
 	}
 
-	defs, err := BootstrapDefaults(context.Background())
+	defs, err := cachedBootstrapDefaultsForNewExecTool()
 	if err != nil && defs == nil {
 		return
 	}

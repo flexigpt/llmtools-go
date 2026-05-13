@@ -486,7 +486,8 @@ func TestRunScript_WindowsCmdScript(t *testing.T) {
 	td := t.TempDir()
 	scriptPath := filepath.Join(td, "hello.cmd")
 	body := "@echo off\r\n<nul set /p dummy=hello\r\nexit /b 0\r\n"
-	if err := os.WriteFile(scriptPath, []byte(body), 0o600); err != nil {
+	//nolint:gosec // Hand crafted.
+	if err := os.WriteFile(scriptPath, []byte(body), 0o700); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 

@@ -4,42 +4,66 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/flexigpt/llmtools-go/internal/executil"
 	"github.com/flexigpt/llmtools-go/internal/logutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
+var (
+	newExecToolBootstrapOnce sync.Once
+	newExecToolBootstrapDefs *BootstrappedDefaults
+	errNewExecToolBootstrap  error
+)
+
+func cachedBootstrapDefaultsForNewExecTool() (*BootstrappedDefaults, error) {
+	newExecToolBootstrapOnce.Do(func() {
+		newExecToolBootstrapDefs, errNewExecToolBootstrap = BootstrapDefaults(context.Background())
+	})
+	return cloneBootstrappedDefaults(newExecToolBootstrapDefs), errNewExecToolBootstrap
+}
+
+func cloneBootstrappedDefaults(in *BootstrappedDefaults) *BootstrappedDefaults {
+	if in == nil {
+		return nil
+	}
+	return &BootstrappedDefaults{
+		DefaultShell: in.DefaultShell,
+		BaseEnv:      maps.Clone(in.BaseEnv),
+	}
+}
+
 // BootstrapDefaults best-effort detects the preferred host shell and a narrow,
 // tool-useful base environment suitable for command/script execution.
-func BootstrapDefaults(ctx context.Context) (*BootstrappedDefaults, error) {
-	ctx, cancel := withBootstrapTimeout(ctx)
-	defer cancel()
+func BootstrapDefaults(
+	ctx context.Context, //nolint:contextcheck // Need independent cancellations.
+) (*BootstrappedDefaults, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-	sel, err := selectShell(ctx, ShellNameAuto)
+	// Shell detection has its own short budget so that a slow host probe
+	// cannot eat the env bootstrap budget.
+	detectCtx, detectCancel := context.WithTimeout(ctx, defaultBootstrapDetectionTimeout)
+	sel, err := selectShell(detectCtx, ShellNameAuto)
+	detectCancel()
 	if err != nil {
 		return nil, err
 	}
 
 	out := &BootstrappedDefaults{DefaultShell: sel.Name}
-	env, envErr := bootstrapBaseEnv(ctx, sel)
+	envCtx, envCancel := context.WithTimeout(ctx, defaultBootstrapEnvTimeout)
+	defer envCancel()
+	env, envErr := bootstrapBaseEnv(envCtx, sel)
 	if envErr != nil {
 		return out, envErr
 	}
 	out.BaseEnv = env
 	return out, nil
-}
-
-func withBootstrapTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if _, ok := ctx.Deadline(); ok {
-		return context.WithCancel(ctx)
-	}
-	return context.WithTimeout(ctx, defaultBootstrapTimeout)
 }
 
 func bootstrapBaseEnv(ctx context.Context, sel executil.SelectedShell) (map[string]string, error) {
