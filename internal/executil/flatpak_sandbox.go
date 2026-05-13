@@ -50,10 +50,13 @@ func PrependHostSpawn(ctx context.Context, args []string) ([]string, bool) {
 }
 
 // buildHostSpawnArgs builds a flatpak-spawn --host invocation with --env=
-// flags for every entry in envList (format: "KEY=VALUE").
-func buildHostSpawnArgs(cmdArgs, envList []string) []string {
-	out := make([]string, 0, 2+len(envList)+len(cmdArgs))
+// flags for every entry in envList (format: "KEY=VALUE") and a concrete host cwd.
+func buildHostSpawnArgs(cmdArgs, envList []string, workdir string) []string {
+	out := make([]string, 0, 3+len(envList)+len(cmdArgs))
 	out = append(out, hostSpawnBin, "--host")
+	if strings.TrimSpace(workdir) != "" {
+		out = append(out, "--directory="+workdir)
+	}
 	for _, kv := range envList {
 		out = append(out, "--env="+kv)
 	}

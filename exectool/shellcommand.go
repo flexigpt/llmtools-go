@@ -196,26 +196,23 @@ func shellCommand(
 		return nil, err
 	}
 
-	// Choose shell + path.
-	sel, err := selectShellWithDefault(ctx, args.Shell, tp.defaultShell)
+	// Choose shell + path using process + tool base env + platform overlay.
+	// Do not include per-call/session overrides here: command PATH overrides
+	// should affect commands inside the shell, not whether the wrapper shell can
+	// be found.
+	shellLookupEnv, shellEnvErr := executil.EffectiveEnvWithBase(tp.baseEnv, nil)
+	if shellEnvErr != nil {
+		shellLookupEnv = env
+	}
+	sel, err := selectShellWithDefaultEnv(ctx, args.Shell, tp.defaultShell, shellLookupEnv)
 	if err != nil {
 		return nil, err
 	}
 
-	// Persist session defaults if caller provided values.
-	if strings.TrimSpace(args.WorkDir) != "" {
-		sess.SetWorkDir(workdirAbs)
-	}
-	if err := sess.AddToEnv(args.Env); err != nil {
-		return nil, err
-	}
-
-	results := make([]ShellCommandExecResult, 0, len(cmds))
+	// Validate command strings and policy before mutating an existing session.
+	// Otherwise a rejected command can still persist WorkDir/Env changes.
+	checkedCmds := make([]string, 0, len(cmds))
 	for _, one := range cmds {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
 		command := strings.TrimSpace(one)
 		if command == "" {
 			continue
@@ -235,6 +232,26 @@ func shellCommand(
 			blocked,
 			!policy.AllowDangerous,
 		); err != nil {
+			return nil, err
+		}
+
+		checkedCmds = append(checkedCmds, command)
+	}
+	if len(checkedCmds) == 0 {
+		return nil, errors.New("commands is required")
+	}
+
+	// Persist session defaults if caller provided values.
+	if strings.TrimSpace(args.WorkDir) != "" {
+		sess.SetWorkDir(workdirAbs)
+	}
+	if err := sess.AddToEnv(args.Env); err != nil {
+		return nil, err
+	}
+
+	results := make([]ShellCommandExecResult, 0, len(cmds))
+	for _, command := range checkedCmds {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
@@ -286,6 +303,18 @@ func selectShell(ctx context.Context, requested ShellName) (executil.SelectedShe
 }
 
 func selectShellWithDefault(ctx context.Context, requested, defaultShell ShellName) (executil.SelectedShell, error) {
+	env, err := executil.EffectiveEnvWithBase(nil, nil)
+	if err != nil {
+		env = nil
+	}
+	return selectShellWithDefaultEnv(ctx, requested, defaultShell, env)
+}
+
+func selectShellWithDefaultEnv(
+	ctx context.Context,
+	requested, defaultShell ShellName,
+	env []string,
+) (executil.SelectedShell, error) {
 	r := strings.ToLower(strings.TrimSpace(string(requested)))
 	if r == "" || r == string(ShellNameAuto) {
 		d := strings.ToLower(strings.TrimSpace(string(defaultShell)))
@@ -297,33 +326,85 @@ func selectShellWithDefault(ctx context.Context, requested, defaultShell ShellNa
 	}
 
 	if r != string(ShellNameAuto) {
-		return resolveShell(ctx, r)
+		return resolveShell(ctx, r, env)
 	}
-	return resolveAutoShell(ctx)
+	return resolveAutoShell(ctx, env)
 }
 
-func resolveAutoShell(ctx context.Context) (executil.SelectedShell, error) {
+func resolveAutoShell(ctx context.Context, env []string) (executil.SelectedShell, error) {
 	if runtime.GOOS == toolutil.GOOSWindows {
-		return resolveWindowsAutoShell()
+		return resolveWindowsAutoShell(env)
 	}
-	return resolveUnixAutoShell(ctx)
+	return resolveUnixAutoShell(ctx, env)
 }
 
-func resolveWindowsAutoShell() (executil.SelectedShell, error) {
+func resolveWindowsAutoShell(env []string) (executil.SelectedShell, error) {
 	// Prefer pwsh, then Windows PowerShell, then cmd.
-	if p, _ := exec.LookPath("pwsh"); p != "" {
+	if p, _ := executil.LookPathInEnv("pwsh", env); p != "" {
 		return executil.SelectedShell{Name: ShellNamePwsh, Path: p}, nil
 	}
-	if p, _ := exec.LookPath("powershell"); p != "" {
+	if p, ok := resolveWindowsPowerShellPath(env); ok {
 		return executil.SelectedShell{Name: ShellNamePowershell, Path: p}, nil
 	}
-	if p, _ := exec.LookPath("cmd"); p != "" {
+	if p, ok := resolveWindowsCmdPath(env); ok {
 		return executil.SelectedShell{Name: ShellNameCmd, Path: p}, nil
 	}
 	return executil.SelectedShell{}, errors.New("no suitable shell found on windows (pwsh/powershell/cmd)")
 }
 
-func resolveUnixAutoShell(ctx context.Context) (executil.SelectedShell, error) {
+func resolveWindowsPowerShellPath(env []string) (string, bool) {
+	if p, _ := executil.LookPathInEnv("powershell", env); p != "" {
+		return p, true
+	}
+	if runtime.GOOS != toolutil.GOOSWindows {
+		return "", false
+	}
+	root, ok := executil.EnvListValue(env, "SystemRoot")
+	if !ok || strings.TrimSpace(root) == "" {
+		return "", false
+	}
+	p := filepath.Join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+	if existingRegularFile(p) {
+		return p, true
+	}
+	return "", false
+}
+
+func resolveWindowsCmdPath(env []string) (string, bool) {
+	if p, _ := executil.LookPathInEnv("cmd", env); p != "" {
+		return p, true
+	}
+	if runtime.GOOS != toolutil.GOOSWindows {
+		return "", false
+	}
+
+	if comspec, ok := executil.EnvListValue(env, "COMSPEC"); ok {
+		comspec = strings.TrimSpace(comspec)
+		if comspec != "" {
+			if p, err := executil.LookPathInEnv(comspec, env); err == nil && p != "" {
+				return p, true
+			}
+			if existingRegularFile(comspec) {
+				return comspec, true
+			}
+		}
+	}
+
+	if root, ok := executil.EnvListValue(env, "SystemRoot"); ok && strings.TrimSpace(root) != "" {
+		p := filepath.Join(root, "System32", "cmd.exe")
+		if existingRegularFile(p) {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+func existingRegularFile(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir()
+}
+
+func resolveUnixAutoShell(ctx context.Context, env []string) (executil.SelectedShell, error) {
 	// In Flatpak: prefer querying the host for the user's real shell.
 	if executil.HostSpawnAvailable(ctx) {
 		if sel, ok := executil.ResolveHostAutoShell(ctx); ok {
@@ -333,36 +414,34 @@ func resolveUnixAutoShell(ctx context.Context) (executil.SelectedShell, error) {
 	}
 
 	// Prefer $SHELL if present.
-	if sel, ok := selectedShellFromCandidate(os.Getenv("SHELL")); ok {
+	if shellEnv, ok := executil.EnvListValue(env, "SHELL"); ok {
+		if sel, ok := selectedShellFromCandidateEnv(shellEnv, env); ok {
+			return sel, nil
+		}
+	} else if sel, ok := selectedShellFromCandidateEnv(os.Getenv("SHELL"), env); ok {
 		return sel, nil
 	}
 	// Then try the user's configured login shell.
-	if sel, ok := lookupAccountLoginShell(ctx); ok {
+	if sel, ok := lookupAccountLoginShell(ctx, env); ok {
 		return sel, nil
 	}
 	// Finally fall back by platform/tool availability.
-	if p, _ := exec.LookPath(string(ShellNameBash)); p != "" {
-		return executil.SelectedShell{Name: ShellNameBash, Path: p}, nil
-	}
-	if p, _ := exec.LookPath(string(ShellNameZsh)); p != "" {
-		return executil.SelectedShell{Name: ShellNameZsh, Path: p}, nil
-	}
-	if p, _ := exec.LookPath(string(ShellNameSh)); p != "" {
-		return executil.SelectedShell{Name: ShellNameSh, Path: p}, nil
-	}
-	if p, _ := exec.LookPath(string(ShellNameDash)); p != "" {
-		return executil.SelectedShell{Name: ShellNameDash, Path: p}, nil
-	}
-	if p, _ := exec.LookPath(string(ShellNameKsh)); p != "" {
-		return executil.SelectedShell{Name: ShellNameKsh, Path: p}, nil
-	}
-	if p, _ := exec.LookPath(string(ShellNameFish)); p != "" {
-		return executil.SelectedShell{Name: ShellNameFish, Path: p}, nil
+	for _, name := range []ShellName{
+		ShellNameBash,
+		ShellNameZsh,
+		ShellNameSh,
+		ShellNameDash,
+		ShellNameKsh,
+		ShellNameFish,
+	} {
+		if p, _ := executil.LookPathInEnv(string(name), env); p != "" {
+			return executil.SelectedShell{Name: name, Path: p}, nil
+		}
 	}
 	return executil.SelectedShell{}, errors.New("no suitable shell found (bash/zsh/sh)")
 }
 
-func lookupAccountLoginShell(ctx context.Context) (executil.SelectedShell, bool) {
+func lookupAccountLoginShell(ctx context.Context, env []string) (executil.SelectedShell, bool) {
 	u, err := user.Current()
 	if err != nil || u == nil {
 		return executil.SelectedShell{}, false
@@ -373,26 +452,26 @@ func lookupAccountLoginShell(ctx context.Context) (executil.SelectedShell, bool)
 	}
 
 	if runtime.GOOS == toolutil.GOOSDarwin {
-		if sel, ok := selectedShellFromCandidate(lookupDarwinUserShell(ctx, username)); ok {
+		if sel, ok := selectedShellFromCandidateEnv(lookupDarwinUserShell(ctx, username), env); ok {
 			return sel, true
 		}
 	}
-	if sel, ok := selectedShellFromCandidate(lookupGetentUserShell(ctx, username)); ok {
+	if sel, ok := selectedShellFromCandidateEnv(lookupGetentUserShell(ctx, username), env); ok {
 		return sel, true
 	}
-	if sel, ok := selectedShellFromCandidate(lookupPasswdUserShell(username)); ok {
+	if sel, ok := selectedShellFromCandidateEnv(lookupPasswdUserShell(username), env); ok {
 		return sel, true
 	}
 	return executil.SelectedShell{}, false
 }
 
-func selectedShellFromCandidate(candidate string) (executil.SelectedShell, bool) {
+func selectedShellFromCandidateEnv(candidate string, env []string) (executil.SelectedShell, bool) {
 	candidate = strings.TrimSpace(candidate)
 	if candidate == "" {
 		return executil.SelectedShell{}, false
 	}
 
-	p, err := exec.LookPath(candidate)
+	p, err := executil.LookPathInEnv(candidate, env)
 	if err != nil || p == "" {
 		return executil.SelectedShell{}, false
 	}
@@ -466,49 +545,72 @@ func lookupPasswdUserShell(username string) string {
 	return ""
 }
 
-func resolveShell(ctx context.Context, name string) (executil.SelectedShell, error) {
+func resolveShell(ctx context.Context, name string, env []string) (executil.SelectedShell, error) {
 	shellName := ShellName(name)
 	switch shellName {
 	case ShellNameBash, ShellNameZsh, ShellNameSh, ShellNameDash, ShellNameKsh, ShellNameFish:
 		// In Flatpak: resolve the shell path on the host, not the sandbox.
 		if executil.HostSpawnAvailable(ctx) {
-			rctx, rcancel := context.WithTimeout(ctx, 3*time.Second)
-			defer rcancel()
-			if out, err := executil.HostExec(rctx, "sh", "-c", "command -v "+name); err == nil {
-				p := strings.TrimSpace(string(out))
-				if p != "" {
-					return executil.SelectedShell{Name: shellName, Path: p}, nil
-				}
+			if p, ok := lookupHostExecutable(ctx, name); ok {
+				return executil.SelectedShell{Name: shellName, Path: p}, nil
 			}
 			logutil.WarnContext(ctx, "exectool: host lookup for shell failed; trying sandbox PATH", "shellname", name)
 		}
 
-		p, err := exec.LookPath(name)
+		p, err := executil.LookPathInEnv(name, env)
 		if err != nil {
 			return executil.SelectedShell{}, fmt.Errorf("shell not found: %s", name)
 		}
 		return executil.SelectedShell{Name: shellName, Path: p}, nil
 	case ShellNamePwsh:
-		p, err := exec.LookPath("pwsh")
+		if executil.HostSpawnAvailable(ctx) {
+			if p, ok := lookupHostExecutable(ctx, "pwsh"); ok {
+				return executil.SelectedShell{Name: ShellNamePwsh, Path: p}, nil
+			}
+			logutil.WarnContext(ctx, "exectool: host lookup for pwsh failed; trying sandbox PATH")
+		}
+		p, err := executil.LookPathInEnv("pwsh", env)
 		if err != nil {
 			return executil.SelectedShell{}, errors.New("pwsh requested but not found")
 		}
 		return executil.SelectedShell{Name: ShellNamePwsh, Path: p}, nil
 	case ShellNamePowershell:
-		p, err := exec.LookPath("powershell")
-		if err != nil {
-			return executil.SelectedShell{}, errors.New("powershell requested but not found")
+		if executil.HostSpawnAvailable(ctx) {
+			if p, ok := lookupHostExecutable(ctx, "powershell"); ok {
+				return executil.SelectedShell{Name: ShellNamePowershell, Path: p}, nil
+			}
+			logutil.WarnContext(ctx, "exectool: host lookup for powershell failed; trying sandbox PATH")
 		}
-		return executil.SelectedShell{Name: ShellNamePowershell, Path: p}, nil
+		if p, ok := resolveWindowsPowerShellPath(env); ok {
+			return executil.SelectedShell{Name: ShellNamePowershell, Path: p}, nil
+		}
+		return executil.SelectedShell{}, errors.New("powershell requested but not found")
 	case ShellNameCmd:
-		p, err := exec.LookPath("cmd")
-		if err != nil {
-			return executil.SelectedShell{}, errors.New("cmd requested but not found")
+		if p, ok := resolveWindowsCmdPath(env); ok {
+			return executil.SelectedShell{Name: ShellNameCmd, Path: p}, nil
 		}
-		return executil.SelectedShell{Name: ShellNameCmd, Path: p}, nil
+		return executil.SelectedShell{}, errors.New("cmd requested but not found")
 	default:
 		return executil.SelectedShell{}, fmt.Errorf("invalid shell: %q", name)
 	}
+}
+
+func lookupHostExecutable(ctx context.Context, name string) (string, bool) {
+	rctx, rcancel := context.WithTimeout(ctx, 3*time.Second)
+	defer rcancel()
+
+	out, err := executil.HostExec(rctx, "sh", "-c", "command -v "+name)
+	if err != nil {
+		return "", false
+	}
+	p := strings.TrimSpace(string(out))
+	if i := strings.IndexAny(p, "\r\n"); i >= 0 {
+		p = strings.TrimSpace(p[:i])
+	}
+	if p == "" {
+		return "", false
+	}
+	return p, true
 }
 
 func effectiveTimeout(policy ExecutionPolicy) time.Duration {

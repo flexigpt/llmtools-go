@@ -37,11 +37,13 @@ func TestCommandFromArgv_ValidationAndDialects(t *testing.T) {
 			wantErrSubstr: "invalid args",
 		},
 		{
-			name:          "cmd_not_supported",
-			shell:         ShellNameCmd,
-			argv:          []string{argvEcho, argvHi},
-			wantErrSubstr: "does not support cmd.exe",
+			name:  "cmd_quotes_external_argv",
+			shell: ShellNameCmd,
+			argv:  []string{argvProgramPath, argvXY, "100%"},
+			want:  "\"C:\\Program Files\\app.exe\" \"x y\" \"100%%\"",
 		},
+		{name: "cmd_rejects_newline", shell: ShellNameCmd, argv: []string{argvEcho, "a\nb"}, wantErrSubstr: "newline"},
+
 		{
 			name:  "sh_quotes_all_args_posix_single_quote",
 			shell: ShellNameSh,

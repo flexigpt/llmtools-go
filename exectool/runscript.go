@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -14,6 +13,11 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
+)
+
+const (
+	defaultRunScriptMaxArgs     = 256
+	defaultRunScriptMaxArgBytes = 16 * 1024
 )
 
 const runScriptFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/exectool/runscript.RunScript"
@@ -153,7 +157,10 @@ func (p *RunScriptPolicy) Clone() *RunScriptPolicy {
 
 	if p.InterpreterByExtension != nil {
 		cp.InterpreterByExtension = make(map[string]RunScriptInterpreter, len(p.InterpreterByExtension))
-		maps.Copy(cp.InterpreterByExtension, p.InterpreterByExtension)
+		for k, v := range p.InterpreterByExtension {
+			v.Args = slices.Clone(v.Args)
+			cp.InterpreterByExtension[k] = v
+		}
 	} else {
 		cp.InterpreterByExtension = nil
 	}
@@ -172,33 +179,43 @@ func DefaultRunScriptPolicy() RunScriptPolicy {
 		pyShell = ShellNamePowershell
 		psShell = ShellNamePowershell
 	}
+	allowed := []string{
+		string(ioutil.ExtShell),
+		string(ioutil.ExtBash),
+		string(ioutil.ExtZsh),
+		string(ioutil.ExtKsh),
+		string(ioutil.ExtDash),
+		string(ioutil.ExtPS1),
+		string(ioutil.ExtPY),
+	}
+
+	interpreters := map[string]RunScriptInterpreter{
+		// Shell scripts: run via the wrapper shell path as interpreter.
+		string(ioutil.ExtShell): {Shell: ShellNameSh, Mode: RunScriptModeShell},
+		string(ioutil.ExtBash):  {Shell: ShellNameBash, Mode: RunScriptModeShell},
+		string(ioutil.ExtZsh):   {Shell: ShellNameZsh, Mode: RunScriptModeShell},
+		string(ioutil.ExtKsh):   {Shell: ShellNameKsh, Mode: RunScriptModeShell},
+		string(ioutil.ExtDash):  {Shell: ShellNameDash, Mode: RunScriptModeShell},
+
+		// PowerShell: execute the script directly via PowerShell dialect ("& 'script.ps1' ...").
+		string(ioutil.ExtPS1): {Shell: psShell, Mode: RunScriptModeDirect},
+
+		// Python: interpreter-based.
+		string(ioutil.ExtPY): {Shell: pyShell, Mode: RunScriptModeInterpreter, Command: pyCmd},
+	}
+
+	if runtime.GOOS == toolutil.GOOSWindows {
+		allowed = append(allowed, string(ioutil.ExtBAT), string(ioutil.ExtCMD))
+		interpreters[string(ioutil.ExtBAT)] = RunScriptInterpreter{Shell: ShellNameCmd, Mode: RunScriptModeDirect}
+		interpreters[string(ioutil.ExtCMD)] = RunScriptInterpreter{Shell: ShellNameCmd, Mode: RunScriptModeDirect}
+	}
+
 	return RunScriptPolicy{
-		AllowedExtensions: []string{
-			string(ioutil.ExtShell),
-			string(ioutil.ExtBash),
-			string(ioutil.ExtZsh),
-			string(ioutil.ExtKsh),
-			string(ioutil.ExtDash),
-			string(ioutil.ExtPS1),
-			string(ioutil.ExtPY),
-		},
-		InterpreterByExtension: map[string]RunScriptInterpreter{
-			// Shell scripts: run via the wrapper shell path as interpreter.
-			string(ioutil.ExtShell): {Shell: ShellNameSh, Mode: RunScriptModeShell},
-			string(ioutil.ExtBash):  {Shell: ShellNameBash, Mode: RunScriptModeShell},
-			string(ioutil.ExtZsh):   {Shell: ShellNameZsh, Mode: RunScriptModeShell},
-			string(ioutil.ExtKsh):   {Shell: ShellNameKsh, Mode: RunScriptModeShell},
-			string(ioutil.ExtDash):  {Shell: ShellNameDash, Mode: RunScriptModeShell},
-
-			// PowerShell: execute the script directly via PowerShell dialect ("& 'script.ps1' ...").
-			string(ioutil.ExtPS1): {Shell: psShell, Mode: RunScriptModeDirect},
-
-			// Python: interpreter-based.
-			string(ioutil.ExtPY): {Shell: pyShell, Mode: RunScriptModeInterpreter, Command: pyCmd},
-		},
-		ExecutionPolicy: ExecutionPolicy{}, // inherit from ExecTool by default
-		MaxArgs:         256,
-		MaxArgBytes:     16 * 1024,
+		AllowedExtensions:      allowed,
+		InterpreterByExtension: interpreters,
+		ExecutionPolicy:        ExecutionPolicy{}, // inherit from ExecTool by default
+		MaxArgs:                defaultRunScriptMaxArgs,
+		MaxArgBytes:            defaultRunScriptMaxArgBytes,
 	}
 }
 
@@ -214,6 +231,12 @@ func NormalizeRunScriptPolicy(in RunScriptPolicy) (RunScriptPolicy, error) {
 	}
 	if out.MaxArgBytes < 0 {
 		return RunScriptPolicy{}, errors.New("runscript policy: MaxArgBytes must be >= 0")
+	}
+	if out.MaxArgs == 0 {
+		out.MaxArgs = defaultRunScriptMaxArgs
+	}
+	if out.MaxArgBytes == 0 {
+		out.MaxArgBytes = defaultRunScriptMaxArgBytes
 	}
 
 	// AllowedExtensions: clone + normalize + stable-dedup (preserve order).
@@ -251,7 +274,25 @@ func NormalizeRunScriptPolicy(in RunScriptPolicy) (RunScriptPolicy, error) {
 
 			// Defensive clone of args slice (RunScriptInterpreter contains []string).
 			v.Args = slices.Clone(v.Args)
+			if strings.TrimSpace(string(v.Shell)) == "" {
+				v.Shell = ShellNameAuto
+			} else {
+				normShell, err := executil.NormalizeShellName(v.Shell)
+				if err != nil {
+					return RunScriptPolicy{}, fmt.Errorf("runscript policy: invalid shell for %q: %w", key, err)
+				}
+				v.Shell = normShell
+			}
 
+			v.Command = strings.TrimSpace(v.Command)
+			if strings.ContainsRune(v.Command, '\x00') {
+				return RunScriptPolicy{}, fmt.Errorf("runscript policy: command for %q contains NUL byte", key)
+			}
+			for i, a := range v.Args {
+				if strings.ContainsRune(a, '\x00') {
+					return RunScriptPolicy{}, fmt.Errorf("runscript policy: args[%d] for %q contains NUL byte", i, key)
+				}
+			}
 			// Validate mapping is internally consistent.
 			switch v.Mode {
 			case RunScriptModeDirect, RunScriptModeShell, RunScriptModeInterpreter:
@@ -331,7 +372,7 @@ func runScript(
 	}
 	maxArgBytes := pol.MaxArgBytes
 	if maxArgBytes <= 0 {
-		maxArgBytes = 16 * 1024
+		maxArgBytes = defaultRunScriptMaxArgBytes
 	}
 	for i, a := range args.Args {
 		if strings.ContainsRune(a, '\x00') {
@@ -348,20 +389,34 @@ func runScript(
 	}
 
 	// Select wrapper shell (concrete shell needed for quoting + execution).
-	sel, err := selectShell(ctx, interp.Shell)
+	// Merge env like shellcommand does (process env + tool base env + overrides), but no session.
+	env, err := executil.EffectiveEnvWithBase(tp.baseEnv, args.Env)
 	if err != nil {
 		return nil, err
 	}
+
+	shellLookupEnv, shellEnvErr := executil.EffectiveEnvWithBase(tp.baseEnv, nil)
+	if shellEnvErr != nil {
+		shellLookupEnv = env
+	}
+
+	// Select wrapper shell (concrete shell needed for quoting + execution).
+	sel, err := selectShellWithDefaultEnv(ctx, interp.Shell, tp.defaultShell, shellLookupEnv)
+	if err != nil {
+		return nil, err
+	}
+
+	scriptArg := runScriptPathArgForShell(sel.Name, scriptAbs)
 
 	// Build argv based on mode.
 	var argv []string
 	switch interp.Mode {
 	case RunScriptModeDirect:
 		// Execute script path directly.
-		argv = append([]string{scriptAbs}, args.Args...)
+		argv = append([]string{scriptArg}, args.Args...)
 	case RunScriptModeShell:
 		// Use the wrapper shell binary as the interpreter.
-		argv = append([]string{sel.Path, scriptAbs}, args.Args...)
+		argv = append([]string{runScriptInterpreterCommand(sel), scriptArg}, args.Args...)
 	case RunScriptModeInterpreter:
 		cmd := strings.TrimSpace(interp.Command)
 		if cmd == "" {
@@ -369,7 +424,7 @@ func runScript(
 		}
 		argv = append(argv, cmd)
 		argv = append(argv, interp.Args...)
-		argv = append(argv, scriptAbs)
+		argv = append(argv, scriptArg)
 		argv = append(argv, args.Args...)
 	default:
 		return nil, fmt.Errorf("invalid interpreter mode: %q", interp.Mode)
@@ -402,13 +457,10 @@ func runScript(
 		}
 	}
 
-	// Effective execution policy: runscript overrides or inherit ExecTool default.
-	execPol := pol.ExecutionPolicy
-	if execPol.Timeout == 0 && execPol.MaxOutputBytes == 0 && execPol.MaxCommands == 0 &&
-		execPol.MaxCommandLength == 0 &&
-		!execPol.AllowDangerous {
-		execPol = defaultExecPol
-	}
+	// Effective execution policy: runscript fields override ExecTool defaults
+	// field-by-field. Zero numeric fields inherit. AllowDangerous=true is
+	// additive because ExecutionPolicy has no tri-state bool.
+	execPol := mergeExecutionPolicy(defaultExecPol, pol.ExecutionPolicy)
 
 	timeout := effectiveTimeout(execPol)
 	maxOut := effectiveMaxOutputBytes(execPol)
@@ -421,12 +473,6 @@ func runScript(
 			max(len(cmdStrExec), len(cmdStrCheck)),
 			maxCmdLen,
 		)
-	}
-
-	// Merge env like shellcommand does (process env + tool base env + overrides), but no session.
-	env, err := executil.EffectiveEnvWithBase(tp.baseEnv, args.Env)
-	if err != nil {
-		return nil, err
 	}
 
 	// Apply the same outer-command checks (blocklist always, heuristics optional).
@@ -498,4 +544,52 @@ func lookupInterpreter(pol RunScriptPolicy, ext string) (RunScriptInterpreter, b
 		return v, true
 	}
 	return RunScriptInterpreter{}, false
+}
+
+func runScriptPathArgForShell(shell ShellName, p string) string {
+	if runtime.GOOS == toolutil.GOOSWindows && isRunScriptShLikeShell(shell) {
+		// Git Bash/MSYS-like shells are much more reliable with "C:/" than "C:\" when the path is interpreted by the
+		// shell.
+		return filepath.ToSlash(p)
+	}
+	return p
+}
+
+func runScriptInterpreterCommand(sel executil.SelectedShell) string {
+	if runtime.GOOS == toolutil.GOOSWindows && isRunScriptShLikeShell(sel.Name) {
+		// The outer shell is already the selected shell. Re-invoking by command
+		// name avoids trying to execute a Windows C:\...\sh.exe path from inside
+		// a POSIX-like shell.
+		return string(sel.Name)
+	}
+	return sel.Path
+}
+
+func isRunScriptShLikeShell(shell ShellName) bool {
+	switch shell {
+	case ShellNameBash, ShellNameZsh, ShellNameSh, ShellNameDash, ShellNameKsh, ShellNameFish:
+		return true
+	default:
+		return false
+	}
+}
+
+func mergeExecutionPolicy(base, override ExecutionPolicy) ExecutionPolicy {
+	out := base
+	if override.Timeout > 0 {
+		out.Timeout = override.Timeout
+	}
+	if override.MaxOutputBytes > 0 {
+		out.MaxOutputBytes = override.MaxOutputBytes
+	}
+	if override.MaxCommands > 0 {
+		out.MaxCommands = override.MaxCommands
+	}
+	if override.MaxCommandLength > 0 {
+		out.MaxCommandLength = override.MaxCommandLength
+	}
+	if override.AllowDangerous {
+		out.AllowDangerous = true
+	}
+	return out
 }

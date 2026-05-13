@@ -216,6 +216,9 @@ func (et *ExecTool) ShellCommandTool() spec.Tool { return toolutil.CloneTool(she
 
 func (et *ExecTool) RunScript(ctx context.Context, args RunScriptArgs) (*RunScriptOut, error) {
 	return toolutil.WithRecoveryResp(func() (*RunScriptOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := et.snapshotPolicy()
 		return runScript(ctx, args, *p)
 	})
@@ -223,6 +226,9 @@ func (et *ExecTool) RunScript(ctx context.Context, args RunScriptArgs) (*RunScri
 
 func (et *ExecTool) ShellCommand(ctx context.Context, args ShellCommandArgs) (*ShellCommandOut, error) {
 	return toolutil.WithRecoveryResp(func() (*ShellCommandOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := et.snapshotPolicy()
 		return shellCommand(ctx, args, *p, et.sessions)
 	})

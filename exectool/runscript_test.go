@@ -102,7 +102,6 @@ func TestLookupInterpreter(t *testing.T) {
 }
 
 func TestRunScript_ValidationsAndResolution(t *testing.T) {
-	t.Parallel()
 	td := t.TempDir()
 	outside := t.TempDir()
 
@@ -112,7 +111,8 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	scriptPath := filepath.Join(scriptDir, testScriptHello)
-	if err := os.WriteFile(scriptPath, []byte(testScriptHelloContent), 0o600); err != nil {
+	//nolint:gosec // Execution script.
+	if err := os.WriteFile(scriptPath, []byte(testScriptHelloContent), 0o700); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -155,6 +155,7 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 		opts             []ExecToolOption
 		args             RunScriptArgs
 		needShell        bool
+		unixOnly         bool
 		wantErrSubs      []string
 		wantOK           bool
 		wantStdout       string
@@ -279,6 +280,7 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 				WorkDir: scriptDir,
 			},
 			needShell:        true,
+			unixOnly:         true,
 			wantOK:           true,
 			wantStdout:       testScriptHelloOutput,
 			wantExitCode:     0,
@@ -327,6 +329,7 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 			},
 			args:             RunScriptArgs{Path: scriptPath, WorkDir: scriptDir},
 			needShell:        true,
+			unixOnly:         true,
 			wantOK:           true,
 			wantStdout:       testScriptHelloOutput,
 			wantExitCode:     0,
@@ -346,6 +349,7 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 			args:             RunScriptArgs{Path: execScriptPath, WorkDir: scriptDir},
 			needShell:        true,
 			wantOK:           true,
+			unixOnly:         true,
 			wantStdout:       testScriptDirectOutput,
 			wantExitCode:     0,
 			wantPathEndsWith: string(filepath.Separator) + testScriptDirect,
@@ -364,6 +368,7 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 			},
 			args:             RunScriptArgs{Path: verbosePath, WorkDir: scriptDir},
 			needShell:        true,
+			unixOnly:         true,
 			wantOK:           true,
 			wantExitCode:     0,
 			wantTrunc:        true,
@@ -383,6 +388,7 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 			},
 			args:             RunScriptArgs{Path: sleepPath, WorkDir: scriptDir},
 			needShell:        true,
+			unixOnly:         true,
 			wantOK:           true,
 			wantExitCode:     124,
 			wantTimedOut:     true,
@@ -392,7 +398,10 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+			if tc.unixOnly && runtime.GOOS == toolutil.GOOSWindows {
+				t.Skip("unix shell-script execution case")
+				return
+			}
 			et, err := NewExecTool(tc.opts...)
 			if err != nil {
 				if len(tc.wantErrSubs) > 0 {
@@ -466,5 +475,68 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestRunScript_WindowsCmdScript(t *testing.T) {
+	if runtime.GOOS != toolutil.GOOSWindows {
+		t.Skip("windows-only")
+	}
+
+	td := t.TempDir()
+	scriptPath := filepath.Join(td, "hello.cmd")
+	body := "@echo off\r\n<nul set /p dummy=hello\r\nexit /b 0\r\n"
+	if err := os.WriteFile(scriptPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	et, err := NewExecTool(
+		WithAllowedRoots([]string{td}),
+		WithWorkBaseDir(td),
+	)
+	if err != nil {
+		t.Fatalf("NewExecTool: %v", err)
+	}
+
+	got, err := et.RunScript(t.Context(), RunScriptArgs{
+		Path:    "hello.cmd",
+		WorkDir: td,
+	})
+	if err != nil {
+		t.Fatalf("RunScript: %v", err)
+	}
+	if got.ExitCode != 0 || got.Stdout != "hello" {
+		t.Fatalf("got exit=%d stdout=%q stderr=%q", got.ExitCode, got.Stdout, got.Stderr)
+	}
+}
+
+func TestMergeExecutionPolicy_InheritsUnsetRunScriptFields(t *testing.T) {
+	base := ExecutionPolicy{
+		AllowDangerous:   true,
+		Timeout:          5 * time.Second,
+		MaxOutputBytes:   1234,
+		MaxCommands:      7,
+		MaxCommandLength: 99,
+	}
+
+	override := ExecutionPolicy{
+		Timeout: 1 * time.Second,
+	}
+
+	got := mergeExecutionPolicy(base, override)
+	if got.Timeout != override.Timeout {
+		t.Fatalf("Timeout got %v want %v", got.Timeout, override.Timeout)
+	}
+	if got.MaxOutputBytes != base.MaxOutputBytes {
+		t.Fatalf("MaxOutputBytes got %d want %d", got.MaxOutputBytes, base.MaxOutputBytes)
+	}
+	if got.MaxCommands != base.MaxCommands {
+		t.Fatalf("MaxCommands got %d want %d", got.MaxCommands, base.MaxCommands)
+	}
+	if got.MaxCommandLength != base.MaxCommandLength {
+		t.Fatalf("MaxCommandLength got %d want %d", got.MaxCommandLength, base.MaxCommandLength)
+	}
+	if !got.AllowDangerous {
+		t.Fatalf("AllowDangerous should inherit/add")
 	}
 }

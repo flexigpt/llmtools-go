@@ -72,6 +72,8 @@ const (
 	ExtJSONL    FileExt = ".jsonl"
 	ExtShell    FileExt = ".sh"
 	ExtBash     FileExt = ".bash"
+	ExtBAT      FileExt = ".bat"
+	ExtCMD      FileExt = ".cmd"
 	ExtZsh      FileExt = ".zsh"
 	ExtKsh      FileExt = ".ksh"
 	ExtDash     FileExt = ".dash"

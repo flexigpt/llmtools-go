@@ -28,6 +28,13 @@ func setEnvEntryValue(envMap map[string]envEntry, key, val string) bool {
 	return true
 }
 
+func mergePathList(listSep string, caseInsensitive bool, values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return mergePathValues(listSep, caseInsensitive, values...)
+}
+
 func mergePathValues(listSep string, caseInsensitive bool, values ...string) string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0)
@@ -56,11 +63,4 @@ func mergePathValues(listSep string, caseInsensitive bool, values ...string) str
 	}
 
 	return strings.Join(out, listSep)
-}
-
-func mergePathList(listSep string, caseInsensitive bool, values []string) string {
-	if len(values) == 0 {
-		return ""
-	}
-	return mergePathValues(listSep, caseInsensitive, values...)
 }

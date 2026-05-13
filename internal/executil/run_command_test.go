@@ -52,6 +52,18 @@ func TestUnixSpecific_ProcessGroupAndExitCodeHelpers(t *testing.T) {
 }
 
 func TestDeriveExecArgs(t *testing.T) {
+	wantPowerShellArgs := []string{"pwsh", "-NoLogo", "-NonInteractive", "-NoProfile"}
+	if runtime.GOOS == toolutil.GOOSWindows {
+		wantPowerShellArgs = append(wantPowerShellArgs,
+			"-ExecutionPolicy",
+			"Bypass",
+		)
+	}
+	wantPowerShellArgs = append(wantPowerShellArgs,
+		"-Command",
+		"Write-Output hi",
+	)
+
 	cases := []struct {
 		name string
 		sel  SelectedShell
@@ -68,13 +80,13 @@ func TestDeriveExecArgs(t *testing.T) {
 			name: "powershell_uses_no_profile_non_interactive",
 			sel:  SelectedShell{Name: ShellNamePwsh, Path: "pwsh"},
 			cmd:  "Write-Output hi",
-			want: []string{"pwsh", "-NoLogo", "-NonInteractive", "-NoProfile", "-Command", "Write-Output hi"},
+			want: wantPowerShellArgs,
 		},
 		{
 			name: "cmd_uses_d_s_c",
 			sel:  SelectedShell{Name: ShellNameCmd, Path: string(ShellNameCmd)},
 			cmd:  runEchoHi,
-			want: []string{string(ShellNameCmd), "/d", "/s", "/c", runEchoHi},
+			want: []string{string(ShellNameCmd), "/d", "/s", "/v:off", "/c", runEchoHi},
 		},
 		{
 			name: "unknown_defaults_to_dash_c",

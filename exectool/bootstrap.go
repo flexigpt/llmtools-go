@@ -111,28 +111,38 @@ func bootstrapCommandArgs(sel executil.SelectedShell) ([]string, error) {
 	switch sel.Name {
 	case ShellNameBash, ShellNameZsh:
 		cmd := fmt.Sprintf(
-			"printf '%%s\\n' '%s'; env; printf '%%s\\n' '%s'",
+			"printf '%%s\\n' '%s'; command env; printf '%%s\\n' '%s'",
 			bootstrapEnvBeginMarker,
 			bootstrapEnvEndMarker,
 		)
 		return []string{sel.Path, "-lic", cmd}, nil
 	case ShellNameFish:
 		cmd := fmt.Sprintf(
-			"printf '%%s\\n' '%s'; env; printf '%%s\\n' '%s'",
+			"printf '%%s\\n' '%s'; command env; printf '%%s\\n' '%s'",
 			bootstrapEnvBeginMarker,
 			bootstrapEnvEndMarker,
 		)
 		return []string{sel.Path, "-l", "-i", "-c", cmd}, nil
-	case ShellNameSh, ShellNameDash, ShellNameKsh:
+	case ShellNameSh, ShellNameDash:
 		cmd := fmt.Sprintf(
-			"printf '%%s\\n' '%s'; env; printf '%%s\\n' '%s'",
+			"printf '%%s\\n' '%s'; command env; printf '%%s\\n' '%s'",
+			bootstrapEnvBeginMarker,
+			bootstrapEnvEndMarker,
+		)
+		// POSIX sh and dash do not portably support "-l". In particular,
+		// dash rejects "sh -lc ...", which made bootstrap fail on systems
+		// where /bin/sh is selected.
+		return []string{sel.Path, "-c", cmd}, nil
+	case ShellNameKsh:
+		cmd := fmt.Sprintf(
+			"printf '%%s\\n' '%s'; command env; printf '%%s\\n' '%s'",
 			bootstrapEnvBeginMarker,
 			bootstrapEnvEndMarker,
 		)
 		return []string{sel.Path, "-lc", cmd}, nil
 	case ShellNamePwsh, ShellNamePowershell:
 		cmd := fmt.Sprintf(
-			"Write-Output '%s'; Get-ChildItem Env: | ForEach-Object { '{0}={1}' -f $_.Name, $_.Value }; Write-Output '%s'",
+			"[Console]::Out.WriteLine('%s'); [Environment]::GetEnvironmentVariables().GetEnumerator() | ForEach-Object { [Console]::Out.WriteLine(('{0}={1}' -f $_.Key, $_.Value)) }; [Console]::Out.WriteLine('%s')",
 			bootstrapEnvBeginMarker,
 			bootstrapEnvEndMarker,
 		)

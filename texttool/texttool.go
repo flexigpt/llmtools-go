@@ -91,6 +91,9 @@ func (tt *TextTool) ReplaceTextTool() spec.Tool   { return toolutil.CloneTool(re
 
 func (tt *TextTool) DeleteText(ctx context.Context, args DeleteTextArgs) (*DeleteTextOut, error) {
 	return toolutil.WithRecoveryResp(func() (*DeleteTextOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := tt.snapshotPolicy()
 		return deleteText(ctx, args, p)
 	})
@@ -98,6 +101,9 @@ func (tt *TextTool) DeleteText(ctx context.Context, args DeleteTextArgs) (*Delet
 
 func (tt *TextTool) FindText(ctx context.Context, args FindTextArgs) (*FindTextOut, error) {
 	return toolutil.WithRecoveryResp(func() (*FindTextOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := tt.snapshotPolicy()
 		return findText(ctx, args, p)
 	})
@@ -105,6 +111,9 @@ func (tt *TextTool) FindText(ctx context.Context, args FindTextArgs) (*FindTextO
 
 func (tt *TextTool) InsertText(ctx context.Context, args InsertTextArgs) (*InsertTextOut, error) {
 	return toolutil.WithRecoveryResp(func() (*InsertTextOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := tt.snapshotPolicy()
 		return insertText(ctx, args, p)
 	})
@@ -112,6 +121,9 @@ func (tt *TextTool) InsertText(ctx context.Context, args InsertTextArgs) (*Inser
 
 func (tt *TextTool) ReadTextRange(ctx context.Context, args ReadTextRangeArgs) (*ReadTextRangeOut, error) {
 	return toolutil.WithRecoveryResp(func() (*ReadTextRangeOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := tt.snapshotPolicy()
 		return readTextRange(ctx, args, p)
 	})
@@ -119,6 +131,9 @@ func (tt *TextTool) ReadTextRange(ctx context.Context, args ReadTextRangeArgs) (
 
 func (tt *TextTool) ReplaceText(ctx context.Context, args ReplaceTextArgs) (*ReplaceTextOut, error) {
 	return toolutil.WithRecoveryResp(func() (*ReplaceTextOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := tt.snapshotPolicy()
 		return replaceText(ctx, args, p)
 	})

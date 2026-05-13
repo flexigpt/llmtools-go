@@ -6,10 +6,12 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/flexigpt/llmtools-go/internal/logutil"
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 const managedCommandWaitDelay = 5 * time.Second
@@ -37,7 +39,7 @@ func RunOneShellCommand(
 	execEnv := env
 	useHostSpawn := HostSpawnAvailable(ctx)
 	if useHostSpawn {
-		execArgs = buildHostSpawnArgs(shellArgs, filterEnvForHostSpawn(env))
+		execArgs = buildHostSpawnArgs(shellArgs, filterEnvForHostSpawn(env), workdir)
 		execEnv = nil // env is forwarded via --env= flags to the host command
 	}
 
@@ -253,15 +255,18 @@ func deriveExecArgs(sel SelectedShell, command string) []string {
 
 	case ShellNamePowershell, ShellNamePwsh:
 		// Always deterministic by default: no profile; non-interactive to avoid prompts.
-		args := []string{sel.Path, "-NoLogo", "-NonInteractive", "-NoProfile", "-Command", command}
+		args := []string{sel.Path, "-NoLogo", "-NonInteractive", "-NoProfile"}
+		if runtime.GOOS == toolutil.GOOSWindows {
+			args = append(args, "-ExecutionPolicy", "Bypass")
+		}
+		args = append(args, "-Command", command)
 		return args
 
 	case ShellNameCmd:
 		// Options: /d disables AutoRun from registry (safer); /s handles quotes; /c runs then exits.
-		return []string{sel.Path, "/d", "/s", "/c", command}
+		return []string{sel.Path, "/d", "/s", "/v:off", "/c", command}
 
 	default:
-
 		return []string{sel.Path, "-c", command}
 	}
 }

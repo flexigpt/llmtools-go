@@ -164,7 +164,7 @@ func (sess *ShellSession) GetEffectiveEnvWithBase(baseEnv, overrides map[string]
 
 	// Then per-call overrides.
 	if len(overrides) != 0 {
-		if err := applyEnv(overrides, false, "override"); err != nil {
+		if err := applyEnv(overrides, true, "override"); err != nil {
 			return nil, err
 		}
 	}
@@ -221,12 +221,20 @@ func ValidateEnvMap(m map[string]string) error {
 	if len(m) > hardMaxEnvVars {
 		return fmt.Errorf("too many env vars: %d (max %d)", len(m), hardMaxEnvVars)
 	}
+	seen := map[string]string{}
 	total := 0
 	for k, v := range m {
 		if err := validateEnvKV(k, v); err != nil {
 			return fmt.Errorf("env %q: %w", k, err)
 		}
-		total += len(k) + len(v)
+		kk := strings.TrimSpace(k)
+		ck := canonicalEnvKey(kk)
+		if prev, ok := seen[ck]; ok {
+			return fmt.Errorf("duplicate env name %q conflicts with %q", kk, prev)
+		}
+		seen[ck] = kk
+
+		total += len(kk) + len(v)
 		if total > hardMaxEnvTotalBytes {
 			return fmt.Errorf("env overrides too large (max %d bytes)", hardMaxEnvTotalBytes)
 		}

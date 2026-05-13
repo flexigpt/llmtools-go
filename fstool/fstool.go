@@ -92,6 +92,9 @@ func (ft *FSTool) WriteFileTool() spec.Tool        { return toolutil.CloneTool(w
 
 func (ft *FSTool) DeleteFile(ctx context.Context, args DeleteFileArgs) (*DeleteFileOut, error) {
 	return toolutil.WithRecoveryResp(func() (*DeleteFileOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := ft.snapshotPolicy()
 		return deleteFile(ctx, args, p)
 	})
@@ -99,6 +102,9 @@ func (ft *FSTool) DeleteFile(ctx context.Context, args DeleteFileArgs) (*DeleteF
 
 func (ft *FSTool) ListDirectory(ctx context.Context, args ListDirectoryArgs) (*ListDirectoryOut, error) {
 	return toolutil.WithRecoveryResp(func() (*ListDirectoryOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := ft.snapshotPolicy()
 		return listDirectory(ctx, args, p)
 	})
@@ -106,6 +112,9 @@ func (ft *FSTool) ListDirectory(ctx context.Context, args ListDirectoryArgs) (*L
 
 func (ft *FSTool) MIMEForExtension(ctx context.Context, args MIMEForExtensionArgs) (*MIMEForExtensionOut, error) {
 	return toolutil.WithRecoveryResp(func() (*MIMEForExtensionOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := ft.snapshotPolicy()
 		return mimeForExtension(ctx, args, p)
 	})
@@ -113,6 +122,9 @@ func (ft *FSTool) MIMEForExtension(ctx context.Context, args MIMEForExtensionArg
 
 func (ft *FSTool) MIMEForPath(ctx context.Context, args MIMEForPathArgs) (*MIMEForPathOut, error) {
 	return toolutil.WithRecoveryResp(func() (*MIMEForPathOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := ft.snapshotPolicy()
 		return mimeForPath(ctx, args, p)
 	})
@@ -123,6 +135,9 @@ func (ft *FSTool) ReadFile(
 	args ReadFileArgs,
 ) ([]spec.ToolOutputUnion, error) {
 	return toolutil.WithRecoveryResp(func() ([]spec.ToolOutputUnion, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := ft.snapshotPolicy()
 		return readFile(ctx, args, p)
 	})
@@ -130,6 +145,9 @@ func (ft *FSTool) ReadFile(
 
 func (ft *FSTool) SearchFiles(ctx context.Context, args SearchFilesArgs) (*SearchFilesOut, error) {
 	return toolutil.WithRecoveryResp(func() (*SearchFilesOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := ft.snapshotPolicy()
 		return searchFiles(ctx, args, p)
 	})
@@ -137,6 +155,9 @@ func (ft *FSTool) SearchFiles(ctx context.Context, args SearchFilesArgs) (*Searc
 
 func (ft *FSTool) StatPath(ctx context.Context, args StatPathArgs) (*StatPathOut, error) {
 	return toolutil.WithRecoveryResp(func() (*StatPathOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := ft.snapshotPolicy()
 		return statPath(ctx, args, p)
 	})
@@ -144,6 +165,9 @@ func (ft *FSTool) StatPath(ctx context.Context, args StatPathArgs) (*StatPathOut
 
 func (ft *FSTool) WriteFile(ctx context.Context, args WriteFileArgs) (*WriteFileOut, error) {
 	return toolutil.WithRecoveryResp(func() (*WriteFileOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := ft.snapshotPolicy()
 		return writeFile(ctx, args, p)
 	})

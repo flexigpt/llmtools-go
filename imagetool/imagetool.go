@@ -81,6 +81,9 @@ func (it *ImageTool) ReadImageTool() spec.Tool { return toolutil.CloneTool(readI
 
 func (it *ImageTool) ReadImage(ctx context.Context, args ReadImageArgs) (*ReadImageOut, error) {
 	return toolutil.WithRecoveryResp(func() (*ReadImageOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		p := it.snapshotPolicy()
 		return readImage(ctx, args, p)
 	})
