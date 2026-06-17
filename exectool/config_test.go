@@ -1,6 +1,7 @@
 package exectool
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -204,8 +205,16 @@ func TestNewExecTool_OptionsAndSnapshotPolicy(t *testing.T) {
 	if et.toolPolicy == nil {
 		t.Fatalf("expected toolPolicy to be initialized")
 	}
-	if et.toolPolicy.fsPolicy.WorkBaseDir() != root {
-		t.Fatalf("fsPolicy.WorkBaseDir got %q want %q", et.toolPolicy.fsPolicy.WorkBaseDir(), root)
+	canonicalize := func(p string) string {
+		p = filepath.Clean(p)
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			p = resolved
+		}
+		return p
+	}
+
+	if got, want := canonicalize(et.toolPolicy.fsPolicy.WorkBaseDir()), canonicalize(root); got != want {
+		t.Fatalf("fsPolicy.WorkBaseDir got %q want %q", got, want)
 	}
 	if !et.toolPolicy.fsPolicy.HasAllowedRoots() {
 		t.Fatalf("expected allowed roots to be configured")
