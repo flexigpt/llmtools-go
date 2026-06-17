@@ -414,7 +414,9 @@ func TestApplyUnifiedDiffStatusHelpers(t *testing.T) {
 			filePlanActionNoop:          false,
 			filePlanActionCreate:        true,
 			filePlanActionWriteExisting: true,
-			filePlanActionDelete:        true,
+			filePlanActionChmodExisting: true,
+
+			filePlanActionDelete: true,
 		}
 		for action, want := range tests {
 			if got := action.mutates(); got != want {
@@ -613,7 +615,15 @@ func TestTextToolConstructorAccessorsAndWrapper(t *testing.T) {
 	dir := t.TempDir()
 	tt := mustNewTextTool(t, dir)
 
-	if got, want := tt.snapshotPolicy().WorkBaseDir(), filepath.Clean(dir); got != want {
+	canonicalize := func(p string) string {
+		p = filepath.Clean(p)
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			p = resolved
+		}
+		return p
+	}
+
+	if got, want := canonicalize(tt.snapshotPolicy().WorkBaseDir()), canonicalize(dir); got != want {
 		t.Fatalf("snapshot policy work dir: want %q got %q", want, got)
 	}
 	if !tt.snapshotPolicy().BlockSymlinks() {

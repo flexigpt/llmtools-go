@@ -18,6 +18,8 @@ import (
 const (
 	defaultRunScriptMaxArgs     = 256
 	defaultRunScriptMaxArgBytes = 16 * 1024
+	defaultPython3Command       = "python3"
+	defaultPythonCommand        = "python"
 )
 
 const runScriptFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/exectool/runscript.RunScript"
@@ -113,7 +115,7 @@ type RunScriptInterpreter struct {
 }
 
 type RunScriptPolicy struct {
-	// AllowedExtensions is an optional lowercase allowlist (e.g. [".sh", ".ps1", ".py"]).
+	// AllowedExtensions is an optional lowercase allowlist (e.g. [.sh, .ps1, .py]).
 	// If empty/nil, extension is allowed iff InterpreterByExtension has a match (or a "" fallback is configured).
 	AllowedExtensions []string
 
@@ -171,11 +173,11 @@ func (p *RunScriptPolicy) Clone() *RunScriptPolicy {
 }
 
 func DefaultRunScriptPolicy() RunScriptPolicy {
-	pyCmd := "python3"
+	pyCmd := defaultPython3Command
 	pyShell := ShellNameSh
 	psShell := ShellNamePwsh
 	if runtime.GOOS == toolutil.GOOSWindows {
-		pyCmd = "python"
+		pyCmd = defaultPythonCommand
 		pyShell = ShellNamePowershell
 		psShell = ShellNamePowershell
 	}
@@ -493,7 +495,7 @@ func runScript(
 	}
 	cmdStrExec, cmdStrCheck := cmdStr, cmdStr
 
-	// PowerShell/Pwsh: when running external commands or scripts via "-Command",
+	// PowerShell/Pwsh: when running external commands or scripts via optionCommand,
 	// use the call operator (&). Without it, script execution often fails, and
 	// executable paths with spaces can fail.
 	//

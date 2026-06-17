@@ -14,6 +14,30 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
+const (
+	optionLIC            = "-lic"
+	optionCommand        = "-Command"
+	optionNoLogo         = "-NoLogo"
+	optionNonInteractive = "-NonInteractive"
+
+	envKeyPath          = "PATH"
+	envKeyHome          = "HOME"
+	envKeyGitSSHCommand = "GIT_SSH_COMMAND"
+	envPrefixASDF       = "ASDF_"
+	envPrefixPYENV      = "PYENV_"
+	envPrefixRBENV      = "RBENV_"
+	envPrefixNVM        = "NVM_"
+	envPrefixVOLTA      = "VOLTA_"
+	envPrefixSDKMAN     = "SDKMAN_"
+	envPrefixCONDA      = "CONDA_"
+	envKeyUser          = "USER"
+	envKeyLogname       = "LOGNAME"
+	envKeyShell         = "SHELL"
+	envKeyLang          = "LANG"
+	envKeyLCAll         = "LC_ALL"
+	envPrefixLC         = "LC_"
+)
+
 var (
 	newExecToolBootstrapOnce sync.Once
 	newExecToolBootstrapDefs *BootstrappedDefaults
@@ -139,7 +163,7 @@ func bootstrapCommandArgs(sel executil.SelectedShell) ([]string, error) {
 			bootstrapEnvBeginMarker,
 			bootstrapEnvEndMarker,
 		)
-		return []string{sel.Path, "-lic", cmd}, nil
+		return []string{sel.Path, optionLIC, cmd}, nil
 	case ShellNameFish:
 		cmd := fmt.Sprintf(
 			"printf '%%s\\n' '%s'; env; printf '%%s\\n' '%s'",
@@ -170,7 +194,7 @@ func bootstrapCommandArgs(sel executil.SelectedShell) ([]string, error) {
 			bootstrapEnvBeginMarker,
 			bootstrapEnvEndMarker,
 		)
-		return []string{sel.Path, "-NoLogo", "-NonInteractive", "-Command", cmd}, nil
+		return []string{sel.Path, optionNoLogo, optionNonInteractive, optionCommand, cmd}, nil
 	case ShellNameCmd:
 		cmd := fmt.Sprintf("echo %s & set & echo %s", bootstrapEnvBeginMarker, bootstrapEnvEndMarker)
 		return []string{sel.Path, "/d", "/s", "/v:off", "/c", cmd}, nil
@@ -225,14 +249,14 @@ func filterBootstrappedEnv(raw map[string]string) map[string]string {
 	out := make(map[string]string)
 	if runtime.GOOS == toolutil.GOOSWindows {
 		exact := map[string]struct{}{
-			"PATH":                    {},
+			envKeyPath:                {},
 			"PATHEXT":                 {},
 			"SYSTEMROOT":              {},
 			"COMSPEC":                 {},
 			"USERPROFILE":             {},
 			"HOMEDRIVE":               {},
 			"HOMEPATH":                {},
-			"HOME":                    {},
+			envKeyHome:                {},
 			"APPDATA":                 {},
 			"LOCALAPPDATA":            {},
 			"PROGRAMDATA":             {},
@@ -269,16 +293,21 @@ func filterBootstrappedEnv(raw map[string]string) map[string]string {
 			"HTTPS_PROXY":             {},
 			"NO_PROXY":                {},
 			"ALL_PROXY":               {},
-			"GIT_TERMINAL_PROMPT":     {},
+			envKeyGitSSHCommand:       {},
 			"GIT_ASKPASS":             {},
 			"GIT_SSH":                 {},
-			"GIT_SSH_COMMAND":         {},
 			"SSH_AUTH_SOCK":           {},
 			"SSL_CERT_FILE":           {},
 			"SSL_CERT_DIR":            {},
 		}
 		prefixes := []string{
-			"ASDF_", "PYENV_", "RBENV_", "NVM_", "VOLTA_", "SDKMAN_", "CONDA_",
+			envPrefixASDF,
+			envPrefixPYENV,
+			envPrefixRBENV,
+			envPrefixNVM,
+			envPrefixVOLTA,
+			envPrefixSDKMAN,
+			envPrefixCONDA,
 			"GIT_",
 		}
 		for k, v := range raw {
@@ -291,61 +320,67 @@ func filterBootstrappedEnv(raw map[string]string) map[string]string {
 	}
 
 	exact := map[string]struct{}{
-		"PATH":                {},
-		"HOME":                {},
-		"USER":                {},
-		"LOGNAME":             {},
-		"SHELL":               {},
-		"TMPDIR":              {},
-		"TMP":                 {},
-		"TEMP":                {},
-		"LANG":                {},
-		"LC_ALL":              {},
-		"LC_CTYPE":            {},
-		"TERM":                {},
-		"COLORTERM":           {},
-		"XDG_CONFIG_HOME":     {},
-		"XDG_CACHE_HOME":      {},
-		"XDG_DATA_HOME":       {},
-		"GOBIN":               {},
-		"GOPATH":              {},
-		"GOROOT":              {},
-		"JAVA_HOME":           {},
-		"PNPM_HOME":           {},
-		"BUN_INSTALL":         {},
-		"CARGO_HOME":          {},
-		"RUSTUP_HOME":         {},
-		"VIRTUAL_ENV":         {},
-		"CONDA_PREFIX":        {},
-		"CONDA_DEFAULT_ENV":   {},
-		"CONDA_EXE":           {},
-		"GOPROXY":             {},
-		"GOPRIVATE":           {},
-		"GONOPROXY":           {},
-		"GONOSUMDB":           {},
-		"GOSUMDB":             {},
-		"GOFLAGS":             {},
-		"GOTOOLCHAIN":         {},
-		"GOINSECURE":          {},
-		"GOVCS":               {},
-		"HTTP_PROXY":          {},
-		"HTTPS_PROXY":         {},
-		"NO_PROXY":            {},
-		"ALL_PROXY":           {},
-		"http_proxy":          {},
-		"https_proxy":         {},
-		"no_proxy":            {},
-		"all_proxy":           {},
-		"GIT_TERMINAL_PROMPT": {},
-		"GIT_ASKPASS":         {},
-		"GIT_SSH":             {},
-		"GIT_SSH_COMMAND":     {},
-		"SSH_AUTH_SOCK":       {},
-		"SSL_CERT_FILE":       {},
-		"SSL_CERT_DIR":        {},
+		envKeyPath:          {},
+		envKeyHome:          {},
+		envKeyUser:          {},
+		envKeyLogname:       {},
+		envKeyShell:         {},
+		"TMPDIR":            {},
+		"TMP":               {},
+		"TEMP":              {},
+		envKeyLang:          {},
+		envKeyLCAll:         {},
+		"LC_CTYPE":          {},
+		"TERM":              {},
+		"COLORTERM":         {},
+		"XDG_CONFIG_HOME":   {},
+		"XDG_CACHE_HOME":    {},
+		"XDG_DATA_HOME":     {},
+		"GOBIN":             {},
+		"GOPATH":            {},
+		"GOROOT":            {},
+		"JAVA_HOME":         {},
+		"PNPM_HOME":         {},
+		"BUN_INSTALL":       {},
+		"CARGO_HOME":        {},
+		"RUSTUP_HOME":       {},
+		"VIRTUAL_ENV":       {},
+		"CONDA_PREFIX":      {},
+		"CONDA_DEFAULT_ENV": {},
+		"CONDA_EXE":         {},
+		"GOPROXY":           {},
+		"GOPRIVATE":         {},
+		"GONOPROXY":         {},
+		"GONOSUMDB":         {},
+		"GOSUMDB":           {},
+		"GOFLAGS":           {},
+		"GOTOOLCHAIN":       {},
+		"GOINSECURE":        {},
+		"GOVCS":             {},
+		"HTTP_PROXY":        {},
+		"HTTPS_PROXY":       {},
+		"NO_PROXY":          {},
+		"ALL_PROXY":         {},
+		"http_proxy":        {},
+		"https_proxy":       {},
+		"no_proxy":          {},
+		"all_proxy":         {},
+		envKeyGitSSHCommand: {},
+		"GIT_ASKPASS":       {},
+		"GIT_SSH":           {},
+		"SSH_AUTH_SOCK":     {},
+		"SSL_CERT_FILE":     {},
+		"SSL_CERT_DIR":      {},
 	}
 	prefixes := []string{
-		"ASDF_", "PYENV_", "RBENV_", "NVM_", "VOLTA_", "SDKMAN_", "LC_", "CONDA_",
+		envPrefixASDF,
+		envPrefixPYENV,
+		envPrefixRBENV,
+		envPrefixNVM,
+		envPrefixVOLTA,
+		envPrefixSDKMAN,
+		envPrefixLC,
+		envPrefixCONDA,
 		"GIT_",
 	}
 	for k, v := range raw {

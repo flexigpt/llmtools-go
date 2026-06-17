@@ -73,8 +73,17 @@ func TestMIMEForPathCoverage(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			abs, mt, mode, method, err := MIMEForPath(mustTestPolicy(t), tc.path)
+			policy := mustTestPolicy(t)
+			abs, mt, mode, method, err := MIMEForPath(policy, tc.path)
 
+			wantAbs := tc.wantAbs
+			if wantAbs != "" {
+				resolvedWantAbs, resolveErr := policy.ResolvePath(wantAbs, "")
+				if resolveErr != nil {
+					t.Fatalf("failed to resolve expected path %q: %v", wantAbs, resolveErr)
+				}
+				wantAbs = resolvedWantAbs
+			}
 			if tc.wantErrIs != nil || tc.wantNotExist || tc.wantErrContains != "" {
 				if err == nil {
 					t.Fatalf("expected error, got nil (abs=%q mt=%q mode=%q method=%q)", abs, mt, mode, method)
@@ -94,8 +103,8 @@ func TestMIMEForPathCoverage(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if abs != tc.wantAbs {
-				t.Fatalf("abs=%q want=%q", abs, tc.wantAbs)
+			if abs != wantAbs {
+				t.Fatalf("abs=%q want=%q", abs, wantAbs)
 			}
 			if mt != tc.wantMIME {
 				t.Fatalf("mime=%q want=%q", mt, tc.wantMIME)

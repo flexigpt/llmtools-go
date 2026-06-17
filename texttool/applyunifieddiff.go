@@ -140,6 +140,7 @@ const (
 	filePlanActionNoop          filePlanAction = "noop"
 	filePlanActionCreate        filePlanAction = "create"
 	filePlanActionWriteExisting filePlanAction = "write_existing"
+	filePlanActionChmodExisting filePlanAction = "chmod_existing"
 	filePlanActionDelete        filePlanAction = "delete"
 )
 
@@ -1442,7 +1443,8 @@ func planFilePatch(
 		)
 		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
 	}
-	if len(file.Hunks) == 0 {
+	modeOnly := file.isModeOnly()
+	if len(file.Hunks) == 0 && !modeOnly {
 		result.OK = true
 		result.Status = ApplyUnifiedDiffStatusAlreadyApplied
 		result.Message = "File patch contains no text hunks; nothing to apply."
@@ -1473,7 +1475,9 @@ func planFilePatch(
 		result.Message = err.Error()
 		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
 	}
-
+	if modeOnly {
+		return planModeOnlyFilePatch(p, file, target, result, exists)
+	}
 	if file.isCreateLike() {
 		return planCreateFilePatch(ctx, p, file, args, target, result, exists)
 	}
@@ -1607,6 +1611,62 @@ func planFilePatch(
 		Perm:            targetPerm,
 		VerifyContent:   true,
 		ExpectedContent: originalContent,
+	}
+}
+
+func planModeOnlyFilePatch(
+	p fspolicy.FSPolicy,
+	file parsedPatchFile,
+	target targetResolution,
+	result ApplyUnifiedDiffFileOut,
+	exists bool,
+) fileApplyPlan {
+	if !exists {
+		result.Status = ApplyUnifiedDiffStatusNeedsInfo
+		result.Message = "target file does not exist: " + target.DisplayPath
+		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
+	}
+
+	if err := requireNoSymlinkExistingRegularFileResolved(p, target.ResolvedPath); err != nil {
+		result.Status = ApplyUnifiedDiffStatusError
+		result.Message = err.Error()
+		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
+	}
+
+	tf, err := readTextFileNoSymlink(p, target.ResolvedPath)
+	if err != nil {
+		result.Status = ApplyUnifiedDiffStatusError
+		result.Message = err.Error()
+		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
+	}
+
+	targetPerm := file.NewFilePerm
+	if targetPerm == 0 {
+		result.Status = ApplyUnifiedDiffStatusAlreadyApplied
+		result.OK = true
+		result.Message = "File patch contains no text hunks; nothing to apply."
+		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
+	}
+
+	if tf.Perm == targetPerm {
+		result.OK = true
+		result.Status = ApplyUnifiedDiffStatusAlreadyApplied
+		result.Message = "Mode-only patch is already applied for this file."
+		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
+	}
+
+	result.OK = true
+	result.Status = ApplyUnifiedDiffStatusApplicable
+	result.Message = fmt.Sprintf("File mode can be updated from %#o to %#o.", tf.Perm, targetPerm)
+
+	return fileApplyPlan{
+		Result:          result,
+		Action:          filePlanActionChmodExisting,
+		DisplayPath:     target.DisplayPath,
+		ResolvedPath:    target.ResolvedPath,
+		Perm:            targetPerm,
+		VerifyContent:   true,
+		ExpectedContent: tf.Render(),
 	}
 }
 
@@ -1782,7 +1842,17 @@ func executeFilePlan(p fspolicy.FSPolicy, plan fileApplyPlan) error {
 				return verifyFilePlanCurrentContent(p, plan)
 			},
 		)
-
+	case filePlanActionChmodExisting:
+		if plan.Perm == 0 {
+			return errors.New("chmod plan has no file mode")
+		}
+		if err := verifyFilePlanCurrentContent(p, plan); err != nil {
+			return err
+		}
+		if err := requireNoSymlinkExistingRegularFileResolved(p, plan.ResolvedPath); err != nil {
+			return err
+		}
+		return os.Chmod(plan.ResolvedPath, plan.Perm)
 	case filePlanActionDelete:
 		if err := verifyFilePlanCurrentContent(p, plan); err != nil {
 			return err
@@ -1889,6 +1959,7 @@ func resolvePatchTarget(
 	isOnlyPatchFile bool,
 ) (target targetResolution, candidates, diagnostics []string, status ApplyUnifiedDiffStatus, err error) {
 	patchPaths := patchPathCandidates(file)
+	var hardResolveErr error
 
 	allCandidates := candidatePathDisplayList(patchPaths, candidateInfos)
 
@@ -1908,6 +1979,8 @@ func resolvePatchTarget(
 		for _, path := range patchPaths {
 			resolvedTarget, resolveErr := resolveTargetPath(p, path)
 			if resolveErr != nil {
+				hardResolveErr = firstHardTargetResolutionError(hardResolveErr, resolveErr)
+
 				diagnostics = append(
 					diagnostics,
 					fmt.Sprintf("diff path %q could not be resolved: %v", path, resolveErr),
@@ -1941,6 +2014,13 @@ func resolvePatchTarget(
 		if hasMissingTarget {
 			return missingTarget, allCandidates, diagnostics, "", nil
 		}
+		if hardResolveErr != nil {
+			return targetResolution{},
+				allCandidates,
+				diagnostics,
+				ApplyUnifiedDiffStatusError,
+				fmt.Errorf("delete target path from diff violates filesystem policy: %w", hardResolveErr)
+		}
 		if len(patchPaths) > 0 {
 			return targetResolution{}, allCandidates, diagnostics, ApplyUnifiedDiffStatusNeedsInfo, errors.New(
 				"delete target path from diff could not be resolved",
@@ -1954,6 +2034,7 @@ func resolvePatchTarget(
 		for _, path := range patchPaths {
 			target, err := resolveTargetPath(p, path)
 			if err != nil {
+				hardResolveErr = firstHardTargetResolutionError(hardResolveErr, err)
 				diagnostics = append(diagnostics, fmt.Sprintf("diff path %q could not be resolved: %v", path, err))
 				continue
 			}
@@ -1983,13 +2064,21 @@ func resolvePatchTarget(
 		for _, path := range patchPaths {
 			target, err := resolveTargetPath(p, path)
 			if err != nil {
+				hardResolveErr = firstHardTargetResolutionError(hardResolveErr, err)
+
 				diagnostics = append(diagnostics, fmt.Sprintf("diff path %q could not be resolved: %v", path, err))
 				continue
 			}
 			return target, allCandidates, diagnostics, "", nil
 		}
 	}
-
+	if hardResolveErr != nil {
+		return targetResolution{},
+			allCandidates,
+			diagnostics,
+			ApplyUnifiedDiffStatusError,
+			fmt.Errorf("target path from diff violates filesystem policy: %w", hardResolveErr)
+	}
 	if isOnlyPatchFile && len(candidateInfos) == 1 {
 		target, err := resolveTargetPath(p, candidateInfos[0].Path)
 		if err != nil {
@@ -2009,6 +2098,21 @@ func resolvePatchTarget(
 	return targetResolution{}, allCandidates, diagnostics, ApplyUnifiedDiffStatusNeedsInfo, errors.New(
 		"diff does not include a usable target path",
 	)
+}
+
+func firstHardTargetResolutionError(current, err error) error {
+	if current != nil {
+		return current
+	}
+	if isHardTargetResolutionError(err) {
+		return err
+	}
+	return nil
+}
+
+func isHardTargetResolutionError(err error) bool {
+	return errors.Is(err, fspolicy.ErrOutsideAllowedRoots) ||
+		errors.Is(err, fspolicy.ErrInvalidPath)
 }
 
 func resolveCandidateMatches(
@@ -2517,10 +2621,10 @@ func findOldBlockMatch(
 	if m, ok, count := findUniqueGlobal(lines, block, compareTrimmed); ok {
 		return blockMatch{Start: m, Method: "trimmed-global"}, true, diagnostics
 	} else if count > 1 {
-		if m2, ok2 := chooseNearest(lines, block, hint, compareTrimmed); ok2 {
-			return blockMatch{Start: m2, Method: "trimmed-nearest-hint"}, true, diagnostics
-		}
-		diagnostics = append(diagnostics, fmt.Sprintf("trimmed old block matched %d locations", count))
+		diagnostics = append(
+			diagnostics,
+			fmt.Sprintf("trimmed old block matched %d locations; refusing to choose by distant line hint", count),
+		)
 	}
 	if m, ok, d := findDeletionAnchoredWindow(lines, block, kinds, hint); ok {
 		diagnostics = append(diagnostics, d...)
@@ -2639,7 +2743,7 @@ func findDeletionAnchoredWindow(
 		}
 
 		candidates++
-		score := 0.90 + contextRatio*0.08 - float64(absInt(start-hint))*0.001
+		score := 0.90 + contextRatio*0.08 - fuzzyHintPenalty(start, hint)
 		if best.Start < 0 || score > best.Score {
 			secondScore = best.Score
 			best = blockMatch{
@@ -2857,7 +2961,7 @@ func findBestScoredWindow(
 		}
 
 		candidates++
-		scoreWithHint := score - float64(absInt(i-hint))*0.001
+		scoreWithHint := score - fuzzyHintPenalty(i, hint)
 
 		if best.Start < 0 || scoreWithHint > best.Score {
 			secondScore = best.Score
@@ -2882,6 +2986,10 @@ func findBestScoredWindow(
 	return best, true, []string{
 		fmt.Sprintf("scored fuzzy search selected line %d with score %.3f", best.Start+1, best.Score),
 	}
+}
+
+func fuzzyHintPenalty(start, hint int) float64 {
+	return float64(min(absInt(start-hint), hunkNearbyLineTolerance)) * 0.001
 }
 
 func scoreFuzzyWindow(actual, expected []string, kinds []byte) (float64, bool) {
@@ -3053,6 +3161,13 @@ func isMarkdownFenceLine(line string) bool {
 		strings.HasPrefix(s, "~~~")
 }
 
+func (f parsedPatchFile) isModeOnly() bool {
+	return len(f.Hunks) == 0 &&
+		f.NewFilePerm != 0 &&
+		!f.isCreate() &&
+		!f.isDelete()
+}
+
 func (f parsedPatchFile) fileKeyMatches(fileKey string) bool {
 	fileKey = strings.TrimSpace(fileKey)
 	if fileKey == "" {
@@ -3116,7 +3231,7 @@ func (f parsedPatchFile) isDelete() bool {
 
 func (a filePlanAction) mutates() bool {
 	switch a {
-	case filePlanActionCreate, filePlanActionWriteExisting, filePlanActionDelete:
+	case filePlanActionCreate, filePlanActionWriteExisting, filePlanActionChmodExisting, filePlanActionDelete:
 		return true
 	default:
 		return false

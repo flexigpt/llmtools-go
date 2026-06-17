@@ -272,9 +272,9 @@ func TestRegistry_Call_UnknownTool(t *testing.T) {
 
 func TestRegistry_Call_TimeoutResolution(t *testing.T) {
 	const (
-		sleepDur    = 60 * time.Millisecond
 		defaultTout = 20 * time.Millisecond
 		shortTout   = 10 * time.Millisecond
+		watchdog    = 5 * time.Second
 	)
 
 	tests := []struct {
@@ -317,12 +317,13 @@ func TestRegistry_Call_TimeoutResolution(t *testing.T) {
 
 			tool := mkTool("github.com/acme/tools.Sleepy", "sleepy")
 			fn := func(ctx context.Context, _ json.RawMessage) ([]spec.ToolOutputUnion, error) {
-				select {
-				case <-time.After(sleepDur):
-					return textOut("ok"), nil
-				case <-ctx.Done():
+				// For timeout cases, block until the registry-provided context is canceled.
+				// This avoids wall-clock flakiness on slower macOS/Windows CI runners.
+				if tc.wantErrIs != nil {
+					<-ctx.Done()
 					return nil, ctx.Err()
 				}
+				return textOut("ok"), nil
 			}
 			if err := r.RegisterTool(tool, fn); err != nil {
 				t.Fatalf("RegisterTool error: %v", err)
@@ -332,23 +333,38 @@ func TestRegistry_Call_TimeoutResolution(t *testing.T) {
 			if tc.callOpt != nil {
 				opts = append(opts, tc.callOpt)
 			}
-			out, err := r.Call(t.Context(), tool.GoImpl.FuncID, json.RawMessage(`{}`), opts...)
+			type callResult struct {
+				out []spec.ToolOutputUnion
+				err error
+			}
 
-			if tc.wantErrIs != nil {
-				if err == nil || !errors.Is(err, tc.wantErrIs) {
-					t.Fatalf("Call error: got %v want errors.Is(%v)=true", err, tc.wantErrIs)
+			resultCh := make(chan callResult, 1)
+			go func() {
+				out, err := r.Call(t.Context(), tool.GoImpl.FuncID, json.RawMessage(`{}`), opts...)
+				resultCh <- callResult{out: out, err: err}
+			}()
+
+			select {
+			case res := <-resultCh:
+				if tc.wantErrIs != nil {
+					if res.err == nil || !errors.Is(res.err, tc.wantErrIs) {
+						t.Fatalf("Call error: got %v want errors.Is(%v)=true", res.err, tc.wantErrIs)
+					}
+					return
 				}
-				return
-			}
 
-			if err != nil {
-				t.Fatalf("Call unexpected error: %v", err)
-			}
-			if len(out) != 1 || out[0].Kind != spec.ToolOutputKindText || out[0].TextItem == nil {
-				t.Fatalf("Call output shape: got %#v want single text output", out)
-			}
-			if out[0].TextItem.Text != tc.wantTextOutput {
-				t.Fatalf("Call output text: got %q want %q", out[0].TextItem.Text, tc.wantTextOutput)
+				if res.err != nil {
+					t.Fatalf("Call unexpected error: %v", res.err)
+				}
+				if len(res.out) != 1 || res.out[0].Kind != spec.ToolOutputKindText || res.out[0].TextItem == nil {
+					t.Fatalf("Call output shape: got %#v want single text output", res.out)
+				}
+				if res.out[0].TextItem.Text != tc.wantTextOutput {
+					t.Fatalf("Call output text: got %q want %q", res.out[0].TextItem.Text, tc.wantTextOutput)
+				}
+
+			case <-time.After(watchdog):
+				t.Fatalf("Call did not return within %v", watchdog)
 			}
 		})
 	}

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -611,4 +612,376 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 			t.Fatalf("metadata-only multi-file content mismatch: got %q", got)
 		}
 	})
+	t.Run("markdown_fenced_diff_with_prose_before_and_after", func(t *testing.T) {
+		path := writeTextFile(t, dir, "fenced.md", "A\nB\nC\n")
+		diff := strings.Join([]string{
+			"Here is the patch:",
+			"",
+			"```diff",
+			"diff --git a/fenced.md b/fenced.md",
+			"--- a/fenced.md",
+			"+++ b/fenced.md",
+			"@@ -1,3 +1,3 @@",
+			" A",
+			"-B",
+			"+X",
+			" C",
+			"```",
+			"",
+			"That should fix it.",
+			"",
+		}, "\n")
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("fenced diff status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, path); got != "A\nX\nC\n" {
+			t.Fatalf("fenced diff content mismatch: got %q", got)
+		}
+	})
+
+	t.Run("malformed_hunk_header_still_applies_by_body_match", func(t *testing.T) {
+		path := writeTextFile(t, dir, "malformed-header.txt", "A\nB\nC\n")
+		diff := makePatchText(
+			"diff --git a/malformed-header.txt b/malformed-header.txt",
+			"--- a/malformed-header.txt",
+			"+++ b/malformed-header.txt",
+			"@@ broken @@",
+			" A",
+			"-B",
+			"+X",
+			" C",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("malformed header status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if len(out.Files) != 1 || !containsDiagnostic(out.Files[0].Diagnostics, "malformed hunk header") {
+			t.Fatalf("expected malformed-header diagnostic, got %#v", out.Files)
+		}
+		if got := readFileString(t, path); got != "A\nX\nC\n" {
+			t.Fatalf("malformed header content mismatch: got %q", got)
+		}
+	})
+
+	t.Run("omitted_hunk_body_prefixes_are_context_with_diagnostic", func(t *testing.T) {
+		path := writeTextFile(t, dir, "omitted-prefix.txt", "A\nB\nC\n")
+		diff := makePatchText(
+			"diff --git a/omitted-prefix.txt b/omitted-prefix.txt",
+			"--- a/omitted-prefix.txt",
+			"+++ b/omitted-prefix.txt",
+			"@@ -1,3 +1,3 @@",
+			"A",
+			"-B",
+			"+X",
+			"C",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("omitted-prefix status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if len(out.Files) != 1 || !containsDiagnostic(out.Files[0].Diagnostics, "without unified-diff prefixes") {
+			t.Fatalf("expected omitted-prefix diagnostic, got %#v", out.Files)
+		}
+		if got := readFileString(t, path); got != "A\nX\nC\n" {
+			t.Fatalf("omitted-prefix content mismatch: got %q", got)
+		}
+	})
+
+	t.Run("multi_hunk_partial_already_applied_file", func(t *testing.T) {
+		path := writeTextFile(t, dir, "partial-already.txt", "A\nX\nC\nD\nE\nF\n")
+		diff := makePatchText(
+			"diff --git a/partial-already.txt b/partial-already.txt",
+			"--- a/partial-already.txt",
+			"+++ b/partial-already.txt",
+			"@@ -1,3 +1,3 @@",
+			" A",
+			"-B",
+			"+X",
+			" C",
+			"@@ -4,3 +4,3 @@",
+			" D",
+			"-E",
+			"+Y",
+			" F",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("partial-already status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if len(out.Files) != 1 ||
+			out.Files[0].AppliedHunks != 1 ||
+			out.Files[0].AlreadyAppliedHunks != 1 {
+			t.Fatalf("partial-already hunk counts mismatch: %#v", out.Files)
+		}
+		if got := readFileString(t, path); got != "A\nX\nC\nD\nY\nF\n" {
+			t.Fatalf("partial-already content mismatch: got %q", got)
+		}
+	})
+
+	t.Run("delete_patch_missing_file_is_already_applied", func(t *testing.T) {
+		diff := makePatchText(
+			"diff --git a/missing-delete.txt b/missing-delete.txt",
+			"deleted file mode 100644",
+			"--- a/missing-delete.txt",
+			"+++ /dev/null",
+			"@@ -1,1 +0,0 @@",
+			"-gone",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusAlreadyApplied ||
+			len(out.Files) != 1 ||
+			out.Files[0].Status != ApplyUnifiedDiffStatusAlreadyApplied {
+			t.Fatalf("missing delete should be already applied: status=%s files=%#v", out.Status, out.Files)
+		}
+	})
+
+	t.Run("existing_non_utf8_file_returns_error", func(t *testing.T) {
+		full := filepath.Join(dir, "non-utf8.txt")
+		if err := os.WriteFile(full, []byte{0xff, 0xfe, 0xfd}, 0o600); err != nil {
+			t.Fatalf("write non-utf8 fixture: %v", err)
+		}
+		diff := makePatchText(
+			"diff --git a/non-utf8.txt b/non-utf8.txt",
+			"--- a/non-utf8.txt",
+			"+++ b/non-utf8.txt",
+			"@@ -1,1 +1,1 @@",
+			"-old",
+			"+new",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusError {
+			t.Fatalf("non-utf8 status mismatch: want error got %s files=%#v", out.Status, out.Files)
+		}
+	})
+
+	t.Run("symlink_target_is_refused_on_unix", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlink creation requires privileges on some Windows setups")
+		}
+
+		writeTextFile(t, dir, "real-symlink-target.txt", "A\nB\n")
+		linkPath := filepath.Join(dir, "link-target.txt")
+		if err := os.Symlink("real-symlink-target.txt", linkPath); err != nil {
+			t.Fatalf("create symlink: %v", err)
+		}
+
+		diff := makePatchText(
+			"diff --git a/link-target.txt b/link-target.txt",
+			"--- a/link-target.txt",
+			"+++ b/link-target.txt",
+			"@@ -1,2 +1,2 @@",
+			" A",
+			"-B",
+			"+X",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusError {
+			t.Fatalf("symlink target status mismatch: want error got %s files=%#v", out.Status, out.Files)
+		}
+	})
+
+	t.Run("quoted_paths_with_spaces_end_to_end", func(t *testing.T) {
+		path := writeTextFile(t, dir, "path with spaces.txt", "A\nB\n")
+		diff := makePatchText(
+			`diff --git "a/path with spaces.txt" "b/path with spaces.txt"`,
+			`--- "a/path with spaces.txt"`,
+			`+++ "b/path with spaces.txt"`,
+			"@@ -1,2 +1,2 @@",
+			" A",
+			"-B",
+			"+X",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("quoted paths status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, path); got != "A\nX\n" {
+			t.Fatalf("quoted paths content mismatch: got %q", got)
+		}
+	})
+
+	t.Run("candidate_suffix_precedence_over_basename", func(t *testing.T) {
+		basenameOnly := writeTextFile(t, dir, "other/target.txt", "A\nB\n")
+		suffix := writeTextFile(t, dir, "repo/src/target.txt", "A\nB\n")
+		diff := makePatchText(
+			"diff --git a/src/target.txt b/src/target.txt",
+			"--- a/src/target.txt",
+			"+++ b/src/target.txt",
+			"@@ -1,2 +1,2 @@",
+			" A",
+			"-B",
+			"+X",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{
+			DiffText:       diff,
+			CandidatePaths: []string{"other/target.txt", "repo/src/target.txt"},
+		})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("suffix precedence status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, suffix); got != "A\nX\n" {
+			t.Fatalf("suffix candidate should have been patched, got %q", got)
+		}
+		if got := readFileString(t, basenameOnly); got != "A\nB\n" {
+			t.Fatalf("basename-only candidate must not be patched, got %q", got)
+		}
+	})
+
+	t.Run("ambiguous_fuzzy_hunk_refuses_to_apply", func(t *testing.T) {
+		path := writeTextFile(
+			t,
+			dir,
+			"ambiguous-fuzzy.txt",
+			strings.Join([]string{
+				"  A  ",
+				"  B  ",
+				"  C  ",
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				strings.Repeat("pad", 1),
+				"  A  ",
+				"  B  ",
+				"  C  ",
+				"",
+			}, "\n"),
+		)
+		diff := makePatchText(
+			"diff --git a/ambiguous-fuzzy.txt b/ambiguous-fuzzy.txt",
+			"--- a/ambiguous-fuzzy.txt",
+			"+++ b/ambiguous-fuzzy.txt",
+			"@@ -10,3 +10,3 @@",
+			" A",
+			"-B",
+			"+X",
+			" C",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusConflict {
+			t.Fatalf("ambiguous fuzzy should conflict, got status=%s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, path); strings.Contains(got, "\nX\n") {
+			t.Fatalf("ambiguous fuzzy conflict must not modify file, got %q", got)
+		}
+	})
+}
+
+func TestApplyUnifiedDiffAllowedRootEscapeReturnsError(t *testing.T) {
+	parent := t.TempDir()
+	allowed := filepath.Join(parent, "allowed")
+	if err := os.MkdirAll(allowed, 0o755); err != nil {
+		t.Fatalf("mkdir allowed root: %v", err)
+	}
+	outside := filepath.Join(parent, "outside.txt")
+	if err := os.WriteFile(outside, []byte("A\nB\n"), 0o600); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+
+	tt, err := NewTextTool(
+		WithWorkBaseDir(allowed),
+		WithAllowedRoots([]string{allowed}),
+		WithBlockSymlinks(true),
+	)
+	mustNoErr(t, err)
+
+	diff := makePatchText(
+		"diff --git a/../outside.txt b/../outside.txt",
+		"--- a/../outside.txt",
+		"+++ b/../outside.txt",
+		"@@ -1,2 +1,2 @@",
+		" A",
+		"-B",
+		"+X",
+	)
+
+	out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+	mustNoErr(t, err)
+	if out.Status != ApplyUnifiedDiffStatusError {
+		t.Fatalf("allowed-root escape status mismatch: want error got %s files=%#v", out.Status, out.Files)
+	}
+	if got := readFileString(t, outside); got != "A\nB\n" {
+		t.Fatalf("outside file must not be modified, got %q", got)
+	}
+}
+
+func TestApplyUnifiedDiffModeOnlyPatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows chmod does not reliably expose unix executable mode bits")
+	}
+
+	dir := t.TempDir()
+	tt := mustNewTextTool(t, dir)
+	path := writeTextFile(t, dir, "mode-only.sh", "#!/bin/sh\necho hi\n")
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("chmod setup: %v", err)
+	}
+
+	diff := makePatchText(
+		"diff --git a/mode-only.sh b/mode-only.sh",
+		"old mode 100644",
+		"new mode 100755",
+	)
+
+	out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+	mustNoErr(t, err)
+	if out.Status != ApplyUnifiedDiffStatusApplied {
+		t.Fatalf("mode-only apply status mismatch: %s files=%#v", out.Status, out.Files)
+	}
+	if got := readFileString(t, path); got != "#!/bin/sh\necho hi\n" {
+		t.Fatalf("mode-only patch must not rewrite content, got %q", got)
+	}
+	st, err := os.Stat(path)
+	mustNoErr(t, err)
+	if st.Mode().Perm() != 0o755 {
+		t.Fatalf("mode-only chmod mismatch: want 0755 got %#o", st.Mode().Perm())
+	}
+
+	out, err = tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+	mustNoErr(t, err)
+	if out.Status != ApplyUnifiedDiffStatusAlreadyApplied {
+		t.Fatalf("mode-only reapply status mismatch: %s files=%#v", out.Status, out.Files)
+	}
+}
+
+func containsDiagnostic(diags []string, sub string) bool {
+	for _, diag := range diags {
+		if strings.Contains(diag, sub) {
+			return true
+		}
+	}
+	return false
 }
