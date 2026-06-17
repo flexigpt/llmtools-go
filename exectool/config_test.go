@@ -220,8 +220,8 @@ func TestNewExecTool_OptionsAndSnapshotPolicy(t *testing.T) {
 		t.Fatalf("expected allowed roots to be configured")
 	}
 	roots := et.toolPolicy.fsPolicy.AllowedRoots()
-	if len(roots) != 1 || roots[0] != root {
-		t.Fatalf("unexpected allowed roots: %#v", roots)
+	if len(roots) != 1 || canonicalize(roots[0]) != canonicalize(root) {
+		t.Fatalf("unexpected allowed roots: %#v", canonicalize(roots[0]))
 	}
 	if !et.toolPolicy.fsPolicy.BlockSymlinks() {
 		t.Fatalf("expected fs policy to block symlinks")
