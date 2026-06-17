@@ -396,11 +396,3 @@ func TestIsProbablyTextSample(t *testing.T) {
 		})
 	}
 }
-
-// Helper to write binary files in tests.
-func mustWriteBytes(t *testing.T, path string, data []byte) {
-	t.Helper()
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("failed to write test file %q: %v", path, err)
-	}
-}

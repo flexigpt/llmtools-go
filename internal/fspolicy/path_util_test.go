@@ -317,3 +317,26 @@ func TestCanonicalizeExistingDir_Errors(t *testing.T) {
 		})
 	}
 }
+
+func TestCanonicalizeAllowedRoots_DedupesAndSorts(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	rootA := mkdirAll(t, filepath.Join(tmp, "a-root"))
+	rootB := mkdirAll(t, filepath.Join(tmp, "b-root"))
+
+	roots, err := canonicalizeAllowedRoots([]string{"  ", rootB, rootA, rootA, "", rootB})
+	if err != nil {
+		t.Fatalf("canonicalizeAllowedRoots error: %v", err)
+	}
+
+	want := []string{pathAbs(t, rootA), pathAbs(t, rootB)}
+	if len(roots) != len(want) {
+		t.Fatalf("len=%d, want %d (roots=%v)", len(roots), len(want), roots)
+	}
+	for i := range want {
+		if roots[i] != want[i] {
+			t.Fatalf("roots[%d]=%q, want %q (all=%v)", i, roots[i], want[i], roots)
+		}
+	}
+}

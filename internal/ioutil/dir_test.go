@@ -270,6 +270,166 @@ func TestListDirectory_Additional(t *testing.T) {
 	}
 }
 
+func TestListDirectoryDetailedNormalizedCoverage(t *testing.T) {
+	root := t.TempDir()
+
+	mustWriteBytes(t, filepath.Join(root, "a.txt"), []byte("a"))
+	mustWriteBytes(t, filepath.Join(root, "b.log"), []byte("b"))
+	mustWriteBytes(t, filepath.Join(root, ".hidden.txt"), []byte("hidden"))
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+
+	haveLink := false
+	if err := os.Symlink(filepath.Join(root, "a.txt"), filepath.Join(root, "link")); err == nil {
+		haveLink = true
+	}
+
+	wantVisible := []ListDirectoryEntry{
+		{Name: "a.txt", Kind: ListDirectoryKindFile},
+		{Name: "b.log", Kind: ListDirectoryKindFile},
+	}
+	if haveLink {
+		wantVisible = append(wantVisible, ListDirectoryEntry{Name: "link", Kind: ListDirectoryKindOther})
+	}
+	wantVisible = append(wantVisible, ListDirectoryEntry{Name: "sub", Kind: ListDirectoryKindDirectory})
+
+	wantAll := append([]ListDirectoryEntry{{Name: ".hidden.txt", Kind: ListDirectoryKindFile}}, wantVisible...)
+
+	tests := []struct {
+		name            string
+		opts            ListDirectoryOptions
+		want            []ListDirectoryEntry
+		wantReached     bool
+		wantErrIs       error
+		wantErrContains string
+	}{
+		{
+			name: "default behavior lists visible entries sorted",
+			opts: ListDirectoryOptions{
+				Kind:              ListDirectoryKindAll,
+				IncludeDotEntries: false,
+				MaxEntries:        0,
+			},
+			want: wantVisible,
+		},
+		{
+			name: "include dot entries keeps hidden files",
+			opts: ListDirectoryOptions{
+				Kind:              ListDirectoryKindAll,
+				IncludeDotEntries: true,
+				MaxEntries:        0,
+			},
+			want: wantAll,
+		},
+		{
+			name: "files only excludes directories and symlinks",
+			opts: ListDirectoryOptions{
+				Kind:              ListDirectoryKindFile,
+				IncludeDotEntries: false,
+				MaxEntries:        0,
+			},
+			want: []ListDirectoryEntry{
+				{Name: "a.txt", Kind: ListDirectoryKindFile},
+				{Name: "b.log", Kind: ListDirectoryKindFile},
+			},
+		},
+		{
+			name: "directories only returns the immediate directory",
+			opts: ListDirectoryOptions{
+				Kind:              ListDirectoryKindDirectory,
+				IncludeDotEntries: true,
+				MaxEntries:        0,
+			},
+			want: []ListDirectoryEntry{{Name: "sub", Kind: ListDirectoryKindDirectory}},
+		},
+		{
+			name: "max entries truncates after sorting",
+			opts: ListDirectoryOptions{
+				Kind:              ListDirectoryKindAll,
+				IncludeDotEntries: false,
+				MaxEntries:        2,
+			},
+			want:        wantVisible[:2],
+			wantReached: true,
+		},
+		{
+			name: "invalid kind errors",
+			opts: ListDirectoryOptions{
+				Kind:              ListDirectoryKind("bogus"),
+				IncludeDotEntries: false,
+			},
+			wantErrContains: "invalid kind",
+		},
+		{
+			name: "negative max entries errors",
+			opts: ListDirectoryOptions{
+				Kind:              ListDirectoryKindAll,
+				IncludeDotEntries: false,
+				MaxEntries:        -1,
+			},
+			wantErrContains: "maxEntries must be >= 0",
+		},
+		{
+			name: "invalid glob errors",
+			opts: ListDirectoryOptions{
+				Kind:              ListDirectoryKindAll,
+				IncludeDotEntries: false,
+				NameGlob:          "[",
+			},
+			wantErrIs: filepath.ErrBadPattern,
+		},
+	}
+
+	if haveLink {
+		tests = append(tests, struct {
+			name            string
+			opts            ListDirectoryOptions
+			want            []ListDirectoryEntry
+			wantReached     bool
+			wantErrIs       error
+			wantErrContains string
+		}{
+			name: "other kind returns symlink entries",
+			opts: ListDirectoryOptions{
+				Kind:              ListDirectoryKindOther,
+				IncludeDotEntries: true,
+				MaxEntries:        0,
+			},
+			want: []ListDirectoryEntry{{Name: "link", Kind: ListDirectoryKindOther}},
+		})
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, reached, err := ListDirectoryDetailedNormalized(root, tc.opts)
+
+			if tc.wantErrIs != nil || tc.wantErrContains != "" {
+				if err == nil {
+					t.Fatalf("expected error, got nil (got=%#v)", got)
+				}
+				if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+					t.Fatalf("error=%v; want errors.Is(_, %v)=true", err, tc.wantErrIs)
+				}
+				if tc.wantErrContains != "" && !strings.Contains(err.Error(), tc.wantErrContains) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrContains)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if reached != tc.wantReached {
+				t.Fatalf("reachedMaxEntries=%v want=%v", reached, tc.wantReached)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got=%#v want=%#v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestListDirectoryNormalized_SortsAndFiltersAndErrors(t *testing.T) {
 	td := t.TempDir()
 

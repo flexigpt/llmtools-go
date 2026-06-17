@@ -157,6 +157,9 @@ func RegisterBuiltins(r *Registry) error {
 	if err := RegisterTypedAsTextTool(r, tt.DeleteTextTool(), tt.DeleteText); err != nil {
 		return err
 	}
+	if err := RegisterTypedAsTextTool(r, tt.ApplyUnifiedDiffTool(), tt.ApplyUnifiedDiff); err != nil {
+		return err
+	}
 
 	return nil
 }

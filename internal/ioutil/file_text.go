@@ -49,7 +49,6 @@ func (t *TextFile) Render() string {
 //
 // Safety behavior (policy-driven):
 //   - Enforces maxBytes if > 0.
-//   - Uses policy.RequireExistingRegularFile (which enforces symlink rules if enabled).
 func ReadTextFileUTF8(p fspolicy.FSPolicy, path string, maxBytes int64) (*TextFile, error) {
 	abs, err := p.ResolvePath(path, "")
 	if err != nil {
@@ -106,6 +105,7 @@ func normalizeNewlines(s string, kind NewlineKind) (norm string, hasFinalNewline
 	// Convert to internal '\n' representation for consistent line splitting.
 	if kind == NewlineCRLF {
 		s = strings.ReplaceAll(s, "\r\n", "\n")
+		s = strings.ReplaceAll(s, "\r", "\n")
 	} else {
 		// If file is mostly LF but contains stray CR (rare), normalize them too.
 		s = strings.ReplaceAll(s, "\r", "\n")

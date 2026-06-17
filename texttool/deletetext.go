@@ -146,7 +146,7 @@ func deleteText(
 	if err != nil {
 		return nil, err
 	}
-
+	originalContent := tf.Render()
 	matchIdxs := findTrimmedTextBlockMatchStarts(tf.Lines, textAbove, oldText, textBelow)
 
 	if err := ioutil.EnsureNonOverlappingFixedWidth(matchIdxs, len(oldText)); err != nil {
@@ -189,11 +189,11 @@ func deleteText(
 		}
 		start := v
 		end := start + len(oldText)
-		tf.Lines = replaceTextBlockLinesSlice(tf.Lines, start, end, nil)
+		tf.Lines = ioutil.ReplaceStringRange(tf.Lines, start, end, nil)
 	}
 
 	outStr := tf.Render()
-	if err := ioutil.WriteFileAtomicBytesResolved(p, tf.Path, []byte(outStr), tf.Perm, true); err != nil {
+	if err := ioutil.WriteRenderedTextFileIfUnchanged(p, tf, originalContent, outStr); err != nil {
 		return nil, err
 	}
 

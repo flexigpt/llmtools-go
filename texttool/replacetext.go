@@ -166,7 +166,7 @@ func replaceText(
 	if err != nil {
 		return nil, err
 	}
-
+	originalContent := tf.Render()
 	matchIdxs := findTrimmedTextBlockMatchStarts(tf.Lines, textAbove, oldText, textBelow)
 
 	if err := ioutil.EnsureNonOverlappingFixedWidth(matchIdxs, len(oldText)); err != nil {
@@ -209,11 +209,11 @@ func replaceText(
 		}
 		start := v
 		end := start + len(oldText)
-		tf.Lines = replaceTextBlockLinesSlice(tf.Lines, start, end, newText)
+		tf.Lines = ioutil.ReplaceStringRange(tf.Lines, start, end, newText)
 	}
 
 	outStr := tf.Render()
-	if err := ioutil.WriteFileAtomicBytesResolved(p, tf.Path, []byte(outStr), tf.Perm, true); err != nil {
+	if err := ioutil.WriteRenderedTextFileIfUnchanged(p, tf, originalContent, outStr); err != nil {
 		return nil, err
 	}
 
@@ -288,9 +288,9 @@ func findTrimmedTextBlockMatchStarts(lines, textAbove, oldText, textBelow []stri
 	}
 
 	tLines := ioutil.GetTrimmedLines(lines)
-	tAbove := trimTextBlockAboveBoundaryBlankLines(ioutil.GetTrimmedLines(textAbove))
+	tAbove := ioutil.TrimTrailingBoundaryBlankLines(ioutil.GetTrimmedLines(textAbove))
 	tOld := ioutil.GetTrimmedLines(oldText)
-	tBelow := trimTextBlockBelowBoundaryBlankLines(ioutil.GetTrimmedLines(textBelow))
+	tBelow := ioutil.TrimLeadingBoundaryBlankLines(ioutil.GetTrimmedLines(textBelow))
 
 	var idxs []int
 	for start := 0; start+len(tOld) <= len(tLines); start++ {
@@ -340,37 +340,6 @@ func textBlockBelowContextMatchesAt(tLines, tBelow []string, targetEnd int) bool
 		}
 	}
 
-	return false
-}
-
-func trimTextBlockAboveBoundaryBlankLines(lines []string) []string {
-	if len(lines) == 0 || !textBlockHasAnyNonBlankTrimmedLine(lines) {
-		return textBlockCloneStringSlice(lines)
-	}
-	end := len(lines)
-	for end > 0 && lines[end-1] == "" {
-		end--
-	}
-	return textBlockCloneStringSlice(lines[:end])
-}
-
-func trimTextBlockBelowBoundaryBlankLines(lines []string) []string {
-	if len(lines) == 0 || !textBlockHasAnyNonBlankTrimmedLine(lines) {
-		return textBlockCloneStringSlice(lines)
-	}
-	start := 0
-	for start < len(lines) && lines[start] == "" {
-		start++
-	}
-	return textBlockCloneStringSlice(lines[start:])
-}
-
-func textBlockHasAnyNonBlankTrimmedLine(lines []string) bool {
-	for _, line := range lines {
-		if line != "" {
-			return true
-		}
-	}
 	return false
 }
 
@@ -432,9 +401,9 @@ func buildTextBlockDiagnosticJSON(
 			diag.SampleCandidates = append(diag.SampleCandidates, textBlockCandidateDiagnostic{
 				StartLine:   idx + 1,
 				EndLine:     matchEndExclusive,
-				BeforeLines: textBlockCloneStringSlice(lines[beforeStart:idx]),
-				MatchedText: textBlockCloneStringSlice(lines[idx:matchEndExclusive]),
-				AfterLines:  textBlockCloneStringSlice(lines[matchEndExclusive:afterEnd]),
+				BeforeLines: toolutil.CloneStringSlice(lines[beforeStart:idx]),
+				MatchedText: toolutil.CloneStringSlice(lines[idx:matchEndExclusive]),
+				AfterLines:  toolutil.CloneStringSlice(lines[matchEndExclusive:afterEnd]),
 			})
 		}
 	}
@@ -444,34 +413,4 @@ func buildTextBlockDiagnosticJSON(
 		return fmt.Sprintf("candidateStartLines=%v", ioutil.OneBasedLineNumbers(matchIdxs))
 	}
 	return string(b)
-}
-
-func textBlockCloneStringSlice(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]string, len(in))
-	copy(out, in)
-	return out
-}
-
-func replaceTextBlockLinesSlice(lines []string, start, end int, repl []string) []string {
-	if start < 0 {
-		start = 0
-	}
-	if end < start {
-		end = start
-	}
-	if start > len(lines) {
-		start = len(lines)
-	}
-	if end > len(lines) {
-		end = len(lines)
-	}
-
-	out := make([]string, 0, len(lines)-(end-start)+len(repl))
-	out = append(out, lines[:start]...)
-	out = append(out, repl...)
-	out = append(out, lines[end:]...)
-	return out
 }

@@ -3,6 +3,7 @@ package ioutil
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -165,7 +166,7 @@ func TestReadTextFileUTF8_Behavior(t *testing.T) {
 			if tf.HasFinalNewline != tc.wantFinal {
 				t.Fatalf("HasFinalNewline=%v want=%v", tf.HasFinalNewline, tc.wantFinal)
 			}
-			if !equalStringSlices(tf.Lines, tc.wantLines) {
+			if !slices.Equal(tf.Lines, tc.wantLines) {
 				t.Fatalf("Lines=%#v want=%#v", tf.Lines, tc.wantLines)
 			}
 			if tf.ModTimeUTC == nil {

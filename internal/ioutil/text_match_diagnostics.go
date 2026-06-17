@@ -3,6 +3,8 @@ package ioutil
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 type MaybeStartLineDiagnostic struct {
@@ -199,8 +201,8 @@ func BuildInsertionPointDiagnosticJSON(
 
 			diag.SampleCandidates = append(diag.SampleCandidates, insertionPointCandidateDiagnostic{
 				InsertedAtLine: idx + 1,
-				BeforeLines:    cloneStringSlice(lines[beforeStart:idx]),
-				AfterLines:     cloneStringSlice(lines[idx:afterEnd]),
+				BeforeLines:    toolutil.CloneStringSlice(lines[beforeStart:idx]),
+				AfterLines:     toolutil.CloneStringSlice(lines[idx:afterEnd]),
 			})
 		}
 	}
@@ -257,9 +259,9 @@ func BuildBlockMatchDiagnosticJSON(
 			diag.SampleCandidates = append(diag.SampleCandidates, blockMatchCandidateDiagnostic{
 				StartLine:   idx + 1,
 				EndLine:     matchEndExclusive,
-				BeforeLines: cloneStringSlice(lines[beforeStart:idx]),
-				MatchLines:  cloneStringSlice(lines[idx:matchEndExclusive]),
-				AfterLines:  cloneStringSlice(lines[matchEndExclusive:afterEnd]),
+				BeforeLines: toolutil.CloneStringSlice(lines[beforeStart:idx]),
+				MatchLines:  toolutil.CloneStringSlice(lines[idx:matchEndExclusive]),
+				AfterLines:  toolutil.CloneStringSlice(lines[matchEndExclusive:afterEnd]),
 			})
 		}
 	}
@@ -279,14 +281,5 @@ func OneBasedLineNumbers(idxs []int) []int {
 	for i, idx := range idxs {
 		out[i] = idx + 1
 	}
-	return out
-}
-
-func cloneStringSlice(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]string, len(in))
-	copy(out, in)
 	return out
 }

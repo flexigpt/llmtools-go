@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -172,10 +174,145 @@ func TestSearchFilesBasic(t *testing.T) {
 
 			if tc.allowedPaths != nil {
 				for _, p := range got {
-					if !containsString(tc.allowedPaths, p) {
+					if !slices.Contains(tc.allowedPaths, p) {
 						t.Fatalf("result %q not in allowed set %#v", p, tc.allowedPaths)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestSearchFilesDetailedCoverage(t *testing.T) {
+	tree := createSearchCoverageTree(t)
+	policy := mustTestPolicy(t)
+
+	tests := []struct {
+		name            string
+		opts            SearchFilesOptions
+		want            map[string]SearchFileMatchKind
+		wantReached     bool
+		wantErrContains string
+		wantErrIs       error
+	}{
+		{
+			name: "path search only is case-insensitive and globbed",
+			opts: SearchFilesOptions{
+				Root:              tree.root,
+				Query:             "alpha",
+				Regexp:            false,
+				SearchIn:          SearchFilesSearchInPath,
+				MaxResults:        0,
+				IncludeDotEntries: false,
+				NameGlob:          "*.txt",
+				CaseSensitive:     false,
+			},
+			want: map[string]SearchFileMatchKind{
+				tree.alpha: SearchFileMatchKindPath,
+			},
+		},
+		{
+			name: "content search includes dot entries when requested",
+			opts: SearchFilesOptions{
+				Root:              tree.root,
+				Query:             "NEEDLE",
+				Regexp:            false,
+				SearchIn:          SearchFilesSearchInContent,
+				MaxResults:        0,
+				IncludeDotEntries: true,
+				NameGlob:          "*.txt",
+				CaseSensitive:     false,
+			},
+			want: map[string]SearchFileMatchKind{
+				tree.both:    SearchFileMatchKindContent,
+				tree.content: SearchFileMatchKindContent,
+				tree.nested:  SearchFileMatchKindContent,
+				tree.hidden:  SearchFileMatchKindContent,
+			},
+		},
+		{
+			name: "content search excludes dot entries by default",
+			opts: SearchFilesOptions{
+				Root:              tree.root,
+				Query:             "NEEDLE",
+				Regexp:            false,
+				SearchIn:          SearchFilesSearchInContent,
+				MaxResults:        0,
+				IncludeDotEntries: false,
+				NameGlob:          "*.txt",
+				CaseSensitive:     false,
+			},
+			want: map[string]SearchFileMatchKind{
+				tree.both:    SearchFileMatchKindContent,
+				tree.content: SearchFileMatchKindContent,
+				tree.nested:  SearchFileMatchKindContent,
+			},
+		},
+		{
+			name: "path or content combines match kinds and honors max results",
+			opts: SearchFilesOptions{
+				Root:              tree.root,
+				Query:             "needle",
+				Regexp:            false,
+				SearchIn:          SearchFilesSearchInPathOrContent,
+				MaxResults:        1,
+				IncludeDotEntries: false,
+				NameGlob:          "*.txt",
+				CaseSensitive:     false,
+			},
+			want: map[string]SearchFileMatchKind{
+				tree.both: SearchFileMatchKindPathAndContent,
+			},
+			wantReached: true,
+		},
+		{
+			name: "invalid searchIn errors",
+			opts: SearchFilesOptions{
+				Root:     tree.root,
+				Query:    "x",
+				Regexp:   false,
+				SearchIn: SearchFilesSearchIn("bogus"),
+			},
+			wantErrContains: "invalid searchIn",
+		},
+		{
+			name: "invalid glob errors",
+			opts: SearchFilesOptions{
+				Root:     tree.root,
+				Query:    "x",
+				Regexp:   false,
+				SearchIn: SearchFilesSearchInContent,
+				NameGlob: "[",
+			},
+			wantErrIs: filepath.ErrBadPattern,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, reached, err := SearchFilesDetailed(t.Context(), policy, tc.opts)
+
+			if tc.wantErrIs != nil || tc.wantErrContains != "" {
+				if err == nil {
+					t.Fatalf("expected error, got nil (got=%#v)", got)
+				}
+				if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+					t.Fatalf("error=%v; want errors.Is(_, %v)=true", err, tc.wantErrIs)
+				}
+				if tc.wantErrContains != "" && !strings.Contains(err.Error(), tc.wantErrContains) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrContains)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if reached != tc.wantReached {
+				t.Fatalf("reachedLimit=%v want=%v", reached, tc.wantReached)
+			}
+			if gotMap := searchMatchKinds(got); !reflect.DeepEqual(gotMap, tc.want) {
+				t.Fatalf("got=%#v want=%#v", gotMap, tc.want)
 			}
 		})
 	}

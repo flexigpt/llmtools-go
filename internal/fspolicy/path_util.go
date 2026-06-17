@@ -52,6 +52,20 @@ func isPathWithinRoot(root, p string) (bool, error) {
 	return true, nil
 }
 
+func lexicalAbsCleanPath(p string) (string, error) {
+	norm, err := normalizePath(p)
+	if err != nil {
+		return "", err
+	}
+	abs, err := filepath.Abs(norm)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+	abs = applySystemRootAliases(abs)
+	return abs, nil
+}
+
 // normalizePath:
 // - trims
 // - rejects empty and NUL byte

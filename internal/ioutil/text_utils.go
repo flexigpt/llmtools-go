@@ -3,6 +3,8 @@ package ioutil
 import (
 	"fmt"
 	"strings"
+
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 // NewlineKind describes the newline convention detected in a file.
@@ -129,8 +131,8 @@ func FindTrimmedInsertionPointMatchCandidates(lines, above, below []string) []In
 
 	switch {
 	case len(above) > 0 && len(below) > 0:
-		tAbove := trimTrailingBoundaryBlankLines(GetTrimmedLines(above))
-		tBelow := trimLeadingBoundaryBlankLines(GetTrimmedLines(below))
+		tAbove := TrimTrailingBoundaryBlankLines(GetTrimmedLines(above))
+		tBelow := TrimLeadingBoundaryBlankLines(GetTrimmedLines(below))
 
 		var matches []InsertionPointMatch
 		for insertAt := 0; insertAt <= len(tLines); insertAt++ {
@@ -201,29 +203,29 @@ func FindTrimmedInsertionPointMatchCandidates(lines, above, below []string) []In
 	}
 }
 
-func trimTrailingBoundaryBlankLines(lines []string) []string {
-	if len(lines) == 0 || !hasAnyNonBlankTrimmedLine(lines) {
-		return cloneStringSlice(lines)
+func TrimTrailingBoundaryBlankLines(lines []string) []string {
+	if len(lines) == 0 || !HasAnyNonBlankTrimmedLine(lines) {
+		return toolutil.CloneStringSlice(lines)
 	}
 	end := len(lines)
 	for end > 0 && lines[end-1] == "" {
 		end--
 	}
-	return cloneStringSlice(lines[:end])
+	return toolutil.CloneStringSlice(lines[:end])
 }
 
-func trimLeadingBoundaryBlankLines(lines []string) []string {
-	if len(lines) == 0 || !hasAnyNonBlankTrimmedLine(lines) {
-		return cloneStringSlice(lines)
+func TrimLeadingBoundaryBlankLines(lines []string) []string {
+	if len(lines) == 0 || !HasAnyNonBlankTrimmedLine(lines) {
+		return toolutil.CloneStringSlice(lines)
 	}
 	start := 0
 	for start < len(lines) && lines[start] == "" {
 		start++
 	}
-	return cloneStringSlice(lines[start:])
+	return toolutil.CloneStringSlice(lines[start:])
 }
 
-func hasAnyNonBlankTrimmedLine(lines []string) bool {
+func HasAnyNonBlankTrimmedLine(lines []string) bool {
 	for _, line := range lines {
 		if line != "" {
 			return true
@@ -329,6 +331,39 @@ func IsBlockEqualsAt(haystack, needle []string, start int) bool {
 	}
 	for j := range needle {
 		if haystack[start+j] != needle[j] {
+			return false
+		}
+	}
+	return true
+}
+
+func ReplaceStringRange(lines []string, start, end int, repl []string) []string {
+	if start < 0 {
+		start = 0
+	}
+	if end < start {
+		end = start
+	}
+	if start > len(lines) {
+		start = len(lines)
+	}
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	out := make([]string, 0, len(lines)-(end-start)+len(repl))
+	out = append(out, lines[:start]...)
+	out = append(out, repl...)
+	out = append(out, lines[end:]...)
+	return out
+}
+
+func StringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
 			return false
 		}
 	}

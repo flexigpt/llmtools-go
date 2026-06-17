@@ -83,11 +83,12 @@ func NewTextTool(opts ...TextToolOption) (*TextTool, error) {
 	return tt, nil
 }
 
-func (tt *TextTool) DeleteTextTool() spec.Tool    { return toolutil.CloneTool(deleteTextTool) }
-func (tt *TextTool) FindTextTool() spec.Tool      { return toolutil.CloneTool(findTextTool) }
-func (tt *TextTool) InsertTextTool() spec.Tool    { return toolutil.CloneTool(insertTextTool) }
-func (tt *TextTool) ReadTextRangeTool() spec.Tool { return toolutil.CloneTool(readTextRangeTool) }
-func (tt *TextTool) ReplaceTextTool() spec.Tool   { return toolutil.CloneTool(replaceTextTool) }
+func (tt *TextTool) DeleteTextTool() spec.Tool       { return toolutil.CloneTool(deleteTextTool) }
+func (tt *TextTool) FindTextTool() spec.Tool         { return toolutil.CloneTool(findTextTool) }
+func (tt *TextTool) InsertTextTool() spec.Tool       { return toolutil.CloneTool(insertTextTool) }
+func (tt *TextTool) ReadTextRangeTool() spec.Tool    { return toolutil.CloneTool(readTextRangeTool) }
+func (tt *TextTool) ReplaceTextTool() spec.Tool      { return toolutil.CloneTool(replaceTextTool) }
+func (tt *TextTool) ApplyUnifiedDiffTool() spec.Tool { return toolutil.CloneTool(applyUnifiedDiffTool) }
 
 func (tt *TextTool) DeleteText(ctx context.Context, args DeleteTextArgs) (*DeleteTextOut, error) {
 	return toolutil.WithRecoveryResp(func() (*DeleteTextOut, error) {
@@ -136,6 +137,18 @@ func (tt *TextTool) ReplaceText(ctx context.Context, args ReplaceTextArgs) (*Rep
 		}
 		p := tt.snapshotPolicy()
 		return replaceText(ctx, args, p)
+	})
+}
+
+func (tt *TextTool) ApplyUnifiedDiff(ctx context.Context, args ApplyUnifiedDiffArgs) (*ApplyUnifiedDiffOut, error) {
+	return toolutil.WithRecoveryResp(func() (*ApplyUnifiedDiffOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return tt.applyUnifiedDiff(ctx, args)
 	})
 }
 

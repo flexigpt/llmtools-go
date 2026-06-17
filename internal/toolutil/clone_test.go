@@ -74,6 +74,59 @@ func TestCloneTool(t *testing.T) {
 	}
 }
 
+func TestCloneStringSlice(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      []string
+		wantNil bool
+		want    []string
+	}{
+		{
+			name:    "nil input returns nil",
+			in:      nil,
+			wantNil: true,
+		},
+		{
+			name:    "empty input returns nil",
+			in:      []string{},
+			wantNil: true,
+		},
+		{
+			name:    "empty-but-non-nil input returns nil",
+			in:      make([]string, 0, 1),
+			wantNil: true,
+		},
+		{
+			name: "non-empty input is copied",
+			in:   []string{"alpha", "beta"},
+			want: []string{"alpha", "beta"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CloneStringSlice(tc.in)
+
+			if tc.wantNil {
+				if got != nil {
+					t.Fatalf("expected nil result, got %#v", got)
+				}
+				return
+			}
+
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("unexpected clone. want %#v, got %#v", tc.want, got)
+			}
+
+			snap := append([]string(nil), tc.in...)
+			got[0] += "-changed"
+			if !reflect.DeepEqual(tc.in, snap) {
+				t.Fatalf("input slice changed after mutating clone; slices alias")
+			}
+		})
+	}
+}
+
 func assertBytesDeepCopied(t *testing.T, orig, cloned []byte) {
 	t.Helper()
 

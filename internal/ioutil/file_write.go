@@ -7,9 +7,50 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
+
+func WriteRenderedTextFileIfUnchanged(
+	p fspolicy.FSPolicy,
+	tf *TextFile,
+	originalContent string,
+	nextContent string,
+) error {
+	if tf == nil {
+		return errors.New("internal error: nil text file")
+	}
+	if len(nextContent) > toolutil.MaxTextProcessingBytes {
+		return fmt.Errorf(
+			"edited file would be too large: %d bytes; max %d",
+			len(nextContent),
+			toolutil.MaxTextProcessingBytes,
+		)
+	}
+	if !utf8.ValidString(nextContent) {
+		return errors.New("edited content is not valid UTF-8")
+	}
+
+	return WriteFileAtomicBytesResolvedWithPreCommitCheck(
+		p,
+		tf.Path,
+		[]byte(nextContent),
+		tf.Perm,
+		true,
+		func() error {
+			current, err := ReadTextFileUTF8(p, tf.Path, toolutil.MaxTextProcessingBytes)
+			if err != nil {
+				return fmt.Errorf("target file changed or became unreadable after it was read: %w", err)
+			}
+			if current.Render() != originalContent {
+				return errors.New("target file changed after it was read; re-run the text edit")
+			}
+			return nil
+		},
+	)
+}
 
 // WriteFileAtomicBytesResolved is like WriteFileAtomicBytes but assumes dst is already an absolute,
 // policy-resolved path (i.e. returned from p.ResolvePath).
@@ -30,7 +71,29 @@ func WriteFileAtomicBytesResolved(
 		return fmt.Errorf("path must be absolute: %s", dst)
 	}
 	dst = filepath.Clean(filepath.FromSlash(dst))
-	return writeFileAtomicBytesResolved(p, dst, data, perm, overwrite, false)
+	return writeFileAtomicBytesResolved(p, dst, data, perm, overwrite, false, nil)
+}
+
+// WriteFileAtomicBytesResolvedWithPreCommitCheck is like WriteFileAtomicBytesResolved,
+// but runs preCommit after the temp file has been fully written/fsynced and
+// immediately before the final atomic commit.
+func WriteFileAtomicBytesResolvedWithPreCommitCheck(
+	p fspolicy.FSPolicy,
+	dst string,
+	data []byte,
+	perm fs.FileMode,
+	overwrite bool,
+	preCommit func() error,
+) error {
+	dst = strings.TrimSpace(dst)
+	if dst == "" || strings.ContainsRune(dst, 0) {
+		return ErrInvalidPath
+	}
+	if !filepath.IsAbs(dst) {
+		return fmt.Errorf("path must be absolute: %s", dst)
+	}
+	dst = filepath.Clean(filepath.FromSlash(dst))
+	return writeFileAtomicBytesResolved(p, dst, data, perm, overwrite, false, preCommit)
 }
 
 // WriteFileAtomicBytesWithParents is a policy-aware convenience wrapper that:
@@ -64,7 +127,7 @@ func WriteFileAtomicBytesWithParents(
 			return dst, err
 		}
 	}
-	return dst, writeFileAtomicBytesResolved(p, dst, data, perm, overwrite, true)
+	return dst, writeFileAtomicBytesResolved(p, dst, data, perm, overwrite, true, nil)
 }
 
 func writeFileAtomicBytesResolved(
@@ -74,10 +137,14 @@ func writeFileAtomicBytesResolved(
 	perm fs.FileMode,
 	overwrite bool,
 	parentAlreadyChecked bool,
+	preCommit func() error,
 ) error {
 	parent := filepath.Dir(dst)
 
-	if p.BlockSymlinks() && !parentAlreadyChecked {
+	// If symlinks are blocked, parentAlreadyChecked is only a prior check,
+	// not a guarantee. Re-check immediately before creating the temp file to
+	// reduce parent-swap TOCTOU exposure.
+	if p.BlockSymlinks() || !parentAlreadyChecked {
 		if err := p.VerifyDirResolved(parent); err != nil {
 			return err
 		}
@@ -135,6 +202,11 @@ func writeFileAtomicBytesResolved(
 	}
 	if err := tmp.Close(); err != nil {
 		return cleanup(err)
+	}
+	if preCommit != nil {
+		if err := preCommit(); err != nil {
+			return cleanup(err)
+		}
 	}
 
 	if err := commitAtomicTempFile(tmpName, dst, parent, perm, overwrite); err != nil {

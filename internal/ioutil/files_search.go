@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -247,14 +248,24 @@ func newSearchStringMatcher(query string, useRegexp, caseSensitive bool) (func(s
 
 func searchFileContent(path string, matchString func(string) bool) bool {
 	info, err := os.Stat(path)
-	if err != nil || info.IsDir() || info.Size() < 0 || info.Size() >= maxSearchContentBytes {
+	if err != nil || info.IsDir() || info.Size() < 0 || info.Size() > maxSearchContentBytes {
 		return false
 	}
 
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return false
 	}
+	defer f.Close()
+
+	data, err := io.ReadAll(io.LimitReader(f, maxSearchContentBytes+1))
+	if err != nil {
+		return false
+	}
+	if int64(len(data)) > maxSearchContentBytes {
+		return false
+	}
+
 	if len(data) == 0 {
 		return matchString("")
 	}

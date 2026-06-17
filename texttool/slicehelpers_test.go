@@ -1,6 +1,10 @@
 package texttool
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/flexigpt/llmtools-go/internal/ioutil"
+)
 
 func Test_insertLines_Bounds(t *testing.T) {
 	lines := []string{"A", "B"}
@@ -20,7 +24,7 @@ func Test_insertLines_Bounds(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := insertLines(lines, tt.idx, toInsert)
+			got := ioutil.ReplaceStringRange(lines, tt.idx, tt.idx, toInsert)
 			if len(got) != len(tt.want) {
 				t.Fatalf("len: want %d got %d (%v)", len(tt.want), len(got), got)
 			}
@@ -51,7 +55,7 @@ func Test_replaceLinesSlice_Bounds(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := replaceTextBlockLinesSlice(lines, tt.start, tt.end, repl)
+			got := ioutil.ReplaceStringRange(lines, tt.start, tt.end, repl)
 			if len(got) != len(tt.want) {
 				t.Fatalf("len: want %d got %d (%v)", len(tt.want), len(got), got)
 			}

@@ -272,31 +272,46 @@ func findText(ctx context.Context, args FindTextArgs, p fspolicy.FSPolicy) (*Fin
 		}
 
 	case findTypeRegex:
-		locs := re.FindAllStringIndex(normalizedText, -1)
 
 		nonEmptyMatches := 0
 		zeroLengthMatches := 0
 
-		for _, loc := range locs {
+		for searchStart := 0; searchStart <= len(normalizedText); {
+
 			if err := ctx.Err(); err != nil {
 				return nil, err
+			}
+			loc := re.FindStringIndex(normalizedText[searchStart:])
+			if loc == nil {
+				break
 			}
 			if len(loc) != 2 || loc[0] < 0 || loc[1] < loc[0] || loc[1] > len(normalizedText) {
 				return nil, fmt.Errorf("internal error: invalid regex match range %v", loc)
 			}
-			if loc[0] == loc[1] {
+			startByte := searchStart + loc[0]
+			endByte := searchStart + loc[1]
+			if startByte == endByte {
 				zeroLengthMatches++
+				if startByte >= len(normalizedText) {
+					break
+				}
+				_, width := utf8.DecodeRuneInString(normalizedText[startByte:])
+				if width <= 0 {
+					width = 1
+				}
+				searchStart = startByte + width
 				continue
 			}
 
 			nonEmptyMatches++
 			if len(out.Matches) < maxMatches {
-				if err := addMatch(loc[0], loc[1]); err != nil {
+				if err := addMatch(startByte, endByte); err != nil {
 					return nil, err
 				}
 			} else {
 				out.AdditionalMatchesOmitted++
 			}
+			searchStart = endByte
 		}
 
 		if nonEmptyMatches == 0 && zeroLengthMatches > 0 {

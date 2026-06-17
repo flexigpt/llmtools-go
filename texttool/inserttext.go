@@ -141,13 +141,17 @@ func insertText(
 			return nil, errors.New("lineHint must be >= 1")
 		}
 	default:
-		// "computeInsertIndex" will return a clear invalid-position error.
+		return nil, fmt.Errorf(
+			`invalid position value %q (expected: "start","end","between")`,
+			pos,
+		)
 	}
 
 	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, toolutil.MaxTextProcessingBytes)
 	if err != nil {
 		return nil, err
 	}
+	originalContent := tf.Render()
 
 	insertAt, textAboveAt, textBelowAt, err := computeInsertIndex(
 		tf.Lines,
@@ -163,10 +167,10 @@ func insertText(
 		return nil, err
 	}
 
-	tf.Lines = insertLines(tf.Lines, insertAt, textToInsert)
+	tf.Lines = ioutil.ReplaceStringRange(tf.Lines, insertAt, insertAt, textToInsert)
 
 	outStr := tf.Render()
-	if err := ioutil.WriteFileAtomicBytesResolved(p, tf.Path, []byte(outStr), tf.Perm, true); err != nil {
+	if err := ioutil.WriteRenderedTextFileIfUnchanged(p, tf, originalContent, outStr); err != nil {
 		return nil, err
 	}
 
@@ -254,18 +258,4 @@ func computeInsertIndex(
 			pos,
 		)
 	}
-}
-
-func insertLines(lines []string, idx int, toInsert []string) []string {
-	if idx < 0 {
-		idx = 0
-	}
-	if idx > len(lines) {
-		idx = len(lines)
-	}
-	out := make([]string, 0, len(lines)+len(toInsert))
-	out = append(out, lines[:idx]...)
-	out = append(out, toInsert...)
-	out = append(out, lines[idx:]...)
-	return out
 }

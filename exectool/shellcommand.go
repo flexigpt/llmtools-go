@@ -352,58 +352,6 @@ func resolveWindowsAutoShell(env []string) (executil.SelectedShell, error) {
 	return executil.SelectedShell{}, errors.New("no suitable shell found on windows (pwsh/powershell/cmd)")
 }
 
-func resolveWindowsPowerShellPath(env []string) (string, bool) {
-	if p, _ := executil.LookPathInEnv("powershell", env); p != "" {
-		return p, true
-	}
-	if runtime.GOOS != toolutil.GOOSWindows {
-		return "", false
-	}
-	root, ok := executil.EnvListValue(env, "SystemRoot")
-	if !ok || strings.TrimSpace(root) == "" {
-		return "", false
-	}
-	p := filepath.Join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-	if existingRegularFile(p) {
-		return p, true
-	}
-	return "", false
-}
-
-func resolveWindowsCmdPath(env []string) (string, bool) {
-	if p, _ := executil.LookPathInEnv("cmd", env); p != "" {
-		return p, true
-	}
-	if runtime.GOOS != toolutil.GOOSWindows {
-		return "", false
-	}
-
-	if comspec, ok := executil.EnvListValue(env, "COMSPEC"); ok {
-		comspec = strings.TrimSpace(comspec)
-		if comspec != "" {
-			if p, err := executil.LookPathInEnv(comspec, env); err == nil && p != "" {
-				return p, true
-			}
-			if existingRegularFile(comspec) {
-				return comspec, true
-			}
-		}
-	}
-
-	if root, ok := executil.EnvListValue(env, "SystemRoot"); ok && strings.TrimSpace(root) != "" {
-		p := filepath.Join(root, "System32", "cmd.exe")
-		if existingRegularFile(p) {
-			return p, true
-		}
-	}
-	return "", false
-}
-
-func existingRegularFile(path string) bool {
-	st, err := os.Stat(path)
-	return err == nil && !st.IsDir()
-}
-
 func resolveUnixAutoShell(ctx context.Context, env []string) (executil.SelectedShell, error) {
 	// In Flatpak: prefer querying the host for the user's real shell.
 	if executil.HostSpawnAvailable(ctx) {
@@ -595,6 +543,53 @@ func resolveShell(ctx context.Context, name string, env []string) (executil.Sele
 	}
 }
 
+func resolveWindowsPowerShellPath(env []string) (string, bool) {
+	if p, _ := executil.LookPathInEnv("powershell", env); p != "" {
+		return p, true
+	}
+	if runtime.GOOS != toolutil.GOOSWindows {
+		return "", false
+	}
+	root, ok := executil.EnvListValue(env, "SystemRoot")
+	if !ok || strings.TrimSpace(root) == "" {
+		return "", false
+	}
+	p := filepath.Join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+	if existingRegularFile(p) {
+		return p, true
+	}
+	return "", false
+}
+
+func resolveWindowsCmdPath(env []string) (string, bool) {
+	if p, _ := executil.LookPathInEnv("cmd", env); p != "" {
+		return p, true
+	}
+	if runtime.GOOS != toolutil.GOOSWindows {
+		return "", false
+	}
+
+	if comspec, ok := executil.EnvListValue(env, "COMSPEC"); ok {
+		comspec = strings.TrimSpace(comspec)
+		if comspec != "" {
+			if p, err := executil.LookPathInEnv(comspec, env); err == nil && p != "" {
+				return p, true
+			}
+			if existingRegularFile(comspec) {
+				return comspec, true
+			}
+		}
+	}
+
+	if root, ok := executil.EnvListValue(env, "SystemRoot"); ok && strings.TrimSpace(root) != "" {
+		p := filepath.Join(root, "System32", "cmd.exe")
+		if existingRegularFile(p) {
+			return p, true
+		}
+	}
+	return "", false
+}
+
 func lookupHostExecutable(ctx context.Context, name string) (string, bool) {
 	rctx, rcancel := context.WithTimeout(ctx, 3*time.Second)
 	defer rcancel()
@@ -653,4 +648,9 @@ func effectiveMaxCommandLength(policy ExecutionPolicy) int {
 	v = max(v, 1)
 	v = min(v, executil.HardMaxCommandLength)
 	return v
+}
+
+func existingRegularFile(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir()
 }

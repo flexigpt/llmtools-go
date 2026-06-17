@@ -114,6 +114,39 @@ func TestApplySystemRootAliases(t *testing.T) {
 	}
 }
 
+func TestAllowSystemSymlink_DarwinAliases(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS != toolutil.GOOSDarwin {
+		t.Skip("darwin only")
+	}
+
+	tested := false
+	for alias, expected := range darwinSystemSymlinkAliases {
+		if _, err := os.Readlink(alias); err != nil {
+			continue
+		}
+
+		resolved, ok, err := allowSystemSymlink(alias)
+		if err != nil {
+			t.Fatalf("allowSystemSymlink(%q) unexpected error: %v", alias, err)
+		}
+		if !ok {
+			t.Fatalf("allowSystemSymlink(%q) returned ok=false", alias)
+		}
+		if resolved != filepath.Clean(expected) {
+			t.Fatalf("allowSystemSymlink(%q)=%q, want %q", alias, resolved, filepath.Clean(expected))
+		}
+
+		tested = true
+		break
+	}
+
+	if !tested {
+		t.Skip("no known system symlink aliases available")
+	}
+}
+
 func TestWalkDirNoSymlinkAbs_RequiresAbsolute(t *testing.T) {
 	t.Parallel()
 
@@ -143,6 +176,23 @@ func TestWalkDirNoSymlinkAbs_DotIsNoop(t *testing.T) {
 	}
 	if created != 0 {
 		t.Fatalf("created=%d want 0", created)
+	}
+}
+
+func TestWalkDirNoSymlinkAbs_FileComponentIsRejected(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	root := mkdirAll(t, filepath.Join(tmp, "root"))
+	filePath := writeFile(t, filepath.Join(root, "file"), []byte("x"))
+	p := mustNewPolicy(t, root, []string{root}, true)
+
+	_, err := p.walkDirNoSymlinkAbs(filepath.Join(filePath, "child"), false, 0)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "path component is not a directory") {
+		t.Fatalf("expected file-component error, got %v", err)
 	}
 }
 

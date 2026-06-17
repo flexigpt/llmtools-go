@@ -53,17 +53,32 @@ func New(workBaseDir string, allowedRoots []string, blockSymlinks bool) (FSPolic
 	}
 	if blockSymlinks {
 		if strings.TrimSpace(workBaseDir) != "" {
-			if err := tmpPolicy.verifyDirNoSymlinkAbs(tmpPolicy.workBaseDir); err != nil {
+			baseLex, err := lexicalAbsCleanPath(workBaseDir)
+			if err != nil {
 				return FSPolicy{}, fmt.Errorf(
 					"work base dir %q violates symlink policy: %w",
-					tmpPolicy.workBaseDir,
+					workBaseDir,
+					err,
+				)
+			}
+			if err := tmpPolicy.verifyDirNoSymlinkAbs(baseLex); err != nil {
+				return FSPolicy{}, fmt.Errorf(
+					"work base dir %q violates symlink policy: %w",
+					workBaseDir,
 					err,
 				)
 			}
 		}
 
 		for _, r := range tmpPolicy.allowedRoots {
-			if err := tmpPolicy.verifyDirNoSymlinkAbs(r); err != nil {
+			if strings.TrimSpace(r) == "" {
+				continue
+			}
+			rootLex, err := lexicalAbsCleanPath(r)
+			if err != nil {
+				return FSPolicy{}, fmt.Errorf("allowed root %q violates symlink policy: %w", r, err)
+			}
+			if err := tmpPolicy.verifyDirNoSymlinkAbs(rootLex); err != nil {
 				return FSPolicy{}, fmt.Errorf("allowed root %q violates symlink policy: %w", r, err)
 			}
 		}

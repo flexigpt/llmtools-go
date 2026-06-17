@@ -118,6 +118,93 @@ func TestNew_Errors(t *testing.T) {
 	}
 }
 
+func TestNew_DefaultsBaseToCWDWhenNoRoots(t *testing.T) {
+	t.Parallel()
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+
+	p, err := New("", nil, false)
+	if err != nil {
+		t.Fatalf("New error: %v", err)
+	}
+
+	wantBase := pathAbs(t, cwd)
+	if p.WorkBaseDir() != wantBase {
+		t.Fatalf("WorkBaseDir=%q, want %q", p.WorkBaseDir(), wantBase)
+	}
+	if p.HasAllowedRoots() {
+		t.Fatalf("HasAllowedRoots()=%v, want false", p.HasAllowedRoots())
+	}
+	if roots := p.AllowedRoots(); roots != nil {
+		t.Fatalf("AllowedRoots()=%v, want nil", roots)
+	}
+
+	got, err := p.ResolvePath(filepath.FromSlash("child/grand"), "")
+	if err != nil {
+		t.Fatalf("ResolvePath error: %v", err)
+	}
+	want := filepath.Join(wantBase, "child", "grand")
+	if got != want {
+		t.Fatalf("ResolvePath=%q, want %q", got, want)
+	}
+}
+
+func TestNew_BlockSymlinksRejectsSymlinkedConfigPaths(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	realRoot := mkdirAll(t, filepath.Join(tmp, "root"))
+	realBase := mkdirAll(t, filepath.Join(realRoot, "base"))
+
+	baseLink := filepath.Join(tmp, "base-link")
+	rootLink := filepath.Join(tmp, "root-link")
+
+	okBase := trySymlink(t, realBase, baseLink)
+	okRoot := trySymlink(t, realRoot, rootLink)
+	if !okBase || !okRoot {
+		t.Skip("symlinks not available")
+	}
+
+	type tc struct {
+		name    string
+		base    string
+		roots   []string
+		wantSub string
+	}
+
+	cases := []tc{
+		{
+			name:    "base_symlink_rejected",
+			base:    baseLink,
+			roots:   []string{realRoot},
+			wantSub: "work base dir",
+		},
+		{
+			name:    "allowed_root_symlink_rejected",
+			base:    realBase,
+			roots:   []string{rootLink},
+			wantSub: "allowed root",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := New(c.base, c.roots, true)
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			requireErrorIs(t, err, ErrSymlinkDisallowed)
+			if !strings.Contains(err.Error(), c.wantSub) {
+				t.Fatalf("error %q does not contain %q", err.Error(), c.wantSub)
+			}
+		})
+	}
+}
+
 func TestAllowedRoots_ReturnsCopy(t *testing.T) {
 	t.Parallel()
 
@@ -384,6 +471,43 @@ func TestRequireExistingRegularFile_SymlinksAllowed(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRequireExistingRegularFileResolved_BlockSymlinksRefusesSymlinkParent(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	root := mkdirAll(t, filepath.Join(tmp, "root"))
+	realDir := mkdirAll(t, filepath.Join(root, "real"))
+	regular := writeFile(t, filepath.Join(realDir, "file.txt"), []byte("x"))
+	linkDir := filepath.Join(root, "link")
+
+	if !trySymlink(t, realDir, linkDir) {
+		t.Skip("symlinks not available")
+	}
+
+	p := mustNewPolicy(t, root, []string{root}, true)
+
+	t.Run("real_file_ok", func(t *testing.T) {
+		t.Parallel()
+		if _, err := p.RequireExistingRegularFileResolved(regular); err != nil {
+			t.Fatalf("RequireExistingRegularFileResolved(%q) error: %v", regular, err)
+		}
+	})
+
+	t.Run("symlink_parent_refused", func(t *testing.T) {
+		t.Parallel()
+		resolved, err := p.ResolvePath(filepath.Join("link", "file.txt"), "")
+		if err != nil {
+			t.Fatalf("ResolvePath error: %v", err)
+		}
+
+		_, err = p.RequireExistingRegularFileResolved(resolved)
+		requireErrorIs(t, err, ErrSymlinkDisallowed)
+		if !strings.Contains(err.Error(), "refusing to traverse symlink path component") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 }
 
 func TestAllowedRootsEmpty_AllowsAnyAbsolutePath(t *testing.T) {

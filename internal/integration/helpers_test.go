@@ -123,7 +123,9 @@ func newHarness(t *testing.T, base string, execOpts ...exectool.ExecToolOption) 
 	if err := llmtools.RegisterTypedAsTextTool(r, tt.DeleteTextTool(), tt.DeleteText); err != nil {
 		t.Fatalf("register deletetext: %v", err)
 	}
-
+	if err := llmtools.RegisterTypedAsTextTool(r, tt.ApplyUnifiedDiffTool(), tt.ApplyUnifiedDiff); err != nil {
+		t.Fatalf("register applyunifieddiff: %v", err)
+	}
 	return &harness{t: t, base: base, r: r}
 }
 
