@@ -738,13 +738,14 @@ func parseUnifiedDiff(diffText string) (parsedPatch, error) {
 
 	finishCurrentHunk := func() {
 		if currentHunk != nil && hunkState.countsKnown() && !hunkState.declaredComplete() {
+			actualOld, actualNew := currentHunk.bodyCounts()
 			addFileDiag(
-				"hunk %s ended before declared line counts were satisfied: expected -%d/+%d, got -%d/+%d",
+				"hunk %s header counts do not match parsed body: declared -%d/+%d, parsed -%d/+%d",
 				currentHunk.Header,
 				currentHunk.OldCount,
 				currentHunk.NewCount,
-				hunkState.oldSeen,
-				hunkState.newSeen,
+				actualOld,
+				actualNew,
 			)
 		}
 		closeCurrentHunk()
@@ -3202,19 +3203,19 @@ func (f parsedPatchFile) isCreateLike() bool {
 }
 
 func (f parsedPatchFile) looksLikeCreateOnlyHunks() bool {
-	return !f.hasDeletedLines() && f.allHunksDeclareNoOldLines()
+	return !f.hasDeletedLines() && f.allHunksHaveNoOldContent()
 }
 
 func (f parsedPatchFile) hasDeletedLines() bool {
 	return f.DeletedLines > 0
 }
 
-func (f parsedPatchFile) allHunksDeclareNoOldLines() bool {
+func (f parsedPatchFile) allHunksHaveNoOldContent() bool {
 	if len(f.Hunks) == 0 {
 		return false
 	}
 	for _, h := range f.Hunks {
-		if h.OldCount != 0 {
+		if h.hasOldContent() {
 			return false
 		}
 	}
@@ -3248,6 +3249,30 @@ func (s looseHunkState) wouldOverflow(oldInc, newInc int) bool {
 
 func (s looseHunkState) countsKnown() bool {
 	return s.hunk != nil && s.hunk.OldCount >= 0 && s.hunk.NewCount >= 0
+}
+
+func (h parsedHunk) bodyCounts() (oldCount, newCount int) {
+	for _, line := range h.Lines {
+		switch line.Kind {
+		case '+':
+			newCount++
+		case '-':
+			oldCount++
+		default:
+			oldCount++
+			newCount++
+		}
+	}
+	return oldCount, newCount
+}
+
+func (h parsedHunk) hasOldContent() bool {
+	for _, line := range h.Lines {
+		if line.Kind != '+' {
+			return true
+		}
+	}
+	return false
 }
 
 func isDevNull(inPath string) bool {
