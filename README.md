@@ -36,7 +36,7 @@ Go-native, cross-platform tools for common local tasks, plus a small registry th
 
 - Cross-platform implementations for Linux, macOS, and Windows.
 - Instance-owned tools with configurable path policy.
-- Deterministic text-editing tools for line-oriented workflows.
+- Deterministic text-editing and unified-diff patching tools for line-oriented workflows.
 - Shell command and script execution with timeouts, output caps, and command blocking.
 - Structured tool manifests and normalized outputs for text, files, and images.
 
@@ -86,6 +86,15 @@ Grouped under `texttool`.
 - `inserttext`: insert text at start/end/between text blocks.
 - `replacetext`: replace text, with optional disambiguation using above/below text.
 - `deletetext`: delete text, with optional disambiguation using above/below text.
+- `applyunifieddiff`
+  - Apply or dry-run Git-style unified diffs against local UTF-8 text files.
+  - Supports multi-file patches, create/delete edits, mode-only changes, no-newline-at-EOF markers, and safe fuzzy hunk matching.
+  - Accepts explicit `fileTargets` when diff paths are missing, wrong, relative to a different base, or ambiguous.
+  - Accepts optional `candidatePaths` to help resolve patch targets by exact path, suffix, or unique basename.
+  - Tracks already-applied changes and returns structured per-file results plus reusable `fileTargets`.
+  - Set `dryRun=true` to inspect applicability without writing files.
+  - Set `strict=true` to require exact hunk matching only.
+  - The parser is intentionally tolerant of common malformed or LLM-generated diffs.
 
 ### Image tools
 
@@ -99,7 +108,7 @@ Grouped under `imagetool`.
 - `spec`: tool manifests and output union types.
 - `fstool`: filesystem tools.
 - `exectool`: shell command execution and script execution.
-- `texttool`: safe, deterministic line-based text editing tools.
+- `texttool`: safe, deterministic line-based text editing and unified-diff patching tools.
 - `imagetool`: image tools.
 
 ## Registry
