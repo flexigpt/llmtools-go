@@ -48,7 +48,7 @@ internal/pdfutil/extract.go;17;15
 internal/toolutil/clone.go;12;12
 internal/toolutil/panic_handler.go;10;10
 registry.go;146;83
-texttool/applyunifieddiff.go;1241;883
+texttool/applyunifieddiff.go;1377;1010
 texttool/deletetext.go;46;43
 texttool/findtext.go;139;122
 texttool/inserttext.go;68;59

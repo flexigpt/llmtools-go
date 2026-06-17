@@ -63,7 +63,7 @@ tasks:
       # Issue: https://github.com/golang/go/issues/74873
       - go test -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage.out -tags=integration ./...
       - go-test-coverage --config=./.testcoverage.yml --breakdown-file-name=file_breakdown.txt
-      - cat file_breakdown.txt
+      # - cat file_breakdown.txt
 
   lt:
     cmds:

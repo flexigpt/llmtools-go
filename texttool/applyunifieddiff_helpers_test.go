@@ -65,6 +65,30 @@ func TestApplyUnifiedDiffValidationHelpers(t *testing.T) {
 			wantErrSub: "contains NUL byte",
 		},
 		{
+			name: "fileTarget_fileKey_must_not_contain_nul",
+			args: ApplyUnifiedDiffArgs{
+				DiffText:    "diff --git a/a b/a\n",
+				FileTargets: []ApplyUnifiedDiffFileTarget{{FileKey: "file-\x001", TargetPath: "a.txt"}},
+			},
+			wantErrSub: "fileTargets[0].fileKey contains NUL byte",
+		},
+		{
+			name: "fileTarget_oldPath_must_not_contain_nul",
+			args: ApplyUnifiedDiffArgs{
+				DiffText:    "diff --git a/a b/a\n",
+				FileTargets: []ApplyUnifiedDiffFileTarget{{OldPath: "bad\x00path", TargetPath: "a.txt"}},
+			},
+			wantErrSub: "fileTargets[0].oldPath contains NUL byte",
+		},
+		{
+			name: "fileTarget_newPath_must_not_contain_nul",
+			args: ApplyUnifiedDiffArgs{
+				DiffText:    "diff --git a/a b/a\n",
+				FileTargets: []ApplyUnifiedDiffFileTarget{{NewPath: "bad\x00path", TargetPath: "a.txt"}},
+			},
+			wantErrSub: "fileTargets[0].newPath contains NUL byte",
+		},
+		{
 			name: "duplicate_fileKey_rejected",
 			args: ApplyUnifiedDiffArgs{
 				DiffText: "diff --git a/a b/a\n",
@@ -474,7 +498,13 @@ func TestApplyUnifiedDiffStatusHelpers(t *testing.T) {
 			status != ApplyUnifiedDiffStatusAlreadyApplied {
 			t.Fatalf("already-applied planned aggregate mismatch: ok=%v status=%s", ok, status)
 		}
-
+		if ok, status, _ := aggregatePlannedStatus(
+			[]ApplyUnifiedDiffFileOut{{Status: ApplyUnifiedDiffStatusAlreadyApplied}},
+			false,
+		); !ok ||
+			status != ApplyUnifiedDiffStatusAlreadyApplied {
+			t.Fatalf("no-hunk already-applied planned aggregate mismatch: ok=%v status=%s", ok, status)
+		}
 		if ok, status, _ := aggregatePlannedStatus(
 			[]ApplyUnifiedDiffFileOut{{Status: ApplyUnifiedDiffStatusApplicable, AppliedHunks: 1}},
 			true,
@@ -617,27 +647,6 @@ func TestTextToolConstructorAccessorsAndWrapper(t *testing.T) {
 		mutated.Slug = "mutated"
 		if fresh := tt.ApplyUnifiedDiffTool(); fresh.Slug == "mutated" {
 			t.Fatalf("ApplyUnifiedDiffTool should return an independent clone")
-		}
-	})
-
-	t.Run("nil_context_is_supported_by_apply_unified_diff_wrapper", func(t *testing.T) {
-		path := writeTextFile(t, dir, "wrapper.txt", "A\nB\n")
-		diff := makePatchText(
-			"--- a/wrapper.txt",
-			"+++ b/wrapper.txt",
-			"@@ -1,2 +1,2 @@",
-			" A",
-			"-B",
-			"+X",
-		)
-
-		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
-		mustNoErr(t, err)
-		if out.Status != ApplyUnifiedDiffStatusApplied {
-			t.Fatalf("status: want applied got %s", out.Status)
-		}
-		if got := readFileString(t, path); got != "A\nX\n" {
-			t.Fatalf("wrapper apply content mismatch: got %q", got)
 		}
 	})
 

@@ -150,6 +150,11 @@ const (
 	compareTrimmed
 )
 
+var (
+	hunkHeaderRE      = regexp.MustCompile(`^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@(?:\s?(.*))?$`)
+	looseHunkHeaderRE = regexp.MustCompile(`^@@\s*-?(\d+)(?:,(\d+))?\s*\+?(\d+)(?:,(\d+))?\s*@@`)
+)
+
 type ApplyUnifiedDiffFileTarget struct {
 	FileKey    string `json:"fileKey,omitempty"`
 	OldPath    string `json:"oldPath,omitempty"`
@@ -246,6 +251,54 @@ type hunkApplyResult struct {
 	MatchBasis hunkMatchBasis
 }
 
+type parsedHunkLine struct {
+	Kind           byte
+	Text           string
+	NoNewlineAtEOF bool
+}
+
+type parsedHunk struct {
+	Header   string
+	OldStart int
+	OldCount int
+	NewStart int
+	NewCount int
+	Lines    []parsedHunkLine
+}
+
+type parsedPatchFile struct {
+	FileKey        string
+	FileKeyAliases []string
+	OldPath        string
+	NewPath        string
+	Hunks          []parsedHunk
+
+	AddedLines     int
+	DeletedLines   int
+	IsRename       bool
+	IsCopy         bool
+	HasBinaryPatch bool
+
+	NewFilePerm       os.FileMode
+	OldNoFinalNewline *bool
+	NewNoFinalNewline *bool
+
+	Diagnostics []string
+}
+
+type parsedPatch struct {
+	Files       []parsedPatchFile
+	Diagnostics []string
+}
+
+type looseHunkState struct {
+	hunk              *parsedHunk
+	oldSeen           int
+	newSeen           int
+	omittedPrefixDiag bool
+	extraLinesDiag    bool
+}
+
 type fileApplyPlan struct {
 	Result ApplyUnifiedDiffFileOut
 
@@ -306,17 +359,7 @@ func (tt *TextTool) applyUnifiedDiff(ctx context.Context, args ApplyUnifiedDiffA
 		return out, nil
 	}
 
-	totalHunks := 0
-	for _, f := range patch.Files {
-		totalHunks += len(f.Hunks)
-	}
-	if totalHunks == 0 {
-		out.OK = false
-		out.Status = ApplyUnifiedDiffStatusConflict
-		out.Message = "Diff was parsed, but it contains no hunks."
-		return out, nil
-	}
-
+	patch.Files = coalesceDuplicateParsedPatchFiles(patch.Files)
 	p := tt.snapshotPolicy()
 	candidateInfos := buildCandidatePathInfos(p, args.CandidatePaths)
 
@@ -408,6 +451,15 @@ func validateApplyUnifiedDiffArgs(args ApplyUnifiedDiffArgs) error {
 		if strings.ContainsRune(targetPath, 0) {
 			return fmt.Errorf("fileTargets[%d].targetPath contains NUL byte", i)
 		}
+		if strings.ContainsRune(target.FileKey, 0) {
+			return fmt.Errorf("fileTargets[%d].fileKey contains NUL byte", i)
+		}
+		if strings.ContainsRune(target.OldPath, 0) {
+			return fmt.Errorf("fileTargets[%d].oldPath contains NUL byte", i)
+		}
+		if strings.ContainsRune(target.NewPath, 0) {
+			return fmt.Errorf("fileTargets[%d].newPath contains NUL byte", i)
+		}
 		if key := strings.TrimSpace(target.FileKey); key != "" {
 			if prev, ok := seenFileKeys[key]; ok {
 				return fmt.Errorf("duplicate fileTargets fileKey %q at indexes %d and %d", key, prev, i)
@@ -440,11 +492,17 @@ func aggregatePlannedStatus(
 	hasNeedsInfo := false
 	hasConflict := false
 	hasError := false
+	applicableFiles := 0
+	alreadyAppliedFiles := 0
 	appliedHunks := 0
 	alreadyAppliedHunks := 0
 
 	for _, f := range files {
 		switch f.Status {
+		case ApplyUnifiedDiffStatusApplicable, ApplyUnifiedDiffStatusApplied:
+			applicableFiles++
+		case ApplyUnifiedDiffStatusAlreadyApplied:
+			alreadyAppliedFiles++
 		case ApplyUnifiedDiffStatusNeedsInfo:
 			hasNeedsInfo = true
 		case ApplyUnifiedDiffStatusConflict:
@@ -467,7 +525,7 @@ func aggregatePlannedStatus(
 	if hasConflict {
 		return false, ApplyUnifiedDiffStatusConflict, "One or more hunks could not be applied cleanly."
 	}
-	if appliedHunks == 0 && alreadyAppliedHunks > 0 {
+	if appliedHunks == 0 && applicableFiles == 0 && alreadyAppliedFiles == len(files) {
 		return true, ApplyUnifiedDiffStatusAlreadyApplied, "Unified diff is already applied."
 	}
 
@@ -645,57 +703,6 @@ func markDuplicateTargetConflict(
 		plans[idx].Result = files[idx]
 	}
 }
-
-type parsedHunkLine struct {
-	Kind           byte
-	Text           string
-	NoNewlineAtEOF bool
-}
-
-type parsedHunk struct {
-	Header   string
-	OldStart int
-	OldCount int
-	NewStart int
-	NewCount int
-	Lines    []parsedHunkLine
-}
-
-type parsedPatchFile struct {
-	FileKey string
-	OldPath string
-	NewPath string
-	Hunks   []parsedHunk
-
-	AddedLines   int
-	DeletedLines int
-	IsRename     bool
-	IsCopy       bool
-
-	NewFilePerm       os.FileMode
-	OldNoFinalNewline *bool
-	NewNoFinalNewline *bool
-
-	Diagnostics []string
-}
-
-type parsedPatch struct {
-	Files       []parsedPatchFile
-	Diagnostics []string
-}
-
-type looseHunkState struct {
-	hunk              *parsedHunk
-	oldSeen           int
-	newSeen           int
-	omittedPrefixDiag bool
-	extraLinesDiag    bool
-}
-
-var (
-	hunkHeaderRE      = regexp.MustCompile(`^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@(?:\s?(.*))?$`)
-	looseHunkHeaderRE = regexp.MustCompile(`^@@\s*-?(\d+)(?:,(\d+))?\s*\+?(\d+)(?:,(\d+))?\s*@@`)
-)
 
 func parseUnifiedDiff(diffText string) (parsedPatch, error) {
 	text := strings.ReplaceAll(diffText, "\r\n", "\n")
@@ -885,6 +892,7 @@ func parseUnifiedDiff(diffText string) (parsedPatch, error) {
 				}
 				continue
 			case strings.HasPrefix(line, "Binary files ") || strings.HasPrefix(line, "GIT binary patch"):
+				current.HasBinaryPatch = true
 				addFileDiag("binary patch content is ignored; this tool only applies UTF-8 text hunks")
 				continue
 			}
@@ -937,6 +945,144 @@ func parseUnifiedDiff(diffText string) (parsedPatch, error) {
 	}
 
 	return out, nil
+}
+
+func coalesceDuplicateParsedPatchFiles(files []parsedPatchFile) []parsedPatchFile {
+	if len(files) <= 1 {
+		return files
+	}
+
+	out := make([]parsedPatchFile, 0, len(files))
+	seen := map[string]int{}
+
+	for _, file := range files {
+		key, ok := parsedPatchFileCoalesceKey(file)
+		if !ok {
+			out = append(out, file)
+			continue
+		}
+
+		if idx, exists := seen[key]; exists {
+			mergeParsedPatchFile(&out[idx], file)
+			continue
+		}
+
+		seen[key] = len(out)
+		out = append(out, file)
+	}
+
+	return out
+}
+
+func parsedPatchFileCoalesceKey(file parsedPatchFile) (string, bool) {
+	if file.IsRename || file.IsCopy {
+		return "", false
+	}
+
+	paths := patchPathCandidates(file)
+	if len(paths) == 0 {
+		return "", false
+	}
+
+	kind := "edit"
+	if file.isDelete() {
+		kind = "delete"
+	}
+
+	norm := normalizePathForCompare(paths[0])
+	if norm == "" || isDevNull(norm) {
+		return "", false
+	}
+
+	return kind + ":" + norm, true
+}
+
+func mergeParsedPatchFile(dst *parsedPatchFile, src parsedPatchFile) {
+	if dst == nil {
+		return
+	}
+
+	target := ""
+	if paths := patchPathCandidates(src); len(paths) > 0 {
+		target = paths[0]
+	}
+
+	dst.FileKeyAliases = appendUniqueTrimmedStrings(dst.FileKeyAliases, src.FileKey)
+	dst.FileKeyAliases = appendUniqueTrimmedStrings(dst.FileKeyAliases, src.FileKeyAliases...)
+
+	dst.Hunks = append(dst.Hunks, src.Hunks...)
+	dst.AddedLines += src.AddedLines
+	dst.DeletedLines += src.DeletedLines
+	dst.IsRename = dst.IsRename || src.IsRename
+	dst.IsCopy = dst.IsCopy || src.IsCopy
+	dst.HasBinaryPatch = dst.HasBinaryPatch || src.HasBinaryPatch
+
+	if dst.OldPath == "" {
+		dst.OldPath = src.OldPath
+	}
+	if dst.NewPath == "" {
+		dst.NewPath = src.NewPath
+	}
+
+	if src.NewFilePerm != 0 {
+		if dst.NewFilePerm != 0 && dst.NewFilePerm != src.NewFilePerm {
+			dst.Diagnostics = append(
+				dst.Diagnostics,
+				fmt.Sprintf(
+					"duplicate file patches specify different new modes %#o and %#o; using %#o",
+					dst.NewFilePerm,
+					src.NewFilePerm,
+					src.NewFilePerm,
+				),
+			)
+		}
+		dst.NewFilePerm = src.NewFilePerm
+	}
+
+	if src.OldNoFinalNewline != nil {
+		dst.OldNoFinalNewline = src.OldNoFinalNewline
+	}
+	if src.NewNoFinalNewline != nil {
+		dst.NewNoFinalNewline = src.NewNoFinalNewline
+	}
+
+	dst.Diagnostics = append(dst.Diagnostics, src.Diagnostics...)
+	if target != "" {
+		dst.Diagnostics = append(
+			dst.Diagnostics,
+			fmt.Sprintf("merged duplicate file patch %s into %s for target %q", src.FileKey, dst.FileKey, target),
+		)
+	} else {
+		dst.Diagnostics = append(
+			dst.Diagnostics,
+			fmt.Sprintf("merged duplicate file patch %s into %s", src.FileKey, dst.FileKey),
+		)
+	}
+}
+
+func appendUniqueTrimmedStrings(in []string, values ...string) []string {
+	out := make([]string, 0, len(in)+len(values))
+	seen := map[string]bool{}
+
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+
+	for _, s := range values {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+
+	return out
 }
 
 func isPatchBoundary(lines []string, i int) bool {
@@ -1287,6 +1433,15 @@ func planFilePatch(
 		)
 		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
 	}
+	if file.HasBinaryPatch {
+		result.Status = ApplyUnifiedDiffStatusConflict
+		result.Message = "binary patches are not supported by applyUnifiedDiff"
+		result.Diagnostics = append(
+			result.Diagnostics,
+			"refusing to treat ignored binary patch content as already applied",
+		)
+		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
+	}
 	if len(file.Hunks) == 0 {
 		result.OK = true
 		result.Status = ApplyUnifiedDiffStatusAlreadyApplied
@@ -1359,8 +1514,12 @@ func planFilePatch(
 	}
 	originalContent := tf.Render()
 	targetPerm := tf.Perm
+	hasModeChange := false
+
 	if file.NewFilePerm != 0 {
 		targetPerm = file.NewFilePerm
+		hasModeChange = targetPerm != tf.Perm
+
 	}
 	nextLines, applied, already, hunkDiagnostics, err := applyPatchHunks(
 		ctx,
@@ -1400,7 +1559,8 @@ func planFilePatch(
 		}
 	}
 
-	if applied == 0 && already > 0 {
+	if applied == 0 && already > 0 && !hasModeChange {
+
 		result.OK = true
 		result.Status = ApplyUnifiedDiffStatusAlreadyApplied
 		result.Message = "Patch is already applied for this file."
@@ -1411,7 +1571,8 @@ func planFilePatch(
 	tf.HasFinalNewline = patchedFileHasFinalNewline(tf.HasFinalNewline, file, nextLines)
 	content := tf.Render()
 
-	if content == originalContent {
+	if content == originalContent && !hasModeChange {
+
 		result.OK = true
 		result.Status = ApplyUnifiedDiffStatusAlreadyApplied
 		result.Message = "Patch is already applied for this file."
@@ -1419,7 +1580,14 @@ func planFilePatch(
 		result.AppliedHunks = 0
 		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
 	}
-
+	if content == originalContent && hasModeChange {
+		result.Diagnostics = append(
+			result.Diagnostics,
+			fmt.Sprintf("file content already matches; file mode can be updated from %#o to %#o", tf.Perm, targetPerm),
+		)
+		result.AlreadyAppliedHunks += result.AppliedHunks
+		result.AppliedHunks = 0
+	}
 	if err := validateUnifiedDiffOutputContent(content); err != nil {
 		result.Status = ApplyUnifiedDiffStatusError
 		result.Message = err.Error()
@@ -1504,7 +1672,11 @@ func planCreateFilePatch(
 	if perm == 0 {
 		perm = defaultUnifiedDiffNewFilePerm
 	}
-
+	if err := verifyCreateParentPlanResolved(p, target.ResolvedPath, newFileMaxParentCreations); err != nil {
+		result.Status = ApplyUnifiedDiffStatusError
+		result.Message = "new file parent directory cannot be prepared: " + err.Error()
+		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
+	}
 	result.OK = true
 	result.Status = ApplyUnifiedDiffStatusApplicable
 	result.Message = "New file can be created by this patch."
@@ -1516,6 +1688,48 @@ func planCreateFilePatch(
 		ResolvedPath: target.ResolvedPath,
 		Content:      content,
 		Perm:         perm,
+	}
+}
+
+func verifyCreateParentPlanResolved(p fspolicy.FSPolicy, resolvedPath string, maxNewDirs int) error {
+	if strings.TrimSpace(resolvedPath) == "" {
+		return errors.New("create plan has no resolved path")
+	}
+
+	parent := filepath.Dir(resolvedPath)
+	if strings.TrimSpace(parent) == "" || parent == "." {
+		return errors.New("create plan has invalid parent directory")
+	}
+
+	existing := parent
+	missing := 0
+
+	for {
+		st, err := os.Lstat(existing)
+		if err == nil {
+			if st.IsDir() || (st.Mode()&os.ModeSymlink) != 0 {
+				if err := p.VerifyDirResolved(existing); err != nil {
+					return err
+				}
+				return nil
+			}
+			return fmt.Errorf("path component is not a directory: %s", existing)
+		}
+
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("stat error: %w", err)
+		}
+
+		missing++
+		if maxNewDirs > 0 && missing > maxNewDirs {
+			return fmt.Errorf("too many parent directories to create (max %d)", maxNewDirs)
+		}
+
+		next := filepath.Dir(existing)
+		if next == existing {
+			return fmt.Errorf("no existing parent directory for %s", parent)
+		}
+		existing = next
 	}
 }
 
@@ -1861,7 +2075,7 @@ func findExplicitTarget(
 
 		fileKey := strings.TrimSpace(target.FileKey)
 		if fileKey != "" {
-			if fileKey == file.FileKey {
+			if file.fileKeyMatches(fileKey) {
 				fileKeyMatches = append(fileKeyMatches, target)
 			}
 			continue
@@ -2147,6 +2361,10 @@ func applyHunkToLines(
 	}
 
 	if !ioutil.StringSlicesEqual(oldBlock, newBlock) {
+		if match, ok := findOldBlockLocalMatch(lines, oldBlock, oldHint, fuzzy); ok {
+			return applyMatchedOldBlock(lines, h, oldBlock, match, nil), nil
+		}
+
 		if already, ok := findAlreadyAppliedMatch(lines, newBlock, newHint, oldHint, fuzzy, false); ok {
 			return alreadyAppliedHunkResult(lines, len(oldBlock), len(newBlock), already, nil), nil
 		}
@@ -2154,26 +2372,7 @@ func applyHunkToLines(
 
 	match, ok, diag := findOldBlockMatch(lines, oldBlock, oldKinds, oldHint, fuzzy)
 	if ok {
-		replacement := buildHunkReplacementFromMatchedOld(
-			lines[match.Start:match.Start+len(oldBlock)],
-			h,
-		)
-		next := ioutil.ReplaceStringRange(lines, match.Start, match.Start+len(oldBlock), replacement)
-
-		return hunkApplyResult{
-			Lines:  next,
-			OldLen: len(oldBlock),
-			NewLen: len(replacement),
-
-			Diagnostics: append(diag, fmt.Sprintf(
-				"matched hunk at line %d using %s",
-				match.Start+1,
-				match.Method,
-			)),
-			Matched:    true,
-			MatchStart: match.Start,
-			MatchBasis: hunkMatchBasisOld,
-		}, nil
+		return applyMatchedOldBlock(lines, h, oldBlock, match, diag), nil
 	}
 
 	already, alreadyOK := findAlreadyAppliedMatch(lines, newBlock, newHint, oldHint, fuzzy, true)
@@ -2189,6 +2388,38 @@ func applyHunkToLines(
 		}, errors.New(
 			"old hunk block was not found and new hunk block was not already present",
 		)
+}
+
+func applyMatchedOldBlock(
+	lines []string,
+	h parsedHunk,
+	oldBlock []string,
+	match blockMatch,
+	priorDiagnostics []string,
+) hunkApplyResult {
+	replacement := buildHunkReplacementFromMatchedOld(
+		lines[match.Start:match.Start+len(oldBlock)],
+		h,
+	)
+	next := ioutil.ReplaceStringRange(lines, match.Start, match.Start+len(oldBlock), replacement)
+
+	diagnostics := append([]string{}, priorDiagnostics...)
+	diagnostics = append(diagnostics, fmt.Sprintf(
+		"matched hunk at line %d using %s",
+		match.Start+1,
+		match.Method,
+	))
+
+	return hunkApplyResult{
+		Lines:  next,
+		OldLen: len(oldBlock),
+		NewLen: len(replacement),
+
+		Diagnostics: diagnostics,
+		Matched:     true,
+		MatchStart:  match.Start,
+		MatchBasis:  hunkMatchBasisOld,
+	}
 }
 
 func alreadyAppliedHunkResult(
@@ -2266,12 +2497,8 @@ func findOldBlockMatch(
 		return blockMatch{Start: clampInt(hint, 0, len(lines)), Method: "empty"}, true, diagnostics
 	}
 
-	if matchBlockAt(lines, block, hint, compareExact) {
-		return blockMatch{Start: hint, Method: "exact-hint"}, true, diagnostics
-	}
-
-	if m, ok := findUniqueNear(lines, block, hint, hunkNearbyLineTolerance, compareExact); ok {
-		return blockMatch{Start: m, Method: "exact-near"}, true, diagnostics
+	if match, ok := findOldBlockLocalMatch(lines, block, hint, fuzzy); ok {
+		return match, true, diagnostics
 	}
 
 	if m, ok, count := findUniqueGlobal(lines, block, compareExact); ok {
@@ -2285,14 +2512,6 @@ func findOldBlockMatch(
 
 	if !fuzzy {
 		return blockMatch{}, false, diagnostics
-	}
-
-	if matchBlockAt(lines, block, hint, compareTrimmed) {
-		return blockMatch{Start: hint, Method: "trimmed-hint"}, true, diagnostics
-	}
-
-	if m, ok := findUniqueNear(lines, block, hint, hunkNearbyLineTolerance, compareTrimmed); ok {
-		return blockMatch{Start: m, Method: "trimmed-near"}, true, diagnostics
 	}
 
 	if m, ok, count := findUniqueGlobal(lines, block, compareTrimmed); ok {
@@ -2318,6 +2537,38 @@ func findOldBlockMatch(
 	}
 
 	return blockMatch{}, false, diagnostics
+}
+
+func findOldBlockLocalMatch(
+	lines, block []string,
+	hint int,
+	fuzzy bool,
+) (blockMatch, bool) {
+	if len(block) == 0 {
+		return blockMatch{Start: clampInt(hint, 0, len(lines)), Method: "empty"}, true
+	}
+
+	if matchBlockAt(lines, block, hint, compareExact) {
+		return blockMatch{Start: hint, Method: "exact-hint"}, true
+	}
+
+	if m, ok := findUniqueNear(lines, block, hint, hunkNearbyLineTolerance, compareExact); ok {
+		return blockMatch{Start: m, Method: "exact-near"}, true
+	}
+
+	if !fuzzy {
+		return blockMatch{}, false
+	}
+
+	if matchBlockAt(lines, block, hint, compareTrimmed) {
+		return blockMatch{Start: hint, Method: "trimmed-hint"}, true
+	}
+
+	if m, ok := findUniqueNear(lines, block, hint, hunkNearbyLineTolerance, compareTrimmed); ok {
+		return blockMatch{Start: m, Method: "trimmed-near"}, true
+	}
+
+	return blockMatch{}, false
 }
 
 func findDeletionAnchoredWindow(
@@ -2802,15 +3053,27 @@ func isMarkdownFenceLine(line string) bool {
 		strings.HasPrefix(s, "~~~")
 }
 
+func (f parsedPatchFile) fileKeyMatches(fileKey string) bool {
+	fileKey = strings.TrimSpace(fileKey)
+	if fileKey == "" {
+		return false
+	}
+	if fileKey == f.FileKey {
+		return true
+	}
+	for _, alias := range f.FileKeyAliases {
+		if fileKey == strings.TrimSpace(alias) {
+			return true
+		}
+	}
+	return false
+}
+
 func (f parsedPatchFile) canCreateWhenMissing() bool {
 	if f.isCreateLike() {
 		return true
 	}
-	return f.OldPath == "" &&
-		f.NewPath != "" &&
-		!isDevNull(f.NewPath) &&
-		!f.hasDeletedLines() &&
-		f.allHunksDeclareNoOldLines()
+	return !f.isDelete() && f.looksLikeCreateOnlyHunks()
 }
 
 func (f parsedPatchFile) isCreateLike() bool {
@@ -2820,8 +3083,11 @@ func (f parsedPatchFile) isCreateLike() bool {
 	return f.NewFilePerm != 0 &&
 		f.NewPath != "" &&
 		!isDevNull(f.NewPath) &&
-		!f.hasDeletedLines() &&
-		f.allHunksDeclareNoOldLines()
+		f.looksLikeCreateOnlyHunks()
+}
+
+func (f parsedPatchFile) looksLikeCreateOnlyHunks() bool {
+	return !f.hasDeletedLines() && f.allHunksDeclareNoOldLines()
 }
 
 func (f parsedPatchFile) hasDeletedLines() bool {

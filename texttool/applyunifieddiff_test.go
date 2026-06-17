@@ -3,6 +3,7 @@ package texttool
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -110,6 +111,49 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("prefers_matching_old_block_over_nearby_new_block", func(t *testing.T) {
+		path := writeTextFile(t, dir, "prefer-old.txt", "A\nX\nC\nA\nB\nC\n")
+		diff := makePatchText(
+			"--- a/prefer-old.txt",
+			"+++ b/prefer-old.txt",
+			"@@ -4,3 +4,3 @@",
+			" A",
+			"-B",
+			"+X",
+			" C",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("status: want applied got %s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, path); got != "A\nX\nC\nA\nX\nC\n" {
+			t.Fatalf("old block should have been patched, got %q", got)
+		}
+	})
+
+	t.Run("crlf_existing_file_keeps_crlf", func(t *testing.T) {
+		path := writeTextFile(t, dir, "crlf.txt", "A\r\nB\r\nC\r\n")
+		diff := makePatchText(
+			"--- a/crlf.txt",
+			"+++ b/crlf.txt",
+			"@@ -1,3 +1,3 @@",
+			" A",
+			"-B",
+			"+X",
+			" C",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("status: want applied got %s", out.Status)
+		}
+		if got := readFileString(t, path); got != "A\r\nX\r\nC\r\n" {
+			t.Fatalf("CRLF should be preserved, got %q", got)
+		}
+	})
 	t.Run("create_patch_creates_file_with_no_newline_marker_and_is_idempotent", func(t *testing.T) {
 		path := filepath.Join(dir, "created.txt")
 		diff := makePatchText(
@@ -141,6 +185,45 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("llm_add_only_missing_file_without_new_file_mode_creates_file", func(t *testing.T) {
+		path := filepath.Join(dir, "llm-add-only.txt")
+		diff := makePatchText(
+			"diff --git a/llm-add-only.txt b/llm-add-only.txt",
+			"@@ -0,0 +1,2 @@",
+			"+hello",
+			"+world",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("add-only create status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, path); got != "hello\nworld\n" {
+			t.Fatalf("add-only created content mismatch: got %q", got)
+		}
+	})
+
+	t.Run("create_patch_dry_run_rejects_too_many_new_parent_dirs", func(t *testing.T) {
+		rel := "deep-new/a/b/c/d/e/f/g/h/i/too-deep.txt"
+		diff := makePatchText(
+			"diff --git a/"+rel+" b/"+rel,
+			"--- /dev/null",
+			"+++ b/"+rel,
+			"@@ -0,0 +1,1 @@",
+			"+x",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff, DryRun: true})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusError {
+			t.Fatalf("deep create dry-run status: want error got %s files=%#v", out.Status, out.Files)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "deep-new")); !os.IsNotExist(err) {
+			t.Fatalf("dry-run must not create parent dirs, stat err=%v", err)
+		}
+	})
+
 	t.Run("create_patch_conflicts_when_target_already_exists_with_different_content", func(t *testing.T) {
 		path := writeTextFile(t, dir, "create-conflict.txt", "different\n")
 		diff := makePatchText(
@@ -163,6 +246,39 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("already_applied_content_with_new_mode_still_updates_mode", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("windows chmod does not reliably expose unix executable mode bits")
+		}
+		path := writeTextFile(t, dir, "mode-already.txt", "A\nX\n")
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatalf("chmod setup: %v", err)
+		}
+		diff := makePatchText(
+			"diff --git a/mode-already.txt b/mode-already.txt",
+			"old mode 100644",
+			"new mode 100755",
+			"--- a/mode-already.txt",
+			"+++ b/mode-already.txt",
+			"@@ -1,2 +1,2 @@",
+			" A",
+			"-B",
+			"+X",
+		)
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("mode update status: want applied got %s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, path); got != "A\nX\n" {
+			t.Fatalf("mode update should not change content, got %q", got)
+		}
+		st, err := os.Stat(path)
+		mustNoErr(t, err)
+		if st.Mode().Perm() != 0o755 {
+			t.Fatalf("mode update mismatch: want 0755 got %#o", st.Mode().Perm())
+		}
+	})
 	t.Run("delete_patch_deletes_file_and_is_idempotent", func(t *testing.T) {
 		path := writeTextFile(t, dir, "delete.txt", "gone\n")
 		diff := makePatchText(
@@ -337,6 +453,34 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("duplicate_file_sections_for_same_path_are_coalesced", func(t *testing.T) {
+		path := writeTextFile(t, dir, "duplicate-sections.txt", "A\nB\nC\nD\n")
+		diff := makePatchText(
+			"diff --git a/duplicate-sections.txt b/duplicate-sections.txt",
+			"@@ -1,2 +1,2 @@",
+			" A",
+			"-B",
+			"+X",
+			"diff --git a/duplicate-sections.txt b/duplicate-sections.txt",
+			"@@ -3,2 +3,2 @@",
+			" C",
+			"-D",
+			"+Y",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("duplicate section status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if len(out.Files) != 1 || out.Files[0].Hunks != 2 {
+			t.Fatalf("duplicate sections should be coalesced into one two-hunk file: %#v", out.Files)
+		}
+		if got := readFileString(t, path); got != "A\nX\nC\nY\n" {
+			t.Fatalf("duplicate section content mismatch: got %q", got)
+		}
+	})
+
 	t.Run("duplicate_mutating_targets_conflict", func(t *testing.T) {
 		path := writeTextFile(t, dir, "shared.txt", "A\nB\nC\n")
 		diff := makePatchText(
@@ -371,6 +515,22 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 		if len(out.Files) != 2 || out.Files[0].Status != ApplyUnifiedDiffStatusConflict ||
 			out.Files[1].Status != ApplyUnifiedDiffStatusConflict {
 			t.Fatalf("duplicate target file statuses mismatch: %#v", out.Files)
+		}
+	})
+
+	t.Run("binary_patch_is_reported_conflict", func(t *testing.T) {
+		diff := makePatchText(
+			"diff --git a/bin.dat b/bin.dat",
+			"Binary files a/bin.dat and b/bin.dat differ",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusConflict {
+			t.Fatalf("binary patch status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if len(out.Files) != 1 || out.Files[0].Status != ApplyUnifiedDiffStatusConflict {
+			t.Fatalf("binary patch file status mismatch: %#v", out.Files)
 		}
 	})
 
@@ -409,7 +569,7 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("metadata_only_single_file_returns_conflict", func(t *testing.T) {
+	t.Run("metadata_only_single_file_returns_already_applied_noop", func(t *testing.T) {
 		diff := makePatchText(
 			"diff --git a/empty.txt b/empty.txt",
 			"--- a/empty.txt",
@@ -418,7 +578,9 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 
 		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
 		mustNoErr(t, err)
-		if out.Status != ApplyUnifiedDiffStatusConflict || len(out.Files) != 0 {
+		if out.Status != ApplyUnifiedDiffStatusAlreadyApplied ||
+			len(out.Files) != 1 ||
+			out.Files[0].Status != ApplyUnifiedDiffStatusAlreadyApplied {
 			t.Fatalf("metadata-only single-file mismatch: status=%s files=%#v", out.Status, out.Files)
 		}
 	})
