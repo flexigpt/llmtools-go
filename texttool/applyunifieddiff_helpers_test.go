@@ -11,6 +11,34 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
+func TestApplyUnifiedDiffExplicitTargetPathVariants(t *testing.T) {
+	file := parsedPatchFile{FileKey: "file-1", OldPath: "old.txt", NewPath: "new.txt"}
+
+	tests := []struct {
+		name   string
+		target ApplyUnifiedDiffFileTarget
+	}{
+		{
+			name:   "new_path_only_matches_new_path",
+			target: ApplyUnifiedDiffFileTarget{NewPath: "new.txt", TargetPath: "actual.txt"},
+		},
+		{
+			name:   "old_path_only_matches_old_path",
+			target: ApplyUnifiedDiffFileTarget{OldPath: "old.txt", TargetPath: "actual.txt"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok, err := findExplicitTarget(file, []ApplyUnifiedDiffFileTarget{tt.target})
+			mustNoErr(t, err)
+			if !ok || got.TargetPath != "actual.txt" {
+				t.Fatalf("explicit path variant match failed: %#v ok=%v", got, ok)
+			}
+		})
+	}
+}
+
 func TestApplyUnifiedDiffValidationHelpers(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -168,22 +196,30 @@ func TestApplyUnifiedDiffParseHelpers(t *testing.T) {
 	})
 
 	t.Run("hunk_header_parsing_and_diagnostics", func(t *testing.T) {
-		standard, diag := parseHunkHeader("@@ -12,3 +34,2 @@ function")
-		if diag != "" || standard.OldStart != 12 || standard.OldCount != 3 || standard.NewStart != 34 ||
-			standard.NewCount != 2 {
-			t.Fatalf("unexpected standard header parse: %#v diag=%q", standard, diag)
+		standard, diag, hasDiag := parseHunkHeader("@@ -12,3 +34,2 @@ function")
+		if hasDiag || diag != (ApplyUnifiedDiffDiagnostic{}) ||
+			standard.OldStart != 12 || standard.OldCount != 3 ||
+			standard.NewStart != 34 || standard.NewCount != 2 {
+			t.Fatalf("unexpected standard header parse: %#v diag=%#v hasDiag=%v", standard, diag, hasDiag)
 		}
 
-		loose, diag := parseHunkHeader("@@ 12 34 @@")
-		if !strings.Contains(diag, "non-standard hunk header") || loose.OldStart != 12 || loose.OldCount != 1 ||
-			loose.NewStart != 34 ||
-			loose.NewCount != 1 {
-			t.Fatalf("unexpected loose header parse: %#v diag=%q", loose, diag)
+		loose, diag, hasDiag := parseHunkHeader("@@ 12 34 @@")
+		if !hasDiag ||
+			diag.Level != ApplyUnifiedDiffDiagnosticLevelWarning ||
+			diag.Code != "non_standard_hunk_header" ||
+			!strings.Contains(diag.Message, "non-standard hunk header") ||
+			loose.OldStart != 12 || loose.OldCount != 1 ||
+			loose.NewStart != 34 || loose.NewCount != 1 {
+			t.Fatalf("unexpected loose header parse: %#v diag=%#v hasDiag=%v", loose, diag, hasDiag)
 		}
 
-		malformed, diag := parseHunkHeader("@@ broken @@")
-		if !strings.Contains(diag, "malformed hunk header") || malformed.OldCount != -1 || malformed.NewCount != -1 {
-			t.Fatalf("unexpected malformed header parse: %#v diag=%q", malformed, diag)
+		malformed, diag, hasDiag := parseHunkHeader("@@ broken @@")
+		if !hasDiag ||
+			diag.Level != ApplyUnifiedDiffDiagnosticLevelWarning ||
+			diag.Code != "malformed_hunk_header" ||
+			!strings.Contains(diag.Message, "malformed hunk header") ||
+			malformed.OldCount != -1 || malformed.NewCount != -1 {
+			t.Fatalf("unexpected malformed header parse: %#v diag=%#v hasDiag=%v", malformed, diag, hasDiag)
 		}
 	})
 
@@ -247,7 +283,7 @@ func TestApplyUnifiedDiffParseHelpers(t *testing.T) {
 					t.Fatalf("NewNoFinalNewline mismatch: got %v want %v", *file.NewNoFinalNewline, tt.wantNew)
 				}
 
-				gotPatched := patchedFileHasFinalNewline(true, *file, []string{"X"})
+				gotPatched := patchedFileHasFinalNewline(true, 0, *file, []string{"X"})
 				gotNew := newFileHasFinalNewline(*file, []string{"X"})
 				if gotPatched != tt.wantPat || gotNew != tt.wantFile {
 					t.Fatalf("unexpected final-newline helpers: patched=%v new=%v", gotPatched, gotNew)
@@ -258,6 +294,28 @@ func TestApplyUnifiedDiffParseHelpers(t *testing.T) {
 }
 
 func TestApplyUnifiedDiffTargetHelpers(t *testing.T) {
+	t.Run("explicit_dev_null_create_is_create_like_even_with_context_lines", func(t *testing.T) {
+		file := parsedPatchFile{
+			OldPath: pathDevNull,
+			NewPath: "new.txt",
+			Hunks: []parsedHunk{
+				{
+					Lines: []parsedHunkLine{
+						{Kind: ' ', Text: "alpha"},
+						{Kind: ' ', Text: "beta"},
+					},
+				},
+			},
+		}
+
+		if !file.isCreateLike() {
+			t.Fatalf("expected explicit /dev/null patch to be create-like")
+		}
+		if !file.canCreateWhenMissing() {
+			t.Fatalf("expected explicit /dev/null patch to create when missing")
+		}
+	})
+
 	t.Run("patch_path_candidates", func(t *testing.T) {
 		tests := []struct {
 			name string
@@ -601,7 +659,9 @@ func TestApplyUnifiedDiffStatusHelpers(t *testing.T) {
 			if file.Status != ApplyUnifiedDiffStatusConflict {
 				t.Fatalf("files[%d] status: want conflict got %s", i, file.Status)
 			}
-			if len(file.Diagnostics) == 0 || !strings.Contains(file.Diagnostics[0], "duplicate target") {
+			if len(file.Diagnostics) == 0 ||
+				file.Diagnostics[0].Code != "duplicate_target" ||
+				file.Diagnostics[0].Level != ApplyUnifiedDiffDiagnosticLevelError {
 				t.Fatalf("files[%d] diagnostics missing duplicate target note: %#v", i, file.Diagnostics)
 			}
 		}

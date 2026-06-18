@@ -36,7 +36,6 @@ const (
 	maxUnifiedDiffCandidates  = 2048
 	maxCandidatePathsPerFile  = 32
 	hunkNearbyLineTolerance   = 16
-	hunkNearestLineLimit      = 64
 	maxDiagnosticCandidates   = 12
 	maxParserDiagnostics      = 64
 	newFileMaxParentCreations = 8
@@ -54,6 +53,20 @@ const (
 	ApplyUnifiedDiffStatusConflict       ApplyUnifiedDiffStatus = "conflict"
 	ApplyUnifiedDiffStatusError          ApplyUnifiedDiffStatus = "error"
 )
+
+type ApplyUnifiedDiffDiagnosticLevel string
+
+const (
+	ApplyUnifiedDiffDiagnosticLevelInfo    ApplyUnifiedDiffDiagnosticLevel = "info"
+	ApplyUnifiedDiffDiagnosticLevelWarning ApplyUnifiedDiffDiagnosticLevel = "warning"
+	ApplyUnifiedDiffDiagnosticLevelError   ApplyUnifiedDiffDiagnosticLevel = "error"
+)
+
+type ApplyUnifiedDiffDiagnostic struct {
+	Level   ApplyUnifiedDiffDiagnosticLevel `json:"level"`
+	Code    string                          `json:"code,omitempty"`
+	Message string                          `json:"message"`
+}
 
 var applyUnifiedDiffTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
@@ -199,8 +212,8 @@ type ApplyUnifiedDiffFileOut struct {
 	Status       ApplyUnifiedDiffStatus `json:"status"`
 	Message      string                 `json:"message,omitempty"`
 
-	CandidatePaths []string `json:"candidatePaths,omitempty"`
-	Diagnostics    []string `json:"diagnostics,omitempty"`
+	CandidatePaths []string                     `json:"candidatePaths,omitempty"`
+	Diagnostics    []ApplyUnifiedDiffDiagnostic `json:"diagnostics,omitempty"`
 
 	Hunks               int `json:"hunks"`
 	AppliedHunks        int `json:"appliedHunks"`
@@ -214,8 +227,8 @@ type ApplyUnifiedDiffOut struct {
 	DryRun bool                   `json:"dryRun"`
 	Status ApplyUnifiedDiffStatus `json:"status"`
 
-	Message     string   `json:"message,omitempty"`
-	Diagnostics []string `json:"diagnostics,omitempty"`
+	Message     string                       `json:"message,omitempty"`
+	Diagnostics []ApplyUnifiedDiffDiagnostic `json:"diagnostics,omitempty"`
 
 	Summary ApplyUnifiedDiffSummary `json:"summary"`
 
@@ -229,6 +242,20 @@ type blockMatch struct {
 	Start  int
 	Method string
 	Score  float64
+}
+
+type singleEditHunkSpec struct {
+	Prefix  []string
+	OldEdit []string
+	NewEdit []string
+	Suffix  []string
+}
+
+type singleEditMatch struct {
+	EditStart      int
+	EstimatedStart int
+	Method         string
+	AlreadyApplied bool
 }
 
 type hunkMatchBasis string
@@ -245,7 +272,7 @@ type hunkApplyResult struct {
 	OldLen         int
 	NewLen         int
 	AlreadyApplied bool
-	Diagnostics    []string
+	Diagnostics    []ApplyUnifiedDiffDiagnostic
 
 	Matched    bool
 	MatchStart int
@@ -284,12 +311,12 @@ type parsedPatchFile struct {
 	OldNoFinalNewline *bool
 	NewNoFinalNewline *bool
 
-	Diagnostics []string
+	Diagnostics []ApplyUnifiedDiffDiagnostic
 }
 
 type parsedPatch struct {
 	Files       []parsedPatchFile
-	Diagnostics []string
+	Diagnostics []ApplyUnifiedDiffDiagnostic
 }
 
 type looseHunkState struct {
@@ -339,7 +366,7 @@ func (tt *TextTool) applyUnifiedDiff(ctx context.Context, args ApplyUnifiedDiffA
 		out.OK = false
 		out.Status = ApplyUnifiedDiffStatusError
 		out.Message = err.Error()
-		//nolint:nilerr // Intentional nil.
+		out.Diagnostics = append(out.Diagnostics, errorDiagnostic("invalid_args", "%v", err))
 		return out, nil
 	}
 
@@ -348,7 +375,7 @@ func (tt *TextTool) applyUnifiedDiff(ctx context.Context, args ApplyUnifiedDiffA
 		out.OK = false
 		out.Status = ApplyUnifiedDiffStatusError
 		out.Message = err.Error()
-		//nolint:nilerr // Intentional nil.
+		out.Diagnostics = append(out.Diagnostics, errorDiagnostic("parse_error", "%v", err))
 		return out, nil
 	}
 	out.Diagnostics = append(out.Diagnostics, patch.Diagnostics...)
@@ -357,6 +384,7 @@ func (tt *TextTool) applyUnifiedDiff(ctx context.Context, args ApplyUnifiedDiffA
 		out.OK = false
 		out.Status = ApplyUnifiedDiffStatusNeedsInfo
 		out.Message = "No file patches were found in the unified diff."
+		out.Diagnostics = append(out.Diagnostics, warningDiagnostic("no_file_patches", "%s", out.Message))
 		return out, nil
 	}
 
@@ -409,7 +437,7 @@ func (tt *TextTool) applyUnifiedDiff(ctx context.Context, args ApplyUnifiedDiffA
 			out.Files[i].OK = false
 			out.Files[i].Status = ApplyUnifiedDiffStatusError
 			out.Files[i].Message = msg
-			out.Files[i].Diagnostics = append(out.Files[i].Diagnostics, err.Error())
+			out.Files[i].Diagnostics = append(out.Files[i].Diagnostics, errorDiagnostic("write_failed", "%v", err))
 
 			continue
 		}
@@ -480,6 +508,44 @@ func validateApplyUnifiedDiffArgs(args ApplyUnifiedDiffArgs) error {
 	}
 
 	return nil
+}
+
+func newApplyUnifiedDiffDiagnostic(
+	level ApplyUnifiedDiffDiagnosticLevel,
+	code string,
+	format string,
+	args ...any,
+) ApplyUnifiedDiffDiagnostic {
+	message := format
+	if len(args) > 0 {
+		message = fmt.Sprintf(format, args...)
+	}
+	return ApplyUnifiedDiffDiagnostic{
+		Level:   level,
+		Code:    code,
+		Message: message,
+	}
+}
+
+func infoDiagnostic(code, format string, args ...any) ApplyUnifiedDiffDiagnostic {
+	return newApplyUnifiedDiffDiagnostic(ApplyUnifiedDiffDiagnosticLevelInfo, code, format, args...)
+}
+
+func warningDiagnostic(code, format string, args ...any) ApplyUnifiedDiffDiagnostic {
+	return newApplyUnifiedDiffDiagnostic(ApplyUnifiedDiffDiagnosticLevelWarning, code, format, args...)
+}
+
+func errorDiagnostic(code, format string, args ...any) ApplyUnifiedDiffDiagnostic {
+	return newApplyUnifiedDiffDiagnostic(ApplyUnifiedDiffDiagnosticLevelError, code, format, args...)
+}
+
+func cloneApplyUnifiedDiffDiagnostics(in []ApplyUnifiedDiffDiagnostic) []ApplyUnifiedDiffDiagnostic {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ApplyUnifiedDiffDiagnostic, len(in))
+	copy(out, in)
+	return out
 }
 
 func aggregatePlannedStatus(
@@ -698,7 +764,7 @@ func markDuplicateTargetConflict(
 		if other >= 0 && other < len(files) {
 			files[idx].Diagnostics = append(
 				files[idx].Diagnostics,
-				"duplicate target also used by "+files[other].FileKey,
+				errorDiagnostic("duplicate_target", "duplicate target also used by %s", files[other].FileKey),
 			)
 		}
 		plans[idx].Result = files[idx]
@@ -717,18 +783,25 @@ func parseUnifiedDiff(diffText string) (parsedPatch, error) {
 	var currentHunk *parsedHunk
 	var hunkState looseHunkState
 
-	addPatchDiag := func(format string, args ...any) {
+	addPatchDiag := func(level ApplyUnifiedDiffDiagnosticLevel, code, format string, args ...any) {
 		if len(out.Diagnostics) >= maxParserDiagnostics {
 			return
 		}
-		out.Diagnostics = append(out.Diagnostics, fmt.Sprintf(format, args...))
+		out.Diagnostics = append(out.Diagnostics, newApplyUnifiedDiffDiagnostic(level, code, format, args...))
 	}
 
-	addFileDiag := func(f string, args ...any) {
+	addFileDiag := func(level ApplyUnifiedDiffDiagnosticLevel, code, format string, args ...any) {
 		if current == nil || len(current.Diagnostics) >= maxParserDiagnostics {
 			return
 		}
-		current.Diagnostics = append(current.Diagnostics, fmt.Sprintf(f, args...))
+		current.Diagnostics = append(current.Diagnostics, newApplyUnifiedDiffDiagnostic(level, code, format, args...))
+	}
+
+	addFileDiagnostic := func(diagnostic ApplyUnifiedDiffDiagnostic) {
+		if current == nil || len(current.Diagnostics) >= maxParserDiagnostics {
+			return
+		}
+		current.Diagnostics = append(current.Diagnostics, diagnostic)
 	}
 
 	closeCurrentHunk := func() {
@@ -740,7 +813,9 @@ func parseUnifiedDiff(diffText string) (parsedPatch, error) {
 		if currentHunk != nil && hunkState.countsKnown() && !hunkState.declaredComplete() {
 			actualOld, actualNew := currentHunk.bodyCounts()
 			addFileDiag(
-				"hunk %s header counts do not match parsed body: declared -%d/+%d, parsed -%d/+%d",
+				ApplyUnifiedDiffDiagnosticLevelWarning,
+				"hunk_header_count_mismatch",
+				"hunk %s header counts differ from parsed body; using parsed body and treating header counts as hints only: declared -%d/+%d, parsed -%d/+%d",
 				currentHunk.Header,
 				currentHunk.OldCount,
 				currentHunk.NewCount,
@@ -807,6 +882,8 @@ func parseUnifiedDiff(diffText string) (parsedPatch, error) {
 			parsedLine, oldInc, newInc, hadPrefix := parseHunkBodyLine(line)
 			if !hadPrefix && !hunkState.omittedPrefixDiag {
 				addFileDiag(
+					ApplyUnifiedDiffDiagnosticLevelWarning,
+					"hunk_body_prefix_missing",
 					"hunk %s contains lines without unified-diff prefixes; treating them as context",
 					currentHunk.Header,
 				)
@@ -814,6 +891,8 @@ func parseUnifiedDiff(diffText string) (parsedPatch, error) {
 			}
 			if hunkState.wouldOverflow(oldInc, newInc) && !hunkState.extraLinesDiag {
 				addFileDiag(
+					ApplyUnifiedDiffDiagnosticLevelWarning,
+					"hunk_body_overflow",
 					"hunk %s contains more body lines than its header declares; treating extra lines as part of the hunk",
 					currentHunk.Header,
 				)
@@ -895,7 +974,11 @@ func parseUnifiedDiff(diffText string) (parsedPatch, error) {
 				continue
 			case strings.HasPrefix(line, "Binary files ") || strings.HasPrefix(line, "GIT binary patch"):
 				current.HasBinaryPatch = true
-				addFileDiag("binary patch content is ignored; this tool only applies UTF-8 text hunks")
+				addFileDiag(
+					ApplyUnifiedDiffDiagnosticLevelWarning,
+					"binary_patch_ignored",
+					"binary patch content is ignored; this tool only applies UTF-8 text hunks",
+				)
 				continue
 			}
 		}
@@ -916,9 +999,9 @@ func parseUnifiedDiff(diffText string) (parsedPatch, error) {
 
 		if strings.HasPrefix(line, "@@") {
 			f := ensureCurrent()
-			hunk, diag := parseHunkHeader(line)
-			if diag != "" {
-				addFileDiag("%s", diag)
+			hunk, diag, hasDiag := parseHunkHeader(line)
+			if hasDiag {
+				addFileDiagnostic(diag)
 			}
 
 			f.Hunks = append(f.Hunks, hunk)
@@ -943,7 +1026,11 @@ func parseUnifiedDiff(diffText string) (parsedPatch, error) {
 	}
 
 	if len(out.Diagnostics) == 0 && len(out.Files) == 0 {
-		addPatchDiag("no recognizable unified-diff file or hunk headers were found")
+		addPatchDiag(
+			ApplyUnifiedDiffDiagnosticLevelWarning,
+			"no_patch_headers_found",
+			"no recognizable unified-diff file or hunk headers were found",
+		)
 	}
 
 	return out, nil
@@ -1030,7 +1117,8 @@ func mergeParsedPatchFile(dst *parsedPatchFile, src parsedPatchFile) {
 		if dst.NewFilePerm != 0 && dst.NewFilePerm != src.NewFilePerm {
 			dst.Diagnostics = append(
 				dst.Diagnostics,
-				fmt.Sprintf(
+				warningDiagnostic(
+					"duplicate_file_mode",
 					"duplicate file patches specify different new modes %#o and %#o; using %#o",
 					dst.NewFilePerm,
 					src.NewFilePerm,
@@ -1052,12 +1140,14 @@ func mergeParsedPatchFile(dst *parsedPatchFile, src parsedPatchFile) {
 	if target != "" {
 		dst.Diagnostics = append(
 			dst.Diagnostics,
-			fmt.Sprintf("merged duplicate file patch %s into %s for target %q", src.FileKey, dst.FileKey, target),
+			infoDiagnostic("merged_duplicate_file_patch",
+				"merged duplicate file patch %s into %s for target %q", src.FileKey, dst.FileKey, target),
 		)
 	} else {
 		dst.Diagnostics = append(
 			dst.Diagnostics,
-			fmt.Sprintf("merged duplicate file patch %s into %s", src.FileKey, dst.FileKey),
+			infoDiagnostic("merged_duplicate_file_patch",
+				"merged duplicate file patch %s into %s", src.FileKey, dst.FileKey),
 		)
 	}
 }
@@ -1338,7 +1428,7 @@ func fallbackUnquoteDiffPath(raw string) string {
 	return b.String()
 }
 
-func parseHunkHeader(line string) (hunk parsedHunk, diagnostics string) {
+func parseHunkHeader(line string) (parsedHunk, ApplyUnifiedDiffDiagnostic, bool) {
 	if m := hunkHeaderRE.FindStringSubmatch(line); m != nil {
 		return parsedHunk{
 			Header:   line,
@@ -1346,26 +1436,34 @@ func parseHunkHeader(line string) (hunk parsedHunk, diagnostics string) {
 			OldCount: atoiDefault(m[2], 1),
 			NewStart: atoiDefault(m[3], 0),
 			NewCount: atoiDefault(m[4], 1),
-		}, ""
+		}, ApplyUnifiedDiffDiagnostic{}, false
 	}
 
 	if m := looseHunkHeaderRE.FindStringSubmatch(line); m != nil {
 		return parsedHunk{
-			Header:   line,
-			OldStart: atoiDefault(m[1], 0),
-			OldCount: atoiDefault(m[2], 1),
-			NewStart: atoiDefault(m[3], 0),
-			NewCount: atoiDefault(m[4], 1),
-		}, fmt.Sprintf("non-standard hunk header %q parsed with loose rules", line)
+				Header:   line,
+				OldStart: atoiDefault(m[1], 0),
+				OldCount: atoiDefault(m[2], 1),
+				NewStart: atoiDefault(m[3], 0),
+				NewCount: atoiDefault(m[4], 1),
+			}, warningDiagnostic(
+				"non_standard_hunk_header",
+				"non-standard hunk header %q parsed with loose rules",
+				line,
+			), true
 	}
 
 	return parsedHunk{
-		Header:   line,
-		OldStart: 0,
-		OldCount: -1,
-		NewStart: 0,
-		NewCount: -1,
-	}, fmt.Sprintf("malformed hunk header %q; line-number hints unavailable and body will be parsed until the next patch boundary", line)
+			Header:   line,
+			OldStart: 0,
+			OldCount: -1,
+			NewStart: 0,
+			NewCount: -1,
+		}, warningDiagnostic(
+			"malformed_hunk_header",
+			"malformed hunk header %q; line-number hints unavailable and body will be parsed until the next patch boundary",
+			line,
+		), true
 }
 
 func atoiDefault(s string, def int) int {
@@ -1414,7 +1512,7 @@ func planFilePatch(
 		Hunks:        len(file.Hunks),
 		AddedLines:   file.AddedLines,
 		DeletedLines: file.DeletedLines,
-		Diagnostics:  toolutil.CloneStringSlice(file.Diagnostics),
+		Diagnostics:  cloneApplyUnifiedDiffDiagnostics(file.Diagnostics),
 	}
 	if file.IsRename || file.IsCopy {
 		kind := "rename/copy"
@@ -1431,7 +1529,10 @@ func planFilePatch(
 		)
 		result.Diagnostics = append(
 			result.Diagnostics,
-			"refusing to apply rename/copy metadata as a plain edit because that can modify the old path instead of creating the new path",
+			errorDiagnostic(
+				"rename_copy_unsupported",
+				"refusing to apply rename/copy metadata as a plain edit because that can modify the old path instead of creating the new path",
+			),
 		)
 		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
 	}
@@ -1440,7 +1541,10 @@ func planFilePatch(
 		result.Message = "binary patches are not supported by applyUnifiedDiff"
 		result.Diagnostics = append(
 			result.Diagnostics,
-			"refusing to treat ignored binary patch content as already applied",
+			errorDiagnostic(
+				"binary_patch_unsupported",
+				"refusing to treat ignored binary patch content as already applied",
+			),
 		)
 		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
 	}
@@ -1486,7 +1590,10 @@ func planFilePatch(
 	if !exists && file.canCreateWhenMissing() {
 		result.Diagnostics = append(
 			result.Diagnostics,
-			"target does not exist and diff looks like a new-file patch; treating it as a create",
+			infoDiagnostic(
+				"missing_target_treated_as_create",
+				"target does not exist and diff looks like a new-file patch; treating it as a create",
+			),
 		)
 		return planCreateFilePatch(ctx, p, file, args, target, result, exists)
 	}
@@ -1524,12 +1631,25 @@ func planFilePatch(
 	if file.NewFilePerm != 0 {
 		targetPerm = file.NewFilePerm
 		hasModeChange = targetPerm != tf.Perm
-
+	}
+	hunksToApply := file.Hunks
+	if file.isDelete() {
+		var normalized bool
+		hunksToApply, normalized = normalizeDeleteFileHunks(file.Hunks)
+		if normalized {
+			result.Diagnostics = append(
+				result.Diagnostics,
+				warningDiagnostic(
+					"delete_context_treated_as_deleted",
+					"delete-file patch contains context lines; treating them as old-side lines because the new path is /dev/null",
+				),
+			)
+		}
 	}
 	nextLines, applied, already, hunkDiagnostics, err := applyPatchHunks(
 		ctx,
 		tf.Lines,
-		file.Hunks,
+		hunksToApply,
 		!args.Strict,
 	)
 	result.Diagnostics = append(result.Diagnostics, hunkDiagnostics...)
@@ -1545,6 +1665,8 @@ func planFilePatch(
 
 	if file.isDelete() {
 		if len(nextLines) != 0 {
+			resetUnwrittenAppliedHunks(&result, applied)
+
 			result.Status = ApplyUnifiedDiffStatusConflict
 			result.Message = "delete-file patch did not leave the target file empty"
 			return fileApplyPlan{Result: result, Action: filePlanActionNoop}
@@ -1572,8 +1694,9 @@ func planFilePatch(
 		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
 	}
 
+	originalLineCount := len(tf.Lines)
 	tf.Lines = nextLines
-	tf.HasFinalNewline = patchedFileHasFinalNewline(tf.HasFinalNewline, file, nextLines)
+	tf.HasFinalNewline = patchedFileHasFinalNewline(tf.HasFinalNewline, originalLineCount, file, nextLines)
 	content := tf.Render()
 
 	if content == originalContent && !hasModeChange {
@@ -1588,7 +1711,10 @@ func planFilePatch(
 	if content == originalContent && hasModeChange {
 		result.Diagnostics = append(
 			result.Diagnostics,
-			fmt.Sprintf("file content already matches; file mode can be updated from %#o to %#o", tf.Perm, targetPerm),
+			infoDiagnostic(
+				"mode_change_only",
+				"file content already matches; file mode can be updated from %#o to %#o",
+				tf.Perm, targetPerm),
 		)
 		result.AlreadyAppliedHunks += result.AppliedHunks
 		result.AppliedHunks = 0
@@ -1613,6 +1739,32 @@ func planFilePatch(
 		VerifyContent:   true,
 		ExpectedContent: originalContent,
 	}
+}
+
+func normalizeDeleteFileHunks(hunks []parsedHunk) ([]parsedHunk, bool) {
+	out := make([]parsedHunk, len(hunks))
+	changed := false
+
+	for i, hunk := range hunks {
+		out[i] = hunk
+		out[i].Lines = make([]parsedHunkLine, len(hunk.Lines))
+
+		for j, line := range hunk.Lines {
+			if line.Kind == ' ' {
+				line.Kind = '-'
+				changed = true
+			}
+			out[i].Lines[j] = line
+		}
+
+		if changed {
+			oldCount, newCount := out[i].bodyCounts()
+			out[i].OldCount = oldCount
+			out[i].NewCount = newCount
+		}
+	}
+
+	return out, changed
 }
 
 func planModeOnlyFilePatch(
@@ -1684,6 +1836,22 @@ func planCreateFilePatch(
 	result.Diagnostics = append(result.Diagnostics, hunkDiagnostics...)
 	result.AppliedHunks = applied
 	result.AlreadyAppliedHunks = already
+
+	if err != nil {
+		if fallbackLines, ok := renderCreateFileContentFromHunks(file.Hunks); ok {
+			result.Diagnostics = append(
+				result.Diagnostics,
+				warningDiagnostic(
+					"create_fallback_from_hunk_body",
+					"create-file patch did not apply cleanly; using hunk body as file content",
+				),
+			)
+			desiredLines = fallbackLines
+			result.AppliedHunks = len(file.Hunks)
+			result.AlreadyAppliedHunks = 0
+			err = nil
+		}
+	}
 
 	desiredHasFinalNewline := newFileHasFinalNewline(file, desiredLines)
 
@@ -1801,7 +1969,10 @@ func resetUnwrittenAppliedHunks(file *ApplyUnifiedDiffFileOut, simulatedApplied 
 	if simulatedApplied > 0 {
 		file.Diagnostics = append(
 			file.Diagnostics,
-			fmt.Sprintf("%d hunk(s) matched in memory but were not written for this file", simulatedApplied),
+			warningDiagnostic(
+				"matched_but_not_written",
+				"%d hunk(s) matched in memory but were not written for this file",
+				simulatedApplied),
 		)
 	}
 	file.AppliedHunks = 0
@@ -1870,6 +2041,7 @@ func executeFilePlan(p fspolicy.FSPolicy, plan fileApplyPlan) error {
 
 func patchedFileHasFinalNewline(
 	originalHasFinalNewline bool,
+	originalLineCount int,
 	file parsedPatchFile,
 	lines []string,
 ) bool {
@@ -1880,6 +2052,9 @@ func patchedFileHasFinalNewline(
 		return !*file.NewNoFinalNewline
 	}
 	if file.OldNoFinalNewline != nil {
+		return true
+	}
+	if originalLineCount == 0 {
 		return true
 	}
 	return originalHasFinalNewline
@@ -1958,7 +2133,7 @@ func resolvePatchTarget(
 	args ApplyUnifiedDiffArgs,
 	candidateInfos []candidatePathInfo,
 	isOnlyPatchFile bool,
-) (target targetResolution, candidates, diagnostics []string, status ApplyUnifiedDiffStatus, err error) {
+) (target targetResolution, candidates []string, diagnostics []ApplyUnifiedDiffDiagnostic, status ApplyUnifiedDiffStatus, err error) {
 	patchPaths := patchPathCandidates(file)
 	var hardResolveErr error
 
@@ -1984,7 +2159,11 @@ func resolvePatchTarget(
 
 				diagnostics = append(
 					diagnostics,
-					fmt.Sprintf("diff path %q could not be resolved: %v", path, resolveErr),
+					warningDiagnostic(
+						"diff_path_unresolved",
+						"diff path %q could not be resolved: %v",
+						path,
+						resolveErr),
 				)
 				continue
 			}
@@ -2036,7 +2215,12 @@ func resolvePatchTarget(
 			target, err := resolveTargetPath(p, path)
 			if err != nil {
 				hardResolveErr = firstHardTargetResolutionError(hardResolveErr, err)
-				diagnostics = append(diagnostics, fmt.Sprintf("diff path %q could not be resolved: %v", path, err))
+				diagnostics = append(
+					diagnostics,
+					warningDiagnostic(
+						"diff_path_unresolved",
+						"diff path %q could not be resolved: %v",
+						path, err))
 				continue
 			}
 
@@ -2067,7 +2251,12 @@ func resolvePatchTarget(
 			if err != nil {
 				hardResolveErr = firstHardTargetResolutionError(hardResolveErr, err)
 
-				diagnostics = append(diagnostics, fmt.Sprintf("diff path %q could not be resolved: %v", path, err))
+				diagnostics = append(
+					diagnostics,
+					warningDiagnostic(
+						"diff_path_unresolved",
+						"diff path %q could not be resolved: %v",
+						path, err))
 				continue
 			}
 			return target, allCandidates, diagnostics, "", nil
@@ -2120,11 +2309,11 @@ func resolveCandidateMatches(
 	p fspolicy.FSPolicy,
 	matches []string,
 	allCandidates []string,
-	diagnostics []string,
+	diagnostics []ApplyUnifiedDiffDiagnostic,
 ) (
 	target targetResolution,
 	candidates []string,
-	outDiagnostics []string,
+	outDiagnostics []ApplyUnifiedDiffDiagnostic,
 	status ApplyUnifiedDiffStatus,
 	err error,
 	handled bool,
@@ -2140,7 +2329,10 @@ func resolveCandidateMatches(
 		return target, allCandidates, diagnostics, "", nil, true
 	}
 
-	diagnostics = append(diagnostics, "multiple candidatePaths match this file patch")
+	diagnostics = append(
+		diagnostics,
+		warningDiagnostic("ambiguous_candidate_paths", "multiple candidatePaths match this file patch"),
+	)
 	return targetResolution{},
 		limitStrings(uniqueStrings(matches), maxCandidatePathsPerFile),
 		diagnostics,
@@ -2371,11 +2563,11 @@ func applyPatchHunks(
 	lines []string,
 	hunks []parsedHunk,
 	fuzzy bool,
-) (desiredLines []string, applied, already int, hunkDiagnostics []string, err error) {
+) (desiredLines []string, applied, already int, hunkDiagnostics []ApplyUnifiedDiffDiagnostic, err error) {
 	next := toolutil.CloneStringSlice(lines)
 	lineDelta := 0
 	lineDrift := 0
-	diagnostics := []string{}
+	diagnostics := []ApplyUnifiedDiffDiagnostic{}
 
 	for _, hunk := range hunks {
 		if err := ctx.Err(); err != nil {
@@ -2434,12 +2626,27 @@ func applyHunkToLines(
 				OldLen:         0,
 				NewLen:         0,
 				AlreadyApplied: true,
-				Diagnostics:    []string{"empty hunk treated as already applied"},
+				Diagnostics: []ApplyUnifiedDiffDiagnostic{
+					infoDiagnostic("empty_hunk", "empty hunk treated as already applied"),
+				},
 			}, nil
 		}
 
-		if already, ok := findAlreadyAppliedMatch(lines, newBlock, newHint, insertHint, fuzzy, false); ok {
+		if already, ok := findAlreadyAppliedMatch(lines, newBlock, newHint, insertHint, fuzzy, fuzzy); ok {
 			return alreadyAppliedHunkResult(lines, 0, len(newBlock), already, nil), nil
+		}
+
+		if fuzzy && len(lines) != 0 {
+			return hunkApplyResult{
+				OldLen: 0,
+				NewLen: len(newBlock),
+				Diagnostics: []ApplyUnifiedDiffDiagnostic{
+					errorDiagnostic(
+						"context_free_insert_unsafe",
+						"context-free insert-only hunk has no old/context lines; refusing to use line-number hint in fuzzy mode",
+					),
+				},
+			}, errors.New("insert-only hunk has no old/context lines; cannot safely place it without matching context")
 		}
 
 		insertAt := insertHint
@@ -2448,6 +2655,14 @@ func applyHunkToLines(
 				return hunkApplyResult{
 					OldLen: 0,
 					NewLen: len(newBlock),
+					Diagnostics: []ApplyUnifiedDiffDiagnostic{
+						errorDiagnostic(
+							"insert_hint_out_of_range",
+							"insert-only hunk line hint %d is outside file range 1..%d and the hunk has no old/context lines",
+							insertHint+1,
+							len(lines)+1,
+						),
+					},
 				}, fmt.Errorf("insert-only hunk line hint %d is outside file range 1..%d and the hunk has no old/context lines", insertHint+1, len(lines)+1)
 			}
 			insertAt = clampInt(insertAt, 0, len(lines))
@@ -2455,39 +2670,64 @@ func applyHunkToLines(
 		next := ioutil.ReplaceStringRange(lines, insertAt, insertAt, newBlock)
 
 		return hunkApplyResult{
-			Lines:       next,
-			OldLen:      0,
-			NewLen:      len(newBlock),
-			Diagnostics: []string{fmt.Sprintf("inserted hunk at line %d", insertAt+1)},
-			Matched:     true,
-			MatchStart:  insertAt,
-			MatchBasis:  hunkMatchBasisInsert,
+			Lines:  next,
+			OldLen: 0,
+			NewLen: len(newBlock),
+			Diagnostics: []ApplyUnifiedDiffDiagnostic{
+				infoDiagnostic("inserted_hunk", "inserted hunk at line %d", insertAt+1),
+			},
+			Matched:    true,
+			MatchStart: insertAt,
+			MatchBasis: hunkMatchBasisInsert,
 		}, nil
 	}
 
-	if !ioutil.StringSlicesEqual(oldBlock, newBlock) {
-		if match, ok := findOldBlockLocalMatch(lines, oldBlock, oldHint, fuzzy); ok {
-			return applyMatchedOldBlock(lines, h, oldBlock, match, nil), nil
-		}
+	blocksDiffer := !ioutil.StringSlicesEqual(oldBlock, newBlock)
 
-		if already, ok := findAlreadyAppliedMatch(lines, newBlock, newHint, oldHint, fuzzy, false); ok {
-			return alreadyAppliedHunkResult(lines, len(oldBlock), len(newBlock), already, nil), nil
-		}
-	}
-
-	match, ok, diag := findOldBlockMatch(lines, oldBlock, oldKinds, oldHint, fuzzy)
+	match, ok, diagnostics := findOldBlockPrimaryMatch(lines, oldBlock, oldHint, fuzzy)
 	if ok {
-		return applyMatchedOldBlock(lines, h, oldBlock, match, diag), nil
+		return applyMatchedOldBlock(lines, h, oldBlock, match, diagnostics), nil
 	}
 
-	already, alreadyOK := findAlreadyAppliedMatch(lines, newBlock, newHint, oldHint, fuzzy, true)
-
-	if alreadyOK {
-		return alreadyAppliedHunkResult(lines, len(oldBlock), len(newBlock), already, diag), nil
+	// Handle single contiguous edit groups before generic fuzzy matching so we
+	// preserve prefix/suffix-specific diagnostics and avoid weaker old-block
+	// fuzzy matches stealing the hunk first.
+	if fuzzy && !ioutil.StringSlicesEqual(oldBlock, newBlock) {
+		if res, handled, err := tryApplySingleEditGroupHunk(lines, h); handled {
+			return res, err
+		}
 	}
 
-	diagnostics := append([]string{}, diag...)
+	if blocksDiffer {
+		if already, ok := findAlreadyAppliedMatch(lines, newBlock, newHint, oldHint, fuzzy, fuzzy); ok {
+			return alreadyAppliedHunkResult(lines, len(oldBlock), len(newBlock), already, diagnostics), nil
+		}
 
+		if fuzzy {
+			if res, handled, err := tryApplySingleEditGroupHunk(lines, h); handled {
+				res.Diagnostics = append(append([]ApplyUnifiedDiffDiagnostic{}, diagnostics...), res.Diagnostics...)
+				return res, err
+			}
+
+			if match, ok, d := findOldBlockAdvancedFuzzyMatch(lines, oldBlock, oldKinds, oldHint); ok {
+				diagnostics = append(diagnostics, d...)
+				return applyMatchedOldBlock(lines, h, oldBlock, match, diagnostics), nil
+			} else {
+				diagnostics = append(diagnostics, d...)
+			}
+		}
+	}
+
+	if !blocksDiffer {
+		if already, ok := findAlreadyAppliedMatch(lines, newBlock, newHint, oldHint, fuzzy, fuzzy); ok {
+			return alreadyAppliedHunkResult(lines, len(oldBlock), len(newBlock), already, diagnostics), nil
+		}
+	}
+
+	diagnostics = append(
+		diagnostics,
+		errorDiagnostic("hunk_match_failed", "old hunk block was not found and new hunk block was not already present"),
+	)
 	return hunkApplyResult{
 			Diagnostics: diagnostics,
 		}, errors.New(
@@ -2500,7 +2740,7 @@ func applyMatchedOldBlock(
 	h parsedHunk,
 	oldBlock []string,
 	match blockMatch,
-	priorDiagnostics []string,
+	priorDiagnostics []ApplyUnifiedDiffDiagnostic,
 ) hunkApplyResult {
 	replacement := buildHunkReplacementFromMatchedOld(
 		lines[match.Start:match.Start+len(oldBlock)],
@@ -2508,8 +2748,9 @@ func applyMatchedOldBlock(
 	)
 	next := ioutil.ReplaceStringRange(lines, match.Start, match.Start+len(oldBlock), replacement)
 
-	diagnostics := append([]string{}, priorDiagnostics...)
-	diagnostics = append(diagnostics, fmt.Sprintf(
+	diagnostics := append([]ApplyUnifiedDiffDiagnostic{}, priorDiagnostics...)
+	diagnostics = append(diagnostics, infoDiagnostic(
+		"hunk_matched",
 		"matched hunk at line %d using %s",
 		match.Start+1,
 		match.Method,
@@ -2532,10 +2773,11 @@ func alreadyAppliedHunkResult(
 	oldLen int,
 	newLen int,
 	match blockMatch,
-	priorDiagnostics []string,
+	priorDiagnostics []ApplyUnifiedDiffDiagnostic,
 ) hunkApplyResult {
-	diagnostics := append([]string{}, priorDiagnostics...)
-	diagnostics = append(diagnostics, fmt.Sprintf(
+	diagnostics := append([]ApplyUnifiedDiffDiagnostic{}, priorDiagnostics...)
+	diagnostics = append(diagnostics, infoDiagnostic(
+		"hunk_already_applied",
 		"hunk already applied at line %d using %s",
 		match.Start+1,
 		match.Method,
@@ -2551,6 +2793,574 @@ func alreadyAppliedHunkResult(
 		MatchStart:     match.Start,
 		MatchBasis:     hunkMatchBasisNew,
 	}
+}
+
+func tryApplySingleEditGroupHunk(
+	lines []string,
+	h parsedHunk,
+) (result hunkApplyResult, handled bool, err error) {
+	hunkSpec, ok := splitSingleEditGroupHunk(h)
+	if !ok {
+		return hunkApplyResult{}, false, nil
+	}
+
+	match, ok, diagnostics := findSingleEditGroupMatch(lines, hunkSpec)
+	if !ok {
+		if len(diagnostics) == 0 {
+			return hunkApplyResult{}, false, nil
+		}
+		diagnostics = append(
+			diagnostics,
+			errorDiagnostic("single_edit_match_failed", "single-edit hunk could not be applied safely"),
+		)
+		return hunkApplyResult{
+				Diagnostics: diagnostics,
+			}, true, errors.New(
+				"single-edit hunk could not be applied safely",
+			)
+	}
+
+	diagnostics = append([]ApplyUnifiedDiffDiagnostic{}, diagnostics...)
+
+	if match.AlreadyApplied {
+		diagnostics = append(diagnostics, infoDiagnostic(
+			"hunk_already_applied",
+			"hunk already applied at line %d using %s",
+			match.EditStart+1,
+			match.Method,
+		))
+
+		return hunkApplyResult{
+			Lines:          lines,
+			OldLen:         len(hunkSpec.OldEdit),
+			NewLen:         len(hunkSpec.NewEdit),
+			AlreadyApplied: true,
+			Diagnostics:    diagnostics,
+			Matched:        true,
+			MatchStart:     match.EstimatedStart,
+			MatchBasis:     hunkMatchBasisNone,
+		}, true, nil
+	}
+
+	if match.EditStart < 0 || match.EditStart+len(hunkSpec.OldEdit) > len(lines) {
+		return hunkApplyResult{Diagnostics: []ApplyUnifiedDiffDiagnostic{
+			errorDiagnostic(
+				"single_edit_invalid_location",
+				"single-edit fallback selected invalid line %d",
+				match.EditStart+1),
+		}}, true, errors.New("single-edit fallback selected invalid line")
+	}
+
+	next := ioutil.ReplaceStringRange(
+		lines,
+		match.EditStart,
+		match.EditStart+len(hunkSpec.OldEdit),
+		hunkSpec.NewEdit,
+	)
+	diagnostics = append(diagnostics, infoDiagnostic(
+		"hunk_matched",
+		"matched hunk at line %d using %s",
+		match.EditStart+1,
+		match.Method,
+	))
+
+	return hunkApplyResult{
+		Lines:       next,
+		OldLen:      len(hunkSpec.OldEdit),
+		NewLen:      len(hunkSpec.NewEdit),
+		Diagnostics: diagnostics,
+		Matched:     true,
+		MatchStart:  match.EstimatedStart,
+		MatchBasis:  hunkMatchBasisNone,
+	}, true, nil
+}
+
+func splitSingleEditGroupHunk(h parsedHunk) (singleEditHunkSpec, bool) {
+	var hunkSpec singleEditHunkSpec
+	phase := 0
+	sawEdit := false
+
+	for _, line := range h.Lines {
+		switch line.Kind {
+		case '+':
+			if phase == 2 {
+				return singleEditHunkSpec{}, false
+			}
+			phase = 1
+			sawEdit = true
+			hunkSpec.NewEdit = append(hunkSpec.NewEdit, line.Text)
+
+		case '-':
+			if phase == 2 {
+				return singleEditHunkSpec{}, false
+			}
+			phase = 1
+			sawEdit = true
+			hunkSpec.OldEdit = append(hunkSpec.OldEdit, line.Text)
+
+		default:
+			if phase == 0 {
+				hunkSpec.Prefix = append(hunkSpec.Prefix, line.Text)
+			} else {
+				phase = 2
+				hunkSpec.Suffix = append(hunkSpec.Suffix, line.Text)
+			}
+		}
+	}
+
+	if !sawEdit {
+		return singleEditHunkSpec{}, false
+	}
+
+	// A context-free insertion into an existing non-empty file is intentionally
+	// handled, and normally rejected in fuzzy mode, by the insert-only branch.
+	if len(hunkSpec.OldEdit) == 0 && len(hunkSpec.Prefix) == 0 && len(hunkSpec.Suffix) == 0 {
+		return singleEditHunkSpec{}, false
+	}
+
+	return hunkSpec, true
+}
+
+func findSingleEditGroupMatch(
+	lines []string,
+	hunkSpec singleEditHunkSpec,
+) (match singleEditMatch, ok bool, diagnostics []ApplyUnifiedDiffDiagnostic) {
+	prefixStrong := strongContextBlock(hunkSpec.Prefix)
+	suffixStrong := strongContextBlock(hunkSpec.Suffix)
+	oldEditStrong := strongContextBlock(hunkSpec.OldEdit)
+	newEditStrong := strongContextBlock(hunkSpec.NewEdit)
+
+	for _, mode := range []compareMode{compareExact, compareTrimmed} {
+		modeName := compareModeName(mode)
+
+		var prefixMatches []int
+		if prefixStrong {
+			prefixMatches = findAllBlockMatches(lines, hunkSpec.Prefix, mode, maxDiagnosticCandidates+1)
+		}
+
+		var suffixMatches []int
+		if suffixStrong {
+			suffixMatches = findAllBlockMatches(lines, hunkSpec.Suffix, mode, maxDiagnosticCandidates+1)
+		}
+
+		prefixMatched := prefixStrong && len(prefixMatches) > 0
+		suffixMatched := suffixStrong && len(suffixMatches) > 0
+
+		if prefixMatched && suffixMatched {
+			candidates := twoSidedSingleEditMatches(lines, hunkSpec, prefixMatches, suffixMatches, mode, modeName)
+			contextDiagnostics := singleEditContextAmbiguityDiagnostics(prefixMatches, suffixMatches, modeName)
+			match, ok, ambiguous, diag := selectUniqueSingleEditMatch(candidates, "two-sided "+modeName+" context")
+			if ok {
+				outDiagnostics := append([]ApplyUnifiedDiffDiagnostic{}, diagnostics...)
+				outDiagnostics = append(outDiagnostics, contextDiagnostics...)
+				outDiagnostics = append(outDiagnostics, diag...)
+				return match, true, outDiagnostics
+			}
+			diagnostics = append(diagnostics, contextDiagnostics...)
+			diagnostics = append(diagnostics, diag...)
+
+			if ambiguous {
+				return singleEditMatch{}, false, diagnostics
+			}
+
+			prefixUnique := len(prefixMatches) == 1
+			suffixUnique := len(suffixMatches) == 1
+
+			switch {
+			case prefixUnique && suffixUnique:
+				diagnostics = append(
+					diagnostics,
+					warningDiagnostic(
+						"single_edit_incompatible_context",
+						"single-edit fallback found unique prefix and suffix %s context, but they do not describe a compatible edit location",
+						modeName,
+					),
+				)
+				return singleEditMatch{}, false, diagnostics
+
+			case !prefixUnique && !suffixUnique:
+				diagnostics = append(
+					diagnostics,
+					warningDiagnostic(
+						"single_edit_non_unique_context",
+						"single-edit fallback found non-unique prefix and suffix %s context and no compatible two-sided edit location",
+						modeName,
+					),
+				)
+				return singleEditMatch{}, false, diagnostics
+
+			default:
+				diagnostics = append(
+					diagnostics,
+					infoDiagnostic(
+						"single_edit_one_sided_fallback",
+						"single-edit fallback found no compatible two-sided %s context; falling back to the unique one-sided context",
+						modeName,
+					),
+				)
+			}
+		}
+
+		contextMatched := prefixMatched || suffixMatched
+
+		if len(hunkSpec.OldEdit) == 0 {
+			alreadyCandidates, d := oneSidedSingleEditMatches(
+				lines,
+				hunkSpec,
+				prefixMatches,
+				suffixMatches,
+				mode,
+				modeName,
+				true,
+			)
+			candidateDiagnostics := append(append([]ApplyUnifiedDiffDiagnostic{}, diagnostics...), d...)
+			if match, ok, ambiguous, diag := selectUniqueSingleEditMatch(
+				alreadyCandidates,
+				"one-sided "+modeName+" already-applied insertion context",
+			); ok {
+				return match, true, append(candidateDiagnostics, diag...)
+			} else if ambiguous {
+				return singleEditMatch{}, false, append(candidateDiagnostics, diag...)
+			}
+			diagnostics = candidateDiagnostics
+
+			applyCandidates, d := oneSidedSingleEditMatches(
+				lines,
+				hunkSpec,
+				prefixMatches,
+				suffixMatches,
+				mode,
+				modeName,
+				false,
+			)
+			candidateDiagnostics = append(append([]ApplyUnifiedDiffDiagnostic{}, diagnostics...), d...)
+			if match, ok, ambiguous, diag := selectUniqueSingleEditMatch(
+				applyCandidates,
+				"one-sided "+modeName+" insertion context",
+			); ok {
+				return match, true, append(candidateDiagnostics, diag...)
+			} else if ambiguous {
+				return singleEditMatch{}, false, append(candidateDiagnostics, diag...)
+			}
+			diagnostics = candidateDiagnostics
+
+			continue
+		}
+
+		applyCandidates, d := oneSidedSingleEditMatches(
+			lines,
+			hunkSpec,
+			prefixMatches,
+			suffixMatches,
+			mode,
+			modeName,
+			false,
+		)
+		candidateDiagnostics := append(append([]ApplyUnifiedDiffDiagnostic{}, diagnostics...), d...)
+		if match, ok, ambiguous, diag := selectUniqueSingleEditMatch(
+			applyCandidates,
+			"one-sided "+modeName+" edit context",
+		); ok {
+			return match, true, append(candidateDiagnostics, diag...)
+		} else if ambiguous {
+			return singleEditMatch{}, false, append(candidateDiagnostics, diag...)
+		}
+		diagnostics = candidateDiagnostics
+
+		alreadyCandidates, d := oneSidedSingleEditMatches(
+			lines,
+			hunkSpec,
+			prefixMatches,
+			suffixMatches,
+			mode,
+			modeName,
+			true,
+		)
+		candidateDiagnostics = append(append([]ApplyUnifiedDiffDiagnostic{}, diagnostics...), d...)
+		if match, ok, ambiguous, diag := selectUniqueSingleEditMatch(
+			alreadyCandidates,
+			"one-sided "+modeName+" already-applied edit context",
+		); ok {
+			return match, true, append(candidateDiagnostics, diag...)
+		} else if ambiguous {
+			return singleEditMatch{}, false, append(candidateDiagnostics, diag...)
+		}
+		diagnostics = candidateDiagnostics
+
+		if !contextMatched && oldEditStrong {
+			oldOnlyCandidates := blockOnlySingleEditMatches(
+				lines,
+				hunkSpec.OldEdit,
+				len(hunkSpec.Prefix),
+				mode,
+				"single-edit-old-"+modeName,
+				false,
+			)
+			if match, ok, ambiguous, diag := selectUniqueSingleEditMatch(
+				oldOnlyCandidates,
+				"old edit body "+modeName,
+			); ok {
+				return match, true, append(append([]ApplyUnifiedDiffDiagnostic{}, diagnostics...), diag...)
+			} else if ambiguous {
+				return singleEditMatch{}, false, append(diagnostics, diag...)
+			}
+		}
+
+		if !contextMatched && newEditStrong {
+			newOnlyCandidates := blockOnlySingleEditMatches(
+				lines,
+				hunkSpec.NewEdit,
+				len(hunkSpec.Prefix),
+				mode,
+				"single-edit-new-"+modeName+"-already",
+				true,
+			)
+			if match, ok, ambiguous, diag := selectUniqueSingleEditMatch(
+				newOnlyCandidates,
+				"new edit body "+modeName,
+			); ok {
+				return match, true, append(append([]ApplyUnifiedDiffDiagnostic{}, diagnostics...), diag...)
+			} else if ambiguous {
+				return singleEditMatch{}, false, append(diagnostics, diag...)
+			}
+		}
+	}
+
+	return singleEditMatch{}, false, diagnostics
+}
+
+func singleEditContextAmbiguityDiagnostics(
+	prefixMatches []int,
+	suffixMatches []int,
+	modeName string,
+) []ApplyUnifiedDiffDiagnostic {
+	diagnostics := []ApplyUnifiedDiffDiagnostic{}
+
+	if len(prefixMatches) > 1 {
+		diagnostics = append(diagnostics, warningDiagnostic(
+			"single_edit_prefix_ambiguous",
+			"single-edit fallback prefix %s context matched %d locations; refusing one-sided prefix anchor",
+			modeName,
+			len(prefixMatches),
+		))
+	}
+	if len(suffixMatches) > 1 {
+		diagnostics = append(diagnostics, warningDiagnostic(
+			"single_edit_suffix_ambiguous",
+			"single-edit fallback suffix %s context matched %d locations; refusing one-sided suffix anchor",
+			modeName,
+			len(suffixMatches),
+		))
+	}
+	return diagnostics
+}
+
+func twoSidedSingleEditMatches(
+	lines []string,
+	hunkSpec singleEditHunkSpec,
+	prefixMatches []int,
+	suffixMatches []int,
+	mode compareMode,
+	modeName string,
+) []singleEditMatch {
+	out := make([]singleEditMatch, 0, 1)
+
+	for _, prefixStart := range prefixMatches {
+		editStart := prefixStart + len(hunkSpec.Prefix)
+
+		for _, suffixStart := range suffixMatches {
+			if suffixStart == editStart+len(hunkSpec.OldEdit) &&
+				matchBlockAt(lines, hunkSpec.OldEdit, editStart, mode) {
+				out = append(out, singleEditMatch{
+					EditStart:      editStart,
+					EstimatedStart: prefixStart,
+					Method:         "single-edit-two-sided-" + modeName,
+				})
+			}
+
+			if suffixStart == editStart+len(hunkSpec.NewEdit) &&
+				matchBlockAt(lines, hunkSpec.NewEdit, editStart, mode) {
+				out = append(out, singleEditMatch{
+					EditStart:      editStart,
+					EstimatedStart: prefixStart,
+					Method:         "single-edit-two-sided-" + modeName + "-already",
+					AlreadyApplied: true,
+				})
+			}
+		}
+	}
+
+	return out
+}
+
+func oneSidedSingleEditMatches(
+	lines []string,
+	hunkSpec singleEditHunkSpec,
+	prefixMatches []int,
+	suffixMatches []int,
+	mode compareMode,
+	modeName string,
+	already bool,
+) (match []singleEditMatch, diagnostics []ApplyUnifiedDiffDiagnostic) {
+	body := hunkSpec.OldEdit
+	action := "apply"
+	if already {
+		body = hunkSpec.NewEdit
+		action = "already"
+	}
+
+	// A one-sided empty "already" body would mark a deletion as already applied
+	// merely because one context side exists. That is too weak. Deletion-already
+	// detection is allowed by the two-sided prefix+suffix-adjacent case.
+	if already && len(body) == 0 {
+		return nil, nil
+	}
+
+	out := make([]singleEditMatch, 0, 2)
+
+	if len(prefixMatches) > 1 {
+		diagnostics = append(
+			diagnostics,
+			warningDiagnostic(
+				"single_edit_prefix_ambiguous",
+				"single-edit fallback prefix %s context matched %d locations; refusing one-sided prefix anchor",
+				modeName,
+				len(prefixMatches),
+			),
+		)
+	} else if len(prefixMatches) == 1 {
+		prefixStart := prefixMatches[0]
+		editStart := prefixStart + len(hunkSpec.Prefix)
+		if matchBlockAt(lines, body, editStart, mode) {
+			out = append(out, singleEditMatch{
+				EditStart:      editStart,
+				EstimatedStart: prefixStart,
+				Method:         "single-edit-prefix-" + action + "-" + modeName,
+				AlreadyApplied: already,
+			})
+		}
+	}
+
+	if len(suffixMatches) > 1 {
+		diagnostics = append(
+			diagnostics,
+			warningDiagnostic(
+				"single_edit_suffix_ambiguous",
+				"single-edit fallback suffix %s context matched %d locations; refusing one-sided suffix anchor",
+				modeName,
+				len(suffixMatches),
+			),
+		)
+	} else if len(suffixMatches) == 1 {
+		editStart := suffixMatches[0] - len(body)
+		if matchBlockAt(lines, body, editStart, mode) {
+			out = append(out, singleEditMatch{
+				EditStart:      editStart,
+				EstimatedStart: estimateSingleEditStart(editStart, len(hunkSpec.Prefix)),
+				Method:         "single-edit-suffix-" + action + "-" + modeName,
+				AlreadyApplied: already,
+			})
+		}
+	}
+
+	return out, diagnostics
+}
+
+func blockOnlySingleEditMatches(
+	lines []string,
+	block []string,
+	prefixLen int,
+	mode compareMode,
+	method string,
+	already bool,
+) []singleEditMatch {
+	matches := findAllBlockMatches(lines, block, mode, maxDiagnosticCandidates+1)
+	out := make([]singleEditMatch, 0, len(matches))
+
+	for _, start := range matches {
+		out = append(out, singleEditMatch{
+			EditStart:      start,
+			EstimatedStart: estimateSingleEditStart(start, prefixLen),
+			Method:         method,
+			AlreadyApplied: already,
+		})
+	}
+
+	return out
+}
+
+func selectUniqueSingleEditMatch(
+	candidates []singleEditMatch,
+	description string,
+) (match singleEditMatch, ok, ambiguous bool, diagnostics []ApplyUnifiedDiffDiagnostic) {
+	candidates = uniqueSingleEditMatches(candidates)
+
+	switch len(candidates) {
+	case 0:
+		return singleEditMatch{}, false, false, nil
+	case 1:
+		return candidates[0], true, false, nil
+	default:
+		return singleEditMatch{}, false, true, []ApplyUnifiedDiffDiagnostic{
+			warningDiagnostic(
+				"single_edit_ambiguous",
+				"single-edit fallback %s matched %d locations; refusing to choose",
+				description,
+				len(candidates),
+			),
+		}
+	}
+}
+
+func uniqueSingleEditMatches(candidates []singleEditMatch) []singleEditMatch {
+	out := make([]singleEditMatch, 0, len(candidates))
+	seen := map[string]int{}
+
+	for _, candidate := range candidates {
+		key := fmt.Sprintf("%d:%t", candidate.EditStart, candidate.AlreadyApplied)
+		if idx, ok := seen[key]; ok {
+			if candidate.Method != "" && !strings.Contains(out[idx].Method, candidate.Method) {
+				if out[idx].Method == "" {
+					out[idx].Method = candidate.Method
+				} else {
+					out[idx].Method += "+" + candidate.Method
+				}
+			}
+			continue
+		}
+
+		seen[key] = len(out)
+		out = append(out, candidate)
+	}
+
+	return out
+}
+
+func strongContextBlock(block []string) bool {
+	nonBlank := 0
+	chars := 0
+
+	for _, line := range block {
+		s := strings.TrimSpace(line)
+		if s == "" {
+			continue
+		}
+		nonBlank++
+		chars += len(s)
+	}
+
+	return nonBlank > 0 && chars >= 4
+}
+
+func compareModeName(mode compareMode) string {
+	if mode == compareTrimmed {
+		return "trimmed"
+	}
+	return "exact"
+}
+
+func estimateSingleEditStart(editStart, prefixLen int) int {
+	return max(0, editStart-prefixLen)
 }
 
 func hunkBlocks(h parsedHunk) (oldBlock []string, oldKinds []byte, newBlock []string) {
@@ -2592,31 +3402,39 @@ func hunkNewHint(h parsedHunk, delta int) int {
 	return h.NewStart - 1 + delta
 }
 
-func findOldBlockMatch(
+func findOldBlockPrimaryMatch(
 	lines, block []string,
-	kinds []byte,
 	hint int,
 	fuzzy bool,
-) (match blockMatch, ok bool, diagnostics []string) {
+) (match blockMatch, ok bool, diagnostics []ApplyUnifiedDiffDiagnostic) {
 	if len(block) == 0 {
 		return blockMatch{Start: clampInt(hint, 0, len(lines)), Method: "empty"}, true, diagnostics
 	}
+	if !fuzzy {
+		if match, ok := findOldBlockLocalMatch(lines, block, hint, false); ok {
+			return match, true, diagnostics
+		}
 
-	if match, ok := findOldBlockLocalMatch(lines, block, hint, fuzzy); ok {
-		return match, true, diagnostics
+		if m, ok, count := findUniqueGlobal(lines, block, compareExact); ok {
+			return blockMatch{Start: m, Method: "exact-global"}, true, diagnostics
+		} else if count > 1 {
+			diagnostics = append(
+				diagnostics,
+				warningDiagnostic("exact_old_block_ambiguous", "exact old block matched %d locations", count),
+			)
+		}
+
+		return blockMatch{}, false, diagnostics
 	}
 
 	if m, ok, count := findUniqueGlobal(lines, block, compareExact); ok {
 		return blockMatch{Start: m, Method: "exact-global"}, true, diagnostics
 	} else if count > 1 {
-		if m2, ok2 := chooseNearest(lines, block, hint, compareExact); ok2 {
-			return blockMatch{Start: m2, Method: "exact-nearest-hint"}, true, diagnostics
-		}
-		diagnostics = append(diagnostics, fmt.Sprintf("exact old block matched %d locations", count))
-	}
-
-	if !fuzzy {
-		return blockMatch{}, false, diagnostics
+		diagnostics = append(
+			diagnostics,
+			warningDiagnostic("exact_old_block_ambiguous",
+				"exact old block matched %d locations; refusing to choose by line hint alone", count),
+		)
 	}
 
 	if m, ok, count := findUniqueGlobal(lines, block, compareTrimmed); ok {
@@ -2624,9 +3442,18 @@ func findOldBlockMatch(
 	} else if count > 1 {
 		diagnostics = append(
 			diagnostics,
-			fmt.Sprintf("trimmed old block matched %d locations; refusing to choose by distant line hint", count),
+			warningDiagnostic("trimmed_old_block_ambiguous",
+				"trimmed old block matched %d locations; refusing to choose by distant line hint", count),
 		)
 	}
+	return blockMatch{}, false, diagnostics
+}
+
+func findOldBlockAdvancedFuzzyMatch(
+	lines, block []string,
+	kinds []byte,
+	hint int,
+) (match blockMatch, ok bool, diagnostics []ApplyUnifiedDiffDiagnostic) {
 	if m, ok, d := findDeletionAnchoredWindow(lines, block, kinds, hint); ok {
 		diagnostics = append(diagnostics, d...)
 		return m, true, diagnostics
@@ -2680,7 +3507,7 @@ func findDeletionAnchoredWindow(
 	lines, block []string,
 	kinds []byte,
 	hint int,
-) (match blockMatch, ok bool, diagnostics []string) {
+) (match blockMatch, ok bool, diagnostics []ApplyUnifiedDiffDiagnostic) {
 	if len(block) == 0 || len(block) > len(lines) {
 		return blockMatch{}, false, nil
 	}
@@ -2762,11 +3589,14 @@ func findDeletionAnchoredWindow(
 	}
 
 	if candidates > 1 && best.Score-secondScore < 0.05 {
-		return blockMatch{}, false, []string{"deletion-anchored fuzzy search was ambiguous"}
+		return blockMatch{}, false, []ApplyUnifiedDiffDiagnostic{
+			warningDiagnostic("deletion_anchored_ambiguous", "deletion-anchored fuzzy search was ambiguous"),
+		}
 	}
 
-	return best, true, []string{
-		fmt.Sprintf(
+	return best, true, []ApplyUnifiedDiffDiagnostic{
+		infoDiagnostic(
+			"deletion_anchored_selected",
 			"deletion-anchored fuzzy search selected line %d with score %.3f",
 			best.Start+1,
 			best.Score,
@@ -2811,38 +3641,38 @@ func findAlreadyAppliedMatch(
 		return blockMatch{}, false
 	}
 
-	if matchBlockAt(lines, newBlock, newHint, compareExact) {
-		return blockMatch{Start: newHint, Method: "already-exact-new-hint"}, true
-	}
-	if matchBlockAt(lines, newBlock, oldHint, compareExact) {
-		return blockMatch{Start: oldHint, Method: "already-exact-old-hint"}, true
-	}
-
-	if m, ok := findUniqueNear(lines, newBlock, newHint, hunkNearbyLineTolerance, compareExact); ok {
-		return blockMatch{Start: m, Method: "already-exact-near"}, true
-	}
-
 	if allowGlobal {
 		if m, ok, _ := findUniqueGlobal(lines, newBlock, compareExact); ok {
 			return blockMatch{Start: m, Method: "already-exact-global"}, true
 		}
+	} else {
+		if matchBlockAt(lines, newBlock, newHint, compareExact) {
+			return blockMatch{Start: newHint, Method: "already-exact-new-hint"}, true
+		}
+		if matchBlockAt(lines, newBlock, oldHint, compareExact) {
+			return blockMatch{Start: oldHint, Method: "already-exact-old-hint"}, true
+		}
+
+		if m, ok := findUniqueNear(lines, newBlock, newHint, hunkNearbyLineTolerance, compareExact); ok {
+			return blockMatch{Start: m, Method: "already-exact-near"}, true
+		}
 	}
 
 	if fuzzy {
-		if matchBlockAt(lines, newBlock, newHint, compareTrimmed) {
-			return blockMatch{Start: newHint, Method: "already-trimmed-new-hint"}, true
-		}
-		if matchBlockAt(lines, newBlock, oldHint, compareTrimmed) {
-			return blockMatch{Start: oldHint, Method: "already-trimmed-old-hint"}, true
-		}
-
-		if m, ok := findUniqueNear(lines, newBlock, newHint, hunkNearbyLineTolerance, compareTrimmed); ok {
-			return blockMatch{Start: m, Method: "already-trimmed-near"}, true
-		}
-
 		if allowGlobal {
 			if m, ok, _ := findUniqueGlobal(lines, newBlock, compareTrimmed); ok {
 				return blockMatch{Start: m, Method: "already-trimmed-global"}, true
+			}
+		} else {
+			if matchBlockAt(lines, newBlock, newHint, compareTrimmed) {
+				return blockMatch{Start: newHint, Method: "already-trimmed-new-hint"}, true
+			}
+			if matchBlockAt(lines, newBlock, oldHint, compareTrimmed) {
+				return blockMatch{Start: oldHint, Method: "already-trimmed-old-hint"}, true
+			}
+
+			if m, ok := findUniqueNear(lines, newBlock, newHint, hunkNearbyLineTolerance, compareTrimmed); ok {
+				return blockMatch{Start: m, Method: "already-trimmed-near"}, true
 			}
 		}
 	}
@@ -2897,35 +3727,25 @@ func findUniqueGlobal(lines, block []string, mode compareMode) (start int, ok bo
 	return first, count == 1, count
 }
 
-func chooseNearest(lines, block []string, hint int, mode compareMode) (int, bool) {
-	best := -1
-	bestDist := 1 << 30
-	secondDist := 1 << 30
+func findAllBlockMatches(lines, block []string, mode compareMode, limit int) []int {
+	if len(block) == 0 || len(block) > len(lines) {
+		return nil
+	}
+
+	matches := []int{}
 
 	for i := 0; i+len(block) <= len(lines); i++ {
 		if !matchBlockAt(lines, block, i, mode) {
 			continue
 		}
 
-		dist := absInt(i - hint)
-		if dist < bestDist {
-			secondDist = bestDist
-			bestDist = dist
-			best = i
-		} else if dist < secondDist {
-			secondDist = dist
+		matches = append(matches, i)
+		if limit > 0 && len(matches) >= limit {
+			break
 		}
 	}
 
-	if best < 0 || bestDist > hunkNearestLineLimit {
-		return 0, false
-	}
-
-	if secondDist-bestDist < 4 {
-		return 0, false
-	}
-
-	return best, true
+	return matches
 }
 
 func matchBlockAt(lines, block []string, start int, mode compareMode) bool {
@@ -2946,7 +3766,7 @@ func findBestScoredWindow(
 	lines, block []string,
 	kinds []byte,
 	hint int,
-) (match blockMatch, ok bool, diagnostics []string) {
+) (match blockMatch, ok bool, diagnostics []ApplyUnifiedDiffDiagnostic) {
 	if len(block) == 0 || len(block) > len(lines) {
 		return blockMatch{}, false, nil
 	}
@@ -2977,15 +3797,24 @@ func findBestScoredWindow(
 	}
 
 	if best.Start < 0 {
-		return blockMatch{}, false, []string{"scored fuzzy search found no safe candidate"}
+		return blockMatch{}, false, []ApplyUnifiedDiffDiagnostic{
+			warningDiagnostic("scored_fuzzy_no_safe_candidate", "scored fuzzy search found no safe candidate"),
+		}
 	}
 
 	if candidates > 1 && best.Score-secondScore < 0.08 {
-		return blockMatch{}, false, []string{"scored fuzzy search was ambiguous"}
+		return blockMatch{}, false, []ApplyUnifiedDiffDiagnostic{
+			warningDiagnostic("scored_fuzzy_ambiguous", "scored fuzzy search was ambiguous"),
+		}
 	}
 
-	return best, true, []string{
-		fmt.Sprintf("scored fuzzy search selected line %d with score %.3f", best.Start+1, best.Score),
+	return best, true, []ApplyUnifiedDiffDiagnostic{
+		infoDiagnostic(
+			"scored_fuzzy_selected",
+			"scored fuzzy search selected line %d with score %.3f",
+			best.Start+1,
+			best.Score,
+		),
 	}
 }
 
@@ -3049,6 +3878,24 @@ func renderNewTextFile(lines []string, hasFinalNewline bool) string {
 		Lines:           toolutil.CloneStringSlice(lines),
 	}
 	return tf.Render()
+}
+
+func renderCreateFileContentFromHunks(hunks []parsedHunk) ([]string, bool) {
+	desired := make([]string, 0)
+
+	for _, hunk := range hunks {
+		_, _, newBlock := hunkBlocks(hunk)
+		if len(newBlock) == 0 {
+			return nil, false
+		}
+		desired = append(desired, newBlock...)
+	}
+
+	if len(desired) == 0 {
+		return nil, false
+	}
+
+	return desired, true
 }
 
 func lineEquals(a, b string, mode compareMode) bool {
@@ -3186,15 +4033,15 @@ func (f parsedPatchFile) fileKeyMatches(fileKey string) bool {
 }
 
 func (f parsedPatchFile) canCreateWhenMissing() bool {
-	if f.isCreateLike() {
-		return true
+	if f.isCreate() {
+		return f.NewPath != "" && !isDevNull(f.NewPath)
 	}
 	return !f.isDelete() && f.looksLikeCreateOnlyHunks()
 }
 
 func (f parsedPatchFile) isCreateLike() bool {
 	if f.isCreate() {
-		return true
+		return f.NewPath != "" && !isDevNull(f.NewPath)
 	}
 	return f.NewFilePerm != 0 &&
 		f.NewPath != "" &&
