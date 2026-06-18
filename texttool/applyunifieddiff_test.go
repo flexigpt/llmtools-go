@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
@@ -156,6 +158,9 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 		}
 	})
 	t.Run("create_patch_creates_file_with_no_newline_marker_and_is_idempotent", func(t *testing.T) {
+		if runtime.GOOS == toolutil.GOOSWindows {
+			t.Skip("win mode issue")
+		}
 		path := filepath.Join(dir, "created.txt")
 		diff := makePatchText(
 			"diff --git a/created.txt b/created.txt",
@@ -2604,6 +2609,9 @@ func TestApplyUnifiedDiffCreateDeleteFilesystemCoverage(t *testing.T) {
 	})
 
 	t.Run("git_metadata_only_empty_create_creates_file_and_is_idempotent", func(t *testing.T) {
+		if runtime.GOOS == toolutil.GOOSWindows {
+			t.Skip("win mode issue")
+		}
 		rel := "metadata-empty-created.txt"
 		full := filepath.Join(dir, rel)
 		diff := makePatchText(
