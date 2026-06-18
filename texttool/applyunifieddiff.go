@@ -305,6 +305,8 @@ type parsedPatchFile struct {
 	DeletedLines   int
 	IsRename       bool
 	IsCopy         bool
+	IsNewFile      bool
+	IsDeletedFile  bool
 	HasBinaryPatch bool
 
 	NewFilePerm       os.FileMode
@@ -934,8 +936,18 @@ func parseUnifiedDiff(diffText string) (parsedPatch, error) {
 		if current != nil {
 			switch {
 			case strings.HasPrefix(line, "new file mode "):
+				current.IsNewFile = true
+				if current.OldPath == "" || patchPathsEqual(current.OldPath, current.NewPath) {
+					current.OldPath = pathDevNull
+				}
 				if perm, ok := parseGitFileModePerm(line); ok {
 					current.NewFilePerm = perm
+				}
+				continue
+			case strings.HasPrefix(line, "deleted file mode "):
+				current.IsDeletedFile = true
+				if current.NewPath == "" || patchPathsEqual(current.NewPath, current.OldPath) {
+					current.NewPath = pathDevNull
 				}
 				continue
 			case strings.HasPrefix(line, "new mode "):
@@ -1104,6 +1116,8 @@ func mergeParsedPatchFile(dst *parsedPatchFile, src parsedPatchFile) {
 	dst.DeletedLines += src.DeletedLines
 	dst.IsRename = dst.IsRename || src.IsRename
 	dst.IsCopy = dst.IsCopy || src.IsCopy
+	dst.IsNewFile = dst.IsNewFile || src.IsNewFile
+	dst.IsDeletedFile = dst.IsDeletedFile || src.IsDeletedFile
 	dst.HasBinaryPatch = dst.HasBinaryPatch || src.HasBinaryPatch
 
 	if dst.OldPath == "" {
@@ -1549,7 +1563,7 @@ func planFilePatch(
 		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
 	}
 	modeOnly := file.isModeOnly()
-	if len(file.Hunks) == 0 && !modeOnly {
+	if len(file.Hunks) == 0 && !modeOnly && !file.isCreate() && !file.isDelete() {
 		result.OK = true
 		result.Status = ApplyUnifiedDiffStatusAlreadyApplied
 		result.Message = "File patch contains no text hunks; nothing to apply."
@@ -1877,6 +1891,35 @@ func planCreateFilePatch(
 		}
 
 		if ioutil.StringSlicesEqual(tf.Lines, desiredLines) && tf.HasFinalNewline == desiredHasFinalNewline {
+			if file.NewFilePerm != 0 && tf.Perm != file.NewFilePerm {
+				result.OK = true
+				result.Status = ApplyUnifiedDiffStatusApplicable
+				result.Message = fmt.Sprintf(
+					"Create-file content already exists; file mode can be updated from %#o to %#o.",
+					tf.Perm,
+					file.NewFilePerm,
+				)
+				result.AlreadyAppliedHunks = len(file.Hunks)
+				result.AppliedHunks = 0
+				result.Diagnostics = append(
+					result.Diagnostics,
+					infoDiagnostic(
+						"create_content_already_present_mode_change",
+						"create-file content already exists; updating mode from %#o to %#o",
+						tf.Perm,
+						file.NewFilePerm,
+					),
+				)
+				return fileApplyPlan{
+					Result:          result,
+					Action:          filePlanActionChmodExisting,
+					DisplayPath:     target.DisplayPath,
+					ResolvedPath:    target.ResolvedPath,
+					Perm:            file.NewFilePerm,
+					VerifyContent:   true,
+					ExpectedContent: tf.Render(),
+				}
+			}
 			result.OK = true
 			result.Status = ApplyUnifiedDiffStatusAlreadyApplied
 			result.Message = "Create-file patch is already applied because the target file already has the desired content."
@@ -3430,6 +3473,18 @@ func findOldBlockPrimaryMatch(
 	if m, ok, count := findUniqueGlobal(lines, block, compareExact); ok {
 		return blockMatch{Start: m, Method: "exact-global"}, true, diagnostics
 	} else if count > 1 {
+		if m, nearOK := findUniqueNear(lines, block, hint, hunkNearbyLineTolerance, compareExact); nearOK {
+			diagnostics = append(
+				diagnostics,
+				warningDiagnostic(
+					"exact_old_block_ambiguous_hint_selected",
+					"exact old block matched %d locations; selected the unique match near the hunk line hint at line %d",
+					count,
+					m+1,
+				),
+			)
+			return blockMatch{Start: m, Method: "exact-near-hint-disambiguated"}, true, diagnostics
+		}
 		diagnostics = append(
 			diagnostics,
 			warningDiagnostic("exact_old_block_ambiguous",
@@ -3440,6 +3495,18 @@ func findOldBlockPrimaryMatch(
 	if m, ok, count := findUniqueGlobal(lines, block, compareTrimmed); ok {
 		return blockMatch{Start: m, Method: "trimmed-global"}, true, diagnostics
 	} else if count > 1 {
+		if m, nearOK := findUniqueNear(lines, block, hint, hunkNearbyLineTolerance, compareTrimmed); nearOK {
+			diagnostics = append(
+				diagnostics,
+				warningDiagnostic(
+					"trimmed_old_block_ambiguous_hint_selected",
+					"trimmed old block matched %d locations; selected the unique match near the hunk line hint at line %d",
+					count,
+					m+1,
+				),
+			)
+			return blockMatch{Start: m, Method: "trimmed-near-hint-disambiguated"}, true, diagnostics
+		}
 		diagnostics = append(
 			diagnostics,
 			warningDiagnostic("trimmed_old_block_ambiguous",
@@ -4070,11 +4137,11 @@ func (f parsedPatchFile) allHunksHaveNoOldContent() bool {
 }
 
 func (f parsedPatchFile) isCreate() bool {
-	return isDevNull(f.OldPath)
+	return f.IsNewFile || isDevNull(f.OldPath)
 }
 
 func (f parsedPatchFile) isDelete() bool {
-	return isDevNull(f.NewPath)
+	return f.IsDeletedFile || isDevNull(f.NewPath)
 }
 
 func (a filePlanAction) mutates() bool {

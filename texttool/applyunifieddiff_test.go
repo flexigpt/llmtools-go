@@ -281,6 +281,82 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("contiguous_mixed_edit_blocks_permutations", func(t *testing.T) {
+		cases := []struct {
+			name     string
+			fileName string
+			body     []string
+		}{
+			{
+				name:     "plus_minus_plus_minus",
+				fileName: "mixed-plus-minus-plus-minus.txt",
+				body: []string{
+					" prefix anchor line",
+					"+new value one",
+					"-old value one",
+					"+new value two",
+					"-old value two",
+					" suffix anchor line",
+				},
+			},
+			{
+				name:     "minus_plus_minus_plus",
+				fileName: "mixed-minus-plus-minus-plus.txt",
+				body: []string{
+					" prefix anchor line",
+					"-old value one",
+					"+new value one",
+					"-old value two",
+					"+new value two",
+					" suffix anchor line",
+				},
+			},
+			{
+				name:     "plus_minus_minus_plus",
+				fileName: "mixed-plus-minus-minus-plus.txt",
+				body: []string{
+					" prefix anchor line",
+					"+new value one",
+					"-old value one",
+					"-old value two",
+					"+new value two",
+					" suffix anchor line",
+				},
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				path := writeTextFile(
+					t,
+					dir,
+					tc.fileName,
+					"prefix anchor line\nold value one\nold value two\nsuffix anchor line\n",
+				)
+
+				lines := []string{
+					"diff --git a/" + tc.fileName + " b/" + tc.fileName,
+					"--- a/" + tc.fileName,
+					"+++ b/" + tc.fileName,
+					"@@ -1,4 +1,4 @@",
+				}
+				lines = append(lines, tc.body...)
+
+				out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: makePatchText(lines...)})
+				mustNoErr(t, err)
+				if out.Status != ApplyUnifiedDiffStatusApplied {
+					t.Fatalf("status mismatch: %s files=%#v", out.Status, out.Files)
+				}
+				if got := readFileString(
+					t,
+					path,
+				); got != "prefix anchor line\nnew value one\nnew value two\nsuffix anchor line\n" {
+					t.Fatalf("content mismatch: got %q", got)
+				}
+			})
+		}
+	})
 	t.Run("insert_only_into_existing_empty_file_adds_final_newline", func(t *testing.T) {
 		path := writeTextFile(t, dir, "existing-empty.txt", "")
 		diff := makePatchText(
@@ -793,6 +869,64 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("hunk_header_counts_too_small_are_warning_hints_only", func(t *testing.T) {
+		path := writeTextFile(t, dir, "count-too-small.txt", "A\nB\nC\n")
+		diff := makePatchText(
+			"diff --git a/count-too-small.txt b/count-too-small.txt",
+			"--- a/count-too-small.txt",
+			"+++ b/count-too-small.txt",
+			"@@ -1,1 +1,1 @@",
+			" A",
+			"-B",
+			"+X",
+			" C",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("count-too-small status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, path); got != "A\nX\nC\n" {
+			t.Fatalf("count-too-small content mismatch: got %q", got)
+		}
+		if len(out.Files) != 1 ||
+			!hasDiagnostic(out.Files[0].Diagnostics, ApplyUnifiedDiffDiagnosticLevelWarning, "hunk_body_overflow") {
+			t.Fatalf("missing hunk_body_overflow warning: %#v", out.Files)
+		}
+	})
+
+	t.Run("hunk_header_counts_too_large_are_warning_hints_only", func(t *testing.T) {
+		path := writeTextFile(t, dir, "count-too-large.txt", "A\nB\nC\n")
+		diff := makePatchText(
+			"diff --git a/count-too-large.txt b/count-too-large.txt",
+			"--- a/count-too-large.txt",
+			"+++ b/count-too-large.txt",
+			"@@ -1,99 +1,99 @@",
+			" A",
+			"-B",
+			"+X",
+			" C",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("count-too-large status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, path); got != "A\nX\nC\n" {
+			t.Fatalf("count-too-large content mismatch: got %q", got)
+		}
+		if len(out.Files) != 1 ||
+			!hasDiagnostic(
+				out.Files[0].Diagnostics,
+				ApplyUnifiedDiffDiagnosticLevelWarning,
+				"hunk_header_count_mismatch",
+			) {
+			t.Fatalf("missing hunk_header_count_mismatch warning: %#v", out.Files)
+		}
+	})
+
 	t.Run("multi_hunk_partial_already_applied_file", func(t *testing.T) {
 		path := writeTextFile(t, dir, "partial-already.txt", "A\nX\nC\nD\nE\nF\n")
 		diff := makePatchText(
@@ -823,6 +957,42 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 		}
 		if got := readFileString(t, path); got != "A\nX\nC\nD\nY\nF\n" {
 			t.Fatalf("partial-already content mismatch: got %q", got)
+		}
+	})
+
+	t.Run("multi_hunk_failure_does_not_write_first_matched_hunk", func(t *testing.T) {
+		path := writeTextFile(t, dir, "partial-failure-no-write.txt", "A\nB\nC\nD\nE\nF\n")
+		diff := makePatchText(
+			"diff --git a/partial-failure-no-write.txt b/partial-failure-no-write.txt",
+			"--- a/partial-failure-no-write.txt",
+			"+++ b/partial-failure-no-write.txt",
+			"@@ -1,3 +1,3 @@",
+			" A",
+			"-B",
+			"+X",
+			" C",
+			"@@ -4,3 +4,3 @@",
+			" D",
+			"-missing",
+			"+Y",
+			" F",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusConflict {
+			t.Fatalf("partial failure should conflict: %s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, path); got != "A\nB\nC\nD\nE\nF\n" {
+			t.Fatalf("partial failure must not write first hunk: got %q", got)
+		}
+		if len(out.Files) != 1 ||
+			!hasDiagnostic(
+				out.Files[0].Diagnostics,
+				ApplyUnifiedDiffDiagnosticLevelWarning,
+				"matched_but_not_written",
+			) {
+			t.Fatalf("missing matched_but_not_written diagnostic: %#v", out.Files)
 		}
 	})
 
@@ -997,6 +1167,65 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 			t.Fatalf("ambiguous fuzzy conflict must not modify file, got %q", got)
 		}
 	})
+
+	t.Run("duplicate_exact_old_block_uses_unique_near_line_hint", func(t *testing.T) {
+		pad := make([]string, 0, 20)
+		for range 20 {
+			pad = append(pad, "pad line")
+		}
+
+		contentLines := make([]string, 0, 7+len(pad))
+		contentLines = append(contentLines,
+			"duplicate prefix line",
+			"duplicate old line",
+			"duplicate suffix line",
+		)
+		contentLines = append(contentLines, pad...)
+		contentLines = append(contentLines,
+			"duplicate prefix line",
+			"duplicate old line",
+			"duplicate suffix line",
+			"",
+		)
+
+		path := writeTextFile(t, dir, "line-hint-disambiguates.txt", strings.Join(contentLines, "\n"))
+		diff := makePatchText(
+			"diff --git a/line-hint-disambiguates.txt b/line-hint-disambiguates.txt",
+			"--- a/line-hint-disambiguates.txt",
+			"+++ b/line-hint-disambiguates.txt",
+			"@@ -24,3 +24,3 @@",
+			" duplicate prefix line",
+			"-duplicate old line",
+			"+duplicate new line",
+			" duplicate suffix line",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("line-hint status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, path); got != strings.Join([]string{
+			"duplicate prefix line",
+			"duplicate old line",
+			"duplicate suffix line",
+			strings.Join(pad, "\n"),
+			"duplicate prefix line",
+			"duplicate new line",
+			"duplicate suffix line",
+			"",
+		}, "\n") {
+			t.Fatalf("line-hint content mismatch: got %q", got)
+		}
+		if len(out.Files) != 1 ||
+			!hasDiagnostic(
+				out.Files[0].Diagnostics,
+				ApplyUnifiedDiffDiagnosticLevelWarning,
+				"exact_old_block_ambiguous_hint_selected",
+			) {
+			t.Fatalf("missing line-hint ambiguity diagnostic: %#v", out.Files)
+		}
+	})
 }
 
 func TestApplyUnifiedDiffAllowedRootEscapeReturnsError(t *testing.T) {
@@ -1073,6 +1302,39 @@ func TestApplyUnifiedDiffModeOnlyPatch(t *testing.T) {
 	mustNoErr(t, err)
 	if out.Status != ApplyUnifiedDiffStatusAlreadyApplied {
 		t.Fatalf("mode-only reapply status mismatch: %s files=%#v", out.Status, out.Files)
+	}
+
+	createExisting := writeTextFile(t, dir, "create-existing-mode.sh", "echo hi\n")
+	if err := os.Chmod(createExisting, 0o644); err != nil {
+		t.Fatalf("chmod create-existing setup: %v", err)
+	}
+	createDiff := makePatchText(
+		"diff --git a/create-existing-mode.sh b/create-existing-mode.sh",
+		"new file mode 100755",
+		"--- /dev/null",
+		"+++ b/create-existing-mode.sh",
+		"@@ -0,0 +1,1 @@",
+		"+echo hi",
+	)
+
+	out, err = tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: createDiff})
+	mustNoErr(t, err)
+	if out.Status != ApplyUnifiedDiffStatusApplied {
+		t.Fatalf("create-existing mode update status mismatch: %s files=%#v", out.Status, out.Files)
+	}
+	if got := readFileString(t, createExisting); got != "echo hi\n" {
+		t.Fatalf("create-existing mode update must not change content, got %q", got)
+	}
+	st, err = os.Stat(createExisting)
+	mustNoErr(t, err)
+	if st.Mode().Perm() != 0o755 {
+		t.Fatalf("create-existing mode mismatch: want 0755 got %#o", st.Mode().Perm())
+	}
+
+	out, err = tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: createDiff})
+	mustNoErr(t, err)
+	if out.Status != ApplyUnifiedDiffStatusAlreadyApplied {
+		t.Fatalf("create-existing mode reapply status mismatch: %s files=%#v", out.Status, out.Files)
 	}
 }
 
@@ -1983,6 +2245,23 @@ func TestApplyUnifiedDiffSingleEditFallbackExtendedEndToEnd(t *testing.T) {
 			wantReapplyStatus: ApplyUnifiedDiffStatusAlreadyApplied,
 		},
 		{
+			name:           "insert_only_unique_prefix_recovers_stale_suffix",
+			fileName:       "insert-prefix-rescue.txt",
+			initialContent: "unique prefix anchor line\noutro line\n",
+			diff: makePatchText(
+				"diff --git a/insert-prefix-rescue.txt b/insert-prefix-rescue.txt",
+				"--- a/insert-prefix-rescue.txt",
+				"+++ b/insert-prefix-rescue.txt",
+				"@@ -10,2 +10,4 @@",
+				" unique prefix anchor line",
+				"+inserted line one",
+				"+inserted line two",
+				" stale suffix anchor line",
+			),
+			wantStatus:  ApplyUnifiedDiffStatusApplied,
+			wantContent: "unique prefix anchor line\ninserted line one\ninserted line two\noutro line\n",
+		},
+		{
 			name:           "delete_only_unique_prefix_recovers_stale_suffix",
 			fileName:       "delete-prefix-rescue.txt",
 			initialContent: "intro line\nunique prefix anchor line\nremove line one\nremove line two\noutro line\n",
@@ -1998,6 +2277,41 @@ func TestApplyUnifiedDiffSingleEditFallbackExtendedEndToEnd(t *testing.T) {
 			),
 			wantStatus:  ApplyUnifiedDiffStatusApplied,
 			wantContent: "intro line\nunique prefix anchor line\noutro line\n",
+		},
+		{
+			name:           "delete_only_unique_suffix_recovers_stale_prefix",
+			fileName:       "delete-suffix-rescue.txt",
+			initialContent: "intro line\nremove line one\nremove line two\nunique suffix anchor line\n",
+			diff: makePatchText(
+				"diff --git a/delete-suffix-rescue.txt b/delete-suffix-rescue.txt",
+				"--- a/delete-suffix-rescue.txt",
+				"+++ b/delete-suffix-rescue.txt",
+				"@@ -10,4 +10,2 @@",
+				" stale prefix anchor line",
+				"-remove line one",
+				"-remove line two",
+				" unique suffix anchor line",
+			),
+			wantStatus:  ApplyUnifiedDiffStatusApplied,
+			wantContent: "intro line\nunique suffix anchor line\n",
+		},
+		{
+			name:           "insert_only_both_unique_but_not_adjacent_conflicts",
+			fileName:       "insert-incompatible-unique.txt",
+			initialContent: "unique prefix anchor line\nexisting middle line\nunique suffix anchor line\n",
+			diff: makePatchText(
+				"diff --git a/insert-incompatible-unique.txt b/insert-incompatible-unique.txt",
+				"--- a/insert-incompatible-unique.txt",
+				"+++ b/insert-incompatible-unique.txt",
+				"@@ -1,2 +1,3 @@",
+				" unique prefix anchor line",
+				"+inserted line",
+				" unique suffix anchor line",
+			),
+			wantStatus:    ApplyUnifiedDiffStatusConflict,
+			wantContent:   "unique prefix anchor line\nexisting middle line\nunique suffix anchor line\n",
+			wantDiagCode:  "single_edit_incompatible_context",
+			wantDiagLevel: ApplyUnifiedDiffDiagnosticLevelWarning,
 		},
 		{
 			name:           "mixed_plus_then_minus_unique_suffix_recovers_stale_prefix",
@@ -2286,6 +2600,75 @@ func TestApplyUnifiedDiffCreateDeleteFilesystemCoverage(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Dir(full)); err != nil {
 			t.Fatalf("parent dir should exist: %v", err)
+		}
+	})
+
+	t.Run("git_metadata_only_empty_create_creates_file_and_is_idempotent", func(t *testing.T) {
+		rel := "metadata-empty-created.txt"
+		full := filepath.Join(dir, rel)
+		diff := makePatchText(
+			"diff --git a/"+rel+" b/"+rel,
+			"new file mode 100644",
+			"index 0000000..e69de29",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("metadata-only empty create status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, full); got != "" {
+			t.Fatalf("metadata-only empty create content mismatch: got %q", got)
+		}
+
+		out, err = tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusAlreadyApplied {
+			t.Fatalf("metadata-only empty create reapply status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+	})
+
+	t.Run("git_metadata_only_empty_delete_deletes_file_and_is_idempotent", func(t *testing.T) {
+		rel := "metadata-empty-delete.txt"
+		full := writeTextFile(t, dir, rel, "")
+		diff := makePatchText(
+			"diff --git a/"+rel+" b/"+rel,
+			"deleted file mode 100644",
+			"index e69de29..0000000",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("metadata-only empty delete status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if _, err := os.Stat(full); !os.IsNotExist(err) {
+			t.Fatalf("metadata-only empty delete should remove file, stat err=%v", err)
+		}
+
+		out, err = tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusAlreadyApplied {
+			t.Fatalf("metadata-only empty delete reapply status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+	})
+
+	t.Run("git_metadata_only_delete_non_empty_file_conflicts", func(t *testing.T) {
+		rel := "metadata-nonempty-delete.txt"
+		full := writeTextFile(t, dir, rel, "still here\n")
+		diff := makePatchText(
+			"diff --git a/"+rel+" b/"+rel,
+			"deleted file mode 100644",
+			"index e69de29..0000000",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusConflict {
+			t.Fatalf("metadata-only non-empty delete should conflict: %s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, full); got != "still here\n" {
+			t.Fatalf("metadata-only non-empty delete must not modify file: got %q", got)
 		}
 	})
 
