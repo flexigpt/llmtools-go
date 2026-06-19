@@ -2678,7 +2678,7 @@ func TestApplyUnifiedDiffCreateDeleteFilesystemCoverage(t *testing.T) {
 			t.Fatalf("candidate-inferred create status mismatch: %s files=%#v", out.Status, out.Files)
 		}
 
-		wantPath := filepath.Join(repoRoot, "src", "created-from-candidate.txt")
+		wantPath := canonicalizePath(filepath.Join(repoRoot, "src", "created-from-candidate.txt"))
 		if got := readFileString(t, wantPath); got != "created line one\ncreated line two\n" {
 			t.Fatalf("candidate-inferred created content mismatch: got %q", got)
 		}
@@ -2689,7 +2689,7 @@ func TestApplyUnifiedDiffCreateDeleteFilesystemCoverage(t *testing.T) {
 			)
 		}
 		if len(out.Files) != 1 ||
-			out.Files[0].ResolvedPath != wantPath ||
+			canonicalizePath(out.Files[0].ResolvedPath) != wantPath ||
 			!hasDiagnostic(
 				out.Files[0].Diagnostics,
 				ApplyUnifiedDiffDiagnosticLevelInfo,
@@ -2726,7 +2726,7 @@ func TestApplyUnifiedDiffCreateDeleteFilesystemCoverage(t *testing.T) {
 			t.Fatalf("root-inferred create status mismatch: %s files=%#v", out.Status, out.Files)
 		}
 
-		wantPath := filepath.Join(repoRoot, "src", "created-from-root.txt")
+		wantPath := canonicalizePath(filepath.Join(repoRoot, "src", "created-from-root.txt"))
 		if got := readFileString(t, wantPath); got != "created from root\n" {
 			t.Fatalf("root-inferred created content mismatch: got %q", got)
 		}

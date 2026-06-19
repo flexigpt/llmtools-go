@@ -100,6 +100,14 @@ func writeTempBytesFile(t *testing.T, dir, pattern string, b []byte) string {
 	return abs
 }
 
+func canonicalizePath(p string) string {
+	p = filepath.Clean(p)
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		p = resolved
+	}
+	return p
+}
+
 func readFileString(t *testing.T, path string) string {
 	t.Helper()
 
