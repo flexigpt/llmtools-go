@@ -712,17 +712,59 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("rename_and_copy_patches_are_rejected", func(t *testing.T) {
+	t.Run("rename_patch_with_text_hunks_applies_to_existing_old_path_without_renaming", func(t *testing.T) {
+		oldPath := writeTextFile(t, dir, "rename-old.txt", "A\n")
+		newPath := filepath.Join(dir, "rename-new.txt")
 		diff := makePatchText(
-			"diff --git a/old.txt b/new.txt",
-			"rename from old.txt",
-			"rename to new.txt",
+			"diff --git a/rename-old.txt b/rename-new.txt",
+			"similarity index 50%",
+			"rename from rename-old.txt",
+			"rename to rename-new.txt",
+			"--- a/rename-old.txt",
+			"+++ b/rename-new.txt",
 			"@@ -1,1 +1,1 @@",
 			"-A",
 			"+B",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("rename text-hunk status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, oldPath); got != "B\n" {
+			t.Fatalf("rename text hunk should patch old path when new path is absent, got %q", got)
+		}
+		if _, err := os.Stat(newPath); !os.IsNotExist(err) {
+			t.Fatalf("rename metadata must not create/rename new path, stat err=%v", err)
+		}
+		if len(out.Files) != 1 ||
+			out.Files[0].TargetPath != "rename-old.txt" ||
+			!hasDiagnostic(
+				out.Files[0].Diagnostics,
+				ApplyUnifiedDiffDiagnosticLevelWarning,
+				"rename_metadata_ignored",
+			) {
+			t.Fatalf("rename diagnostics/target mismatch: %#v", out.Files)
+		}
+
+		out, err = tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusAlreadyApplied {
+			t.Fatalf("rename text-hunk reapply status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, oldPath); got != "B\n" {
+			t.Fatalf("rename text-hunk reapply should not change content, got %q", got)
+		}
+	})
+
+	t.Run("copy_patches_are_rejected", func(t *testing.T) {
+		diff := makePatchText(
 			"diff --git a/src.txt b/copy.txt",
 			"copy from src.txt",
 			"copy to copy.txt",
+			"--- a/src.txt",
+			"+++ b/copy.txt",
 			"@@ -1,1 +1,1 @@",
 			"-C",
 			"+D",
@@ -731,11 +773,12 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
 		mustNoErr(t, err)
 		if out.Status != ApplyUnifiedDiffStatusConflict {
-			t.Fatalf("rename/copy status mismatch: %s", out.Status)
+			t.Fatalf("copy status mismatch: %s", out.Status)
 		}
-		if len(out.Files) != 2 || out.Files[0].Status != ApplyUnifiedDiffStatusConflict ||
-			out.Files[1].Status != ApplyUnifiedDiffStatusConflict {
-			t.Fatalf("rename/copy file statuses mismatch: %#v", out.Files)
+		if len(out.Files) != 1 ||
+			out.Files[0].Status != ApplyUnifiedDiffStatusConflict ||
+			!hasDiagnostic(out.Files[0].Diagnostics, ApplyUnifiedDiffDiagnosticLevelError, "copy_unsupported") {
+			t.Fatalf("copy file status/diagnostics mismatch: %#v", out.Files)
 		}
 	})
 
@@ -2605,6 +2648,124 @@ func TestApplyUnifiedDiffCreateDeleteFilesystemCoverage(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Dir(full)); err != nil {
 			t.Fatalf("parent dir should exist: %v", err)
+		}
+	})
+
+	t.Run("create_patch_infers_absolute_target_from_candidate_file_same_directory", func(t *testing.T) {
+		appRoot := filepath.Join(dir, "app-cwd-for-create-inference")
+		repoRoot := filepath.Join(dir, "repo-for-create-inference")
+		if err := os.MkdirAll(appRoot, 0o755); err != nil {
+			t.Fatalf("mkdir app root: %v", err)
+		}
+
+		candidate := writeTextFile(t, repoRoot, "src/existing.txt", "existing\n")
+		tt := mustNewTextTool(t, appRoot)
+
+		diff := makePatchText(
+			"--- /dev/null",
+			"+++ b/src/created-from-candidate.txt",
+			"@@ -0,0 +1,2 @@",
+			"+created line one",
+			"+created line two",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{
+			DiffText:       diff,
+			CandidatePaths: []string{candidate},
+		})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("candidate-inferred create status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+
+		wantPath := filepath.Join(repoRoot, "src", "created-from-candidate.txt")
+		if got := readFileString(t, wantPath); got != "created line one\ncreated line two\n" {
+			t.Fatalf("candidate-inferred created content mismatch: got %q", got)
+		}
+		if _, err := os.Stat(filepath.Join(appRoot, "src", "created-from-candidate.txt")); !os.IsNotExist(err) {
+			t.Fatalf(
+				"create must not fall back to app work dir when candidatePaths infer repo target, stat err=%v",
+				err,
+			)
+		}
+		if len(out.Files) != 1 ||
+			out.Files[0].ResolvedPath != wantPath ||
+			!hasDiagnostic(
+				out.Files[0].Diagnostics,
+				ApplyUnifiedDiffDiagnosticLevelInfo,
+				"create_target_inferred_from_candidate_paths",
+			) {
+			t.Fatalf("candidate-inferred target/diagnostics mismatch: %#v", out.Files)
+		}
+	})
+
+	t.Run("create_patch_infers_absolute_target_from_candidate_root_directory", func(t *testing.T) {
+		appRoot := filepath.Join(dir, "app-cwd-for-root-create-inference")
+		repoRoot := filepath.Join(dir, "repo-root-create-inference")
+		if err := os.MkdirAll(appRoot, 0o755); err != nil {
+			t.Fatalf("mkdir app root: %v", err)
+		}
+		if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+			t.Fatalf("mkdir repo root: %v", err)
+		}
+
+		tt := mustNewTextTool(t, appRoot)
+		diff := makePatchText(
+			"--- /dev/null",
+			"+++ b/src/created-from-root.txt",
+			"@@ -0,0 +1,1 @@",
+			"+created from root",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{
+			DiffText:       diff,
+			CandidatePaths: []string{repoRoot},
+		})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("root-inferred create status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+
+		wantPath := filepath.Join(repoRoot, "src", "created-from-root.txt")
+		if got := readFileString(t, wantPath); got != "created from root\n" {
+			t.Fatalf("root-inferred created content mismatch: got %q", got)
+		}
+	})
+
+	t.Run("create_patch_with_ambiguous_candidate_roots_returns_needs_info", func(t *testing.T) {
+		appRoot := filepath.Join(dir, "app-cwd-for-ambiguous-create")
+		repoOne := filepath.Join(dir, "repo-one-ambiguous")
+		repoTwo := filepath.Join(dir, "repo-two-ambiguous")
+		if err := os.MkdirAll(appRoot, 0o755); err != nil {
+			t.Fatalf("mkdir app root: %v", err)
+		}
+		candidateOne := writeTextFile(t, repoOne, "src/existing.txt", "one\n")
+		candidateTwo := writeTextFile(t, repoTwo, "src/existing.txt", "two\n")
+		tt := mustNewTextTool(t, appRoot)
+
+		diff := makePatchText(
+			"--- /dev/null",
+			"+++ b/src/created-ambiguous.txt",
+			"@@ -0,0 +1,1 @@",
+			"+ambiguous",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{
+			DiffText:       diff,
+			CandidatePaths: []string{candidateOne, candidateTwo},
+			DryRun:         true,
+		})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusNeedsInfo {
+			t.Fatalf("ambiguous create should need info, got %s files=%#v", out.Status, out.Files)
+		}
+		if len(out.Files) != 1 ||
+			!hasDiagnostic(
+				out.Files[0].Diagnostics,
+				ApplyUnifiedDiffDiagnosticLevelWarning,
+				"create_target_ambiguous_from_candidate_paths",
+			) {
+			t.Fatalf("ambiguous create diagnostics mismatch: %#v", out.Files)
 		}
 	})
 

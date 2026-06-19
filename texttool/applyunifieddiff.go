@@ -351,11 +351,19 @@ type candidatePathInfo struct {
 	Path         string
 	ResolvedPath string
 	Exists       bool
+	IsDir        bool
 
 	NormPath     string
 	NormResolved string
 	BasePath     string
 	BaseResolved string
+}
+
+type createTargetInference struct {
+	TargetPath    string
+	SourcePath    string
+	MatchedPrefix string
+	Score         int
 }
 
 func (tt *TextTool) applyUnifiedDiff(ctx context.Context, args ApplyUnifiedDiffArgs) (*ApplyUnifiedDiffOut, error) {
@@ -434,12 +442,26 @@ func (tt *TextTool) applyUnifiedDiff(ctx context.Context, args ApplyUnifiedDiffA
 		}
 
 		if err := executeFilePlan(p, plans[i]); err != nil {
-			msg := fmt.Sprintf("Failed to write patch for %s: %v", plans[i].Result.FileKey, err)
+			msg := fmt.Sprintf("Failed to apply patch for %s: %v", plans[i].Result.FileKey, err)
+
 			resetUnwrittenAppliedHunks(&out.Files[i], out.Files[i].AppliedHunks)
 			out.Files[i].OK = false
 			out.Files[i].Status = ApplyUnifiedDiffStatusError
 			out.Files[i].Message = msg
 			out.Files[i].Diagnostics = append(out.Files[i].Diagnostics, errorDiagnostic("write_failed", "%v", err))
+			continue
+		}
+
+		if err := verifyExecutedFilePlan(p, plans[i]); err != nil {
+			msg := fmt.Sprintf("Patch execution for %s could not be verified: %v", plans[i].Result.FileKey, err)
+			resetUnverifiedAppliedHunks(&out.Files[i], out.Files[i].AppliedHunks)
+			out.Files[i].OK = false
+			out.Files[i].Status = ApplyUnifiedDiffStatusError
+			out.Files[i].Message = msg
+			out.Files[i].Diagnostics = append(
+				out.Files[i].Diagnostics,
+				errorDiagnostic("post_apply_verify_failed", "%v", err),
+			)
 
 			continue
 		}
@@ -1528,28 +1550,42 @@ func planFilePatch(
 		DeletedLines: file.DeletedLines,
 		Diagnostics:  cloneApplyUnifiedDiffDiagnostics(file.Diagnostics),
 	}
-	if file.IsRename || file.IsCopy {
-		kind := "rename/copy"
-		if file.IsRename && !file.IsCopy {
-			kind = "rename"
-		} else if file.IsCopy && !file.IsRename {
-			kind = "copy"
-		}
+	if file.IsCopy {
 
 		result.Status = ApplyUnifiedDiffStatusConflict
-		result.Message = fmt.Sprintf(
-			"git %s patches are not safely supported by applyUnifiedDiff yet",
-			kind,
-		)
+		result.Message = "git copy patches are not safely supported by applyUnifiedDiff yet"
+
 		result.Diagnostics = append(
 			result.Diagnostics,
 			errorDiagnostic(
-				"rename_copy_unsupported",
-				"refusing to apply rename/copy metadata as a plain edit because that can modify the old path instead of creating the new path",
+				"copy_unsupported",
+				"refusing to apply copy metadata as a plain edit because that can modify the source path instead of creating the copied target",
 			),
 		)
 		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
 	}
+	if file.IsRename {
+		result.Diagnostics = append(
+			result.Diagnostics,
+			warningDiagnostic(
+				"rename_metadata_ignored",
+				"git rename metadata is ignored; text hunks will be applied to an existing target path and no filesystem rename will be performed",
+			),
+		)
+		if len(file.Hunks) == 0 && file.NewFilePerm == 0 {
+			result.Status = ApplyUnifiedDiffStatusConflict
+			result.Message = "rename-only patches are not applied because applyUnifiedDiff does not rename files"
+			result.Diagnostics = append(
+				result.Diagnostics,
+				errorDiagnostic(
+					"rename_without_text_hunks_unsupported",
+					"rename patch has no text hunks or mode change to apply after ignoring rename metadata",
+				),
+			)
+			return fileApplyPlan{Result: result, Action: filePlanActionNoop}
+		}
+	}
+
 	if file.HasBinaryPatch {
 		result.Status = ApplyUnifiedDiffStatusConflict
 		result.Message = "binary patches are not supported by applyUnifiedDiff"
@@ -1949,6 +1985,8 @@ func planCreateFilePatch(
 		result.Message = "new file parent directory cannot be prepared: " + err.Error()
 		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
 	}
+	appendRelativeCreateTargetDiagnostic(&result, p, target)
+
 	result.OK = true
 	result.Status = ApplyUnifiedDiffStatusApplicable
 	result.Message = "New file can be created by this patch."
@@ -1961,6 +1999,30 @@ func planCreateFilePatch(
 		Content:      content,
 		Perm:         perm,
 	}
+}
+
+func appendRelativeCreateTargetDiagnostic(
+	result *ApplyUnifiedDiffFileOut,
+	p fspolicy.FSPolicy,
+	target targetResolution,
+) {
+	if result == nil ||
+		strings.TrimSpace(target.DisplayPath) == "" ||
+		strings.TrimSpace(target.ResolvedPath) == "" ||
+		filepath.IsAbs(filepath.FromSlash(target.DisplayPath)) {
+		return
+	}
+
+	result.Diagnostics = append(
+		result.Diagnostics,
+		infoDiagnostic(
+			"relative_create_target_resolved",
+			"relative new-file target %q resolved against work base dir %q to %q",
+			target.DisplayPath,
+			p.WorkBaseDir(),
+			target.ResolvedPath,
+		),
+	)
 }
 
 func verifyCreateParentPlanResolved(p fspolicy.FSPolicy, resolvedPath string, maxNewDirs int) error {
@@ -2016,6 +2078,23 @@ func resetUnwrittenAppliedHunks(file *ApplyUnifiedDiffFileOut, simulatedApplied 
 				"matched_but_not_written",
 				"%d hunk(s) matched in memory but were not written for this file",
 				simulatedApplied),
+		)
+	}
+	file.AppliedHunks = 0
+}
+
+func resetUnverifiedAppliedHunks(file *ApplyUnifiedDiffFileOut, simulatedApplied int) {
+	if file == nil {
+		return
+	}
+	if simulatedApplied > 0 {
+		file.Diagnostics = append(
+			file.Diagnostics,
+			warningDiagnostic(
+				"matched_but_not_verified",
+				"%d hunk(s) were executed but the final on-disk state could not be verified",
+				simulatedApplied,
+			),
 		)
 	}
 	file.AppliedHunks = 0
@@ -2080,6 +2159,65 @@ func executeFilePlan(p fspolicy.FSPolicy, plan fileApplyPlan) error {
 	default:
 		return fmt.Errorf("unknown file plan action: %s", plan.Action)
 	}
+}
+
+func verifyExecutedFilePlan(p fspolicy.FSPolicy, plan fileApplyPlan) error {
+	switch plan.Action {
+	case filePlanActionNoop:
+		return nil
+
+	case filePlanActionCreate:
+		return verifyPlanFileContentAndMode(p, plan.ResolvedPath, plan.Content, plan.Perm, "created file")
+
+	case filePlanActionWriteExisting:
+		return verifyPlanFileContentAndMode(p, plan.ResolvedPath, plan.Content, plan.Perm, "patched file")
+
+	case filePlanActionChmodExisting:
+		return verifyPlanFileContentAndMode(p, plan.ResolvedPath, plan.ExpectedContent, plan.Perm, "chmod target")
+
+	case filePlanActionDelete:
+		if strings.TrimSpace(plan.ResolvedPath) == "" {
+			return errors.New("delete plan has no resolved path")
+		}
+		exists, err := resolvedPathExists(plan.ResolvedPath)
+		if err != nil {
+			return fmt.Errorf("deleted file could not be checked after apply: %w", err)
+		}
+		if exists {
+			return fmt.Errorf("deleted file is still present on disk after apply: %s", plan.ResolvedPath)
+		}
+		return nil
+
+	default:
+		return fmt.Errorf("unknown file plan action: %s", plan.Action)
+	}
+}
+
+func verifyPlanFileContentAndMode(
+	p fspolicy.FSPolicy,
+	resolvedPath string,
+	expectedContent string,
+	perm os.FileMode,
+	label string,
+) error {
+	if strings.TrimSpace(resolvedPath) == "" {
+		return fmt.Errorf("%s plan has no resolved path", label)
+	}
+
+	tf, err := readTextFileNoSymlink(p, resolvedPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%s is not present on disk after apply: %s", label, resolvedPath)
+		}
+		return fmt.Errorf("%s could not be read back after apply: %w", label, err)
+	}
+	if tf.Render() != expectedContent {
+		return fmt.Errorf("%s content verification failed after apply: %s", label, resolvedPath)
+	}
+	if perm != 0 && runtime.GOOS != toolutil.GOOSWindows && tf.Perm != perm {
+		return fmt.Errorf("%s mode verification failed after apply: want %#o got %#o", label, perm, tf.Perm)
+	}
+	return nil
 }
 
 func patchedFileHasFinalNewline(
@@ -2287,7 +2425,13 @@ func resolvePatchTarget(
 	); handled {
 		return target, candidates, diagnostics, status, err
 	}
-
+	if canCreate {
+		if target, candidates, diagnostics, status, err, handled := resolveCreateTargetFromCandidatePaths(
+			p, patchPaths, candidateInfos, allCandidates, diagnostics,
+		); handled {
+			return target, candidates, diagnostics, status, err
+		}
+	}
 	if canCreate && len(patchPaths) > 0 {
 		for _, path := range patchPaths {
 			target, err := resolveTargetPath(p, path)
@@ -2303,6 +2447,20 @@ func resolvePatchTarget(
 				continue
 			}
 			return target, allCandidates, diagnostics, "", nil
+		}
+		if len(candidateInfos) > 0 && allPatchPathCandidatesAreRelative(patchPaths) {
+			diagnostics = append(
+				diagnostics,
+				warningDiagnostic(
+					"relative_create_target_not_inferred",
+					"new-file target path from relative diff could not be inferred from candidatePaths; provide fileTargets[].targetPath or include a unique absolute base directory candidate",
+				),
+			)
+			return targetResolution{},
+				allCandidates,
+				diagnostics,
+				ApplyUnifiedDiffStatusNeedsInfo,
+				errors.New("new-file target path from relative diff could not be inferred from candidatePaths")
 		}
 	}
 	if hardResolveErr != nil {
@@ -2382,6 +2540,189 @@ func resolveCandidateMatches(
 		ApplyUnifiedDiffStatusNeedsInfo,
 		errors.New("ambiguous target path"),
 		true
+}
+
+func resolveCreateTargetFromCandidatePaths(
+	p fspolicy.FSPolicy,
+	patchPaths []string,
+	candidateInfos []candidatePathInfo,
+	allCandidates []string,
+	diagnostics []ApplyUnifiedDiffDiagnostic,
+) (
+	target targetResolution,
+	candidates []string,
+	outDiagnostics []ApplyUnifiedDiffDiagnostic,
+	status ApplyUnifiedDiffStatus,
+	err error,
+	handled bool,
+) {
+	inferences := inferCreateTargetsFromCandidatePaths(patchPaths, candidateInfos)
+	if len(inferences) == 0 {
+		return targetResolution{}, nil, diagnostics, "", nil, false
+	}
+
+	best := bestCreateTargetInferences(inferences)
+	targetPaths := createInferenceTargetPaths(best)
+
+	if len(targetPaths) == 1 {
+		target, err := resolveTargetPath(p, targetPaths[0])
+		if err != nil {
+			return targetResolution{}, allCandidates, diagnostics, ApplyUnifiedDiffStatusError, err, true
+		}
+
+		source := best[0].SourcePath
+		if source == "" {
+			source = "candidatePaths"
+		}
+		diagnostics = append(
+			diagnostics,
+			infoDiagnostic(
+				"create_target_inferred_from_candidate_paths",
+				"new-file target inferred as %q from candidate path %q",
+				target.DisplayPath,
+				source,
+			),
+		)
+		return target, allCandidates, diagnostics, "", nil, true
+	}
+
+	diagnostics = append(
+		diagnostics,
+		warningDiagnostic(
+			"create_target_ambiguous_from_candidate_paths",
+			"new-file target path is ambiguous after candidatePaths inference; provide fileTargets[].targetPath",
+		),
+	)
+	return targetResolution{},
+		limitStrings(targetPaths, maxCandidatePathsPerFile),
+		diagnostics,
+		ApplyUnifiedDiffStatusNeedsInfo,
+		errors.New("new-file target path is ambiguous after candidatePaths inference"),
+		true
+}
+
+func inferCreateTargetsFromCandidatePaths(
+	patchPaths []string,
+	candidateInfos []candidatePathInfo,
+) []createTargetInference {
+	out := make([]createTargetInference, 0)
+
+	for _, patchPath := range patchPaths {
+		patchNorm := normalizePathForCompare(patchPath)
+		if patchNorm == "" || isDevNull(patchNorm) || isAbsoluteDiffPath(patchPath) {
+			continue
+		}
+
+		patchDir := path.Dir(patchNorm)
+		if patchDir == "." {
+			patchDir = ""
+		}
+		patchDirParts := comparablePathParts(patchDir)
+
+		for _, info := range candidateInfos {
+			source := strings.TrimSpace(info.ResolvedPath)
+			if source == "" {
+				continue
+			}
+
+			sourceNorm := normalizePathForCompare(source)
+			if sourceNorm == "" {
+				continue
+			}
+
+			sourceIsDir := info.IsDir || candidatePathLooksLikeDirectory(info.Path)
+			candidateDir := sourceNorm
+			if !sourceIsDir {
+				candidateDir = path.Dir(sourceNorm)
+				if candidateDir == "." {
+					candidateDir = ""
+				}
+			}
+
+			if candidateDir != "" && len(patchDirParts) > 0 {
+				candidateDirParts := comparablePathParts(candidateDir)
+				maxPrefix := min(len(patchDirParts), len(candidateDirParts))
+
+				for k := maxPrefix; k >= 1; k-- {
+					prefix := strings.Join(patchDirParts[:k], "/")
+					root, ok := trimComparableDirSuffix(candidateDir, prefix)
+					if !ok {
+						continue
+					}
+
+					out = append(out, createTargetInference{
+						TargetPath:    filepath.FromSlash(joinComparableRootAndRel(root, patchNorm)),
+						SourcePath:    info.Path,
+						MatchedPrefix: prefix,
+						Score:         k,
+					})
+					break
+				}
+			}
+
+			if sourceIsDir {
+				out = append(out, createTargetInference{
+					TargetPath: filepath.FromSlash(joinComparableRootAndRel(sourceNorm, patchNorm)),
+					SourcePath: info.Path,
+					Score:      0,
+				})
+			}
+		}
+	}
+
+	return sortAndDedupeCreateTargetInferences(out)
+}
+
+func sortAndDedupeCreateTargetInferences(in []createTargetInference) []createTargetInference {
+	byTarget := map[string]createTargetInference{}
+
+	for _, candidate := range in {
+		key := normalizePathForCompare(candidate.TargetPath)
+		if key == "" {
+			continue
+		}
+		existing, ok := byTarget[key]
+		if !ok || candidate.Score > existing.Score {
+			byTarget[key] = candidate
+		}
+	}
+
+	out := make([]createTargetInference, 0, len(byTarget))
+	for _, candidate := range byTarget {
+		out = append(out, candidate)
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score
+		}
+		return normalizePathForCompare(out[i].TargetPath) < normalizePathForCompare(out[j].TargetPath)
+	})
+
+	return out
+}
+
+func bestCreateTargetInferences(in []createTargetInference) []createTargetInference {
+	if len(in) == 0 {
+		return nil
+	}
+	bestScore := in[0].Score
+	var out []createTargetInference
+	for _, candidate := range in {
+		if candidate.Score != bestScore {
+			break
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func createInferenceTargetPaths(in []createTargetInference) []string {
+	out := make([]string, 0, len(in))
+	for _, candidate := range in {
+		out = append(out, candidate.TargetPath)
+	}
+	return uniqueStrings(out)
 }
 
 func resolveTargetPath(p fspolicy.FSPolicy, displayPath string) (targetResolution, error) {
@@ -2520,8 +2861,9 @@ func buildCandidatePathInfos(p fspolicy.FSPolicy, candidatePaths []string) []can
 			info.NormResolved = normalizePathForCompare(resolved)
 			info.BaseResolved = basenameForCompare(resolved)
 
-			if exists, statErr := resolvedPathExists(resolved); statErr == nil {
-				info.Exists = exists
+			if st, statErr := os.Lstat(resolved); statErr == nil {
+				info.Exists = true
+				info.IsDir = st.IsDir()
 			}
 		}
 
@@ -2568,6 +2910,9 @@ func matchCandidatePaths(patchPaths []string, infos []candidatePathInfo, require
 		}
 
 		for _, info := range infos {
+			if info.IsDir {
+				continue
+			}
 			if requireExists && !info.Exists {
 				continue
 			}
@@ -4046,6 +4391,47 @@ func normalizePathForCompare(pathValue string) string {
 	return pathValue
 }
 
+func comparablePathParts(pathValue string) []string {
+	pathValue = strings.Trim(pathValue, "/")
+	if pathValue == "" {
+		return nil
+	}
+	return strings.Split(pathValue, "/")
+}
+
+func trimComparableDirSuffix(candidateDir, suffix string) (string, bool) {
+	candidateDir = strings.TrimRight(strings.TrimSpace(candidateDir), "/")
+	suffix = strings.Trim(strings.TrimSpace(suffix), "/")
+	if candidateDir == "" || suffix == "" {
+		return "", false
+	}
+	if candidateDir == suffix {
+		return "", true
+	}
+	marker := "/" + suffix
+	if before, ok := strings.CutSuffix(candidateDir, marker); ok {
+		return before, true
+	}
+	return "", false
+}
+
+func joinComparableRootAndRel(root, rel string) string {
+	root = strings.TrimSpace(root)
+	rel = strings.TrimLeft(strings.TrimSpace(rel), "/")
+	if root == "" {
+		return rel
+	}
+	if root == "/" {
+		return "/" + rel
+	}
+	return strings.TrimRight(root, "/") + "/" + rel
+}
+
+func candidatePathLooksLikeDirectory(inPath string) bool {
+	s := strings.TrimSpace(inPath)
+	return strings.HasSuffix(s, "/") || strings.HasSuffix(s, `\`)
+}
+
 func collapseRepeatedSlashes(s string) string {
 	for strings.Contains(s, "//") {
 		s = strings.ReplaceAll(s, "//", "/")
@@ -4191,6 +4577,28 @@ func (h parsedHunk) hasOldContent() bool {
 
 func isDevNull(inPath string) bool {
 	return strings.TrimSpace(inPath) == pathDevNull
+}
+
+func isAbsoluteDiffPath(inPath string) bool {
+	inPath = strings.TrimSpace(inPath)
+	if inPath == "" || isDevNull(inPath) {
+		return false
+	}
+	return filepath.IsAbs(filepath.FromSlash(inPath))
+}
+
+func allPatchPathCandidatesAreRelative(paths []string) bool {
+	found := false
+	for _, candidate := range paths {
+		if strings.TrimSpace(candidate) == "" || isDevNull(candidate) {
+			continue
+		}
+		found = true
+		if isAbsoluteDiffPath(candidate) {
+			return false
+		}
+	}
+	return found
 }
 
 func isNoNewlineAtEOFMarker(line string) bool {

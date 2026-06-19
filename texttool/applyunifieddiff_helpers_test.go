@@ -671,6 +671,54 @@ func TestApplyUnifiedDiffStatusHelpers(t *testing.T) {
 	})
 }
 
+func TestApplyUnifiedDiffPostApplyVerification(t *testing.T) {
+	dir := t.TempDir()
+	tt := mustNewTextTool(t, dir)
+	p := tt.snapshotPolicy()
+
+	t.Run("create_plan_must_leave_file_on_disk", func(t *testing.T) {
+		missingPath := filepath.Join(dir, "missing-after-create.txt")
+		err := verifyExecutedFilePlan(
+			p,
+			fileApplyPlan{
+				Action:       filePlanActionCreate,
+				ResolvedPath: missingPath,
+				Content:      "created\n",
+				Perm:         0o644,
+			},
+		)
+		if err == nil || !strings.Contains(err.Error(), "created file is not present on disk") {
+			t.Fatalf("expected missing created-file verification error, got %v", err)
+		}
+	})
+
+	t.Run("create_end_to_end_resolved_path_exists", func(t *testing.T) {
+		rel := "verify-created-on-disk.txt"
+		diff := makePatchText(
+			"--- /dev/null",
+			"+++ b/"+rel,
+			"@@ -0,0 +1,2 @@",
+			"+created line one",
+			"+created line two",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("create status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if len(out.Files) != 1 || out.Files[0].ResolvedPath == "" {
+			t.Fatalf("created file should report resolved path: %#v", out.Files)
+		}
+		if _, err := os.Stat(out.Files[0].ResolvedPath); err != nil {
+			t.Fatalf("created file should exist at reported resolved path %q: %v", out.Files[0].ResolvedPath, err)
+		}
+		if got := readFileString(t, out.Files[0].ResolvedPath); got != "created line one\ncreated line two\n" {
+			t.Fatalf("created file content mismatch: got %q", got)
+		}
+	})
+}
+
 func TestTextToolConstructorAccessorsAndWrapper(t *testing.T) {
 	dir := t.TempDir()
 	tt := mustNewTextTool(t, dir)
