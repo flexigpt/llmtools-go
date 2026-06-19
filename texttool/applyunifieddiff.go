@@ -2824,6 +2824,17 @@ func patchPathCandidates(file parsedPatchFile) []string {
 		return uniqueStrings(out)
 	}
 
+	if file.IsRename {
+		if file.OldPath != "" && !isDevNull(file.OldPath) {
+			out = append(out, file.OldPath)
+		}
+		if file.NewPath != "" && !isDevNull(file.NewPath) {
+			out = append(out, file.NewPath)
+		}
+
+		return uniqueStrings(out)
+	}
+
 	if file.NewPath != "" && !isDevNull(file.NewPath) {
 		out = append(out, file.NewPath)
 	}
@@ -3353,6 +3364,32 @@ func findSingleEditGroupMatch(
 
 			prefixUnique := len(prefixMatches) == 1
 			suffixUnique := len(suffixMatches) == 1
+
+			if prefixUnique && suffixUnique && len(hunkSpec.OldEdit) == 0 && len(hunkSpec.NewEdit) > 0 {
+				alreadyCandidates, d := oneSidedSingleEditMatches(
+					lines,
+					hunkSpec,
+					prefixMatches,
+					suffixMatches,
+					mode,
+					modeName,
+					true,
+				)
+				candidateDiagnostics := append(append([]ApplyUnifiedDiffDiagnostic{}, diagnostics...), d...)
+				if match, ok, ambiguous, diag := selectUniqueSingleEditMatch(
+					alreadyCandidates,
+					"one-sided "+modeName+" already-applied insertion context after incompatible two-sided context",
+				); ok {
+					candidateDiagnostics = append(candidateDiagnostics, diag...)
+					candidateDiagnostics = append(candidateDiagnostics, warningDiagnostic(
+						"single_edit_incompatible_context_already_applied",
+						"insert-only hunk appears already applied next to one unique context side even though the unique prefix and suffix are not adjacent; preserving intervening local lines",
+					))
+					return match, true, candidateDiagnostics
+				} else if ambiguous {
+					return singleEditMatch{}, false, append(candidateDiagnostics, diag...)
+				}
+			}
 
 			switch {
 			case prefixUnique && suffixUnique:

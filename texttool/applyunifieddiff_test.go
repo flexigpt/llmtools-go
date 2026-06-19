@@ -208,6 +208,9 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 		if got := readFileString(t, path); got != "hello\nworld\n" {
 			t.Fatalf("add-only created content mismatch: got %q", got)
 		}
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("add-only created file should exist on disk: %v", err)
+		}
 	})
 	t.Run("create_patch_with_omitted_prefixes_creates_file_from_dev_null_header", func(t *testing.T) {
 		path := filepath.Join(dir, "create-omitted-prefix.txt")
@@ -755,6 +758,43 @@ func TestApplyUnifiedDiffEndToEnd(t *testing.T) {
 		}
 		if got := readFileString(t, oldPath); got != "B\n" {
 			t.Fatalf("rename text-hunk reapply should not change content, got %q", got)
+		}
+	})
+
+	t.Run("rename_patch_prefers_existing_old_path_when_rename_metadata_is_ignored", func(t *testing.T) {
+		oldPath := writeTextFile(t, dir, "rename-both-old.txt", "A\n")
+		newPath := writeTextFile(t, dir, "rename-both-new.txt", "A\n")
+		diff := makePatchText(
+			"diff --git a/rename-both-old.txt b/rename-both-new.txt",
+			"similarity index 50%",
+			"rename from rename-both-old.txt",
+			"rename to rename-both-new.txt",
+			"--- a/rename-both-old.txt",
+			"+++ b/rename-both-new.txt",
+			"@@ -1,1 +1,1 @@",
+			"-A",
+			"+B",
+		)
+
+		out, err := tt.ApplyUnifiedDiff(t.Context(), ApplyUnifiedDiffArgs{DiffText: diff})
+		mustNoErr(t, err)
+		if out.Status != ApplyUnifiedDiffStatusApplied {
+			t.Fatalf("rename both-paths status mismatch: %s files=%#v", out.Status, out.Files)
+		}
+		if got := readFileString(t, oldPath); got != "B\n" {
+			t.Fatalf("rename text hunk should patch old path when rename metadata is ignored, got %q", got)
+		}
+		if got := readFileString(t, newPath); got != "A\n" {
+			t.Fatalf("rename text hunk should not patch new path when old path exists, got %q", got)
+		}
+		if len(out.Files) != 1 ||
+			out.Files[0].TargetPath != "rename-both-old.txt" ||
+			!hasDiagnostic(
+				out.Files[0].Diagnostics,
+				ApplyUnifiedDiffDiagnosticLevelWarning,
+				"rename_metadata_ignored",
+			) {
+			t.Fatalf("rename both-paths diagnostics/target mismatch: %#v", out.Files)
 		}
 	})
 
@@ -1581,6 +1621,25 @@ func TestApplyUnifiedDiffSingleEditFallbackCases(t *testing.T) {
 			),
 			wantStatus:  ApplyUnifiedDiffStatusApplied,
 			wantContent: "before\ninsert\nafter\n",
+		},
+		{
+			name:           "insert_only_already_applied_with_extra_line_before_suffix",
+			fileName:       "insert-already-extra-line.txt",
+			initialContent: "unique prefix anchor line\ninserted line one\ninserted line two\nintervening local line\nunique suffix anchor line\n",
+			diff: makePatchText(
+				"diff --git a/insert-already-extra-line.txt b/insert-already-extra-line.txt",
+				"--- a/insert-already-extra-line.txt",
+				"+++ b/insert-already-extra-line.txt",
+				"@@ -1,2 +1,4 @@",
+				" unique prefix anchor line",
+				"+inserted line one",
+				"+inserted line two",
+				" unique suffix anchor line",
+			),
+			wantStatus:    ApplyUnifiedDiffStatusAlreadyApplied,
+			wantContent:   "unique prefix anchor line\ninserted line one\ninserted line two\nintervening local line\nunique suffix anchor line\n",
+			wantDiagCode:  "single_edit_incompatible_context_already_applied",
+			wantDiagLevel: ApplyUnifiedDiffDiagnosticLevelWarning,
 		},
 		{
 			name:           "context_free_insert_only_rejected_in_non_empty_file",

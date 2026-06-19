@@ -337,6 +337,11 @@ func TestApplyUnifiedDiffTargetHelpers(t *testing.T) {
 				file: parsedPatchFile{OldPath: "old.txt", NewPath: "new.txt"},
 				want: []string{"new.txt", "old.txt"},
 			},
+			{
+				name: "rename_prefers_old_path_when_metadata_is_ignored",
+				file: parsedPatchFile{OldPath: "old.txt", NewPath: "new.txt", IsRename: true},
+				want: []string{"old.txt", "new.txt"},
+			},
 		}
 
 		for _, tt := range tests {
