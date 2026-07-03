@@ -162,7 +162,6 @@ func blame(ctx context.Context, snap gitToolSnapshot, args BlameArgs) (*BlameOut
 	}
 
 	currentCommit := commit
-	currentLines := append([]string(nil), lines...)
 	for range maxCommits {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -187,14 +186,16 @@ func blame(ctx context.Context, snap gitToolSnapshot, args BlameArgs) (*BlameOut
 		for _, line := range parentLines {
 			parentCounts[line]++
 		}
-		for i, line := range currentLines {
+		for i, line := range lines {
+			if assignments[i] != currentCommit {
+				continue
+			}
 			if parentCounts[line] > 0 {
 				parentCounts[line]--
 				assignments[i] = parent
 			}
 		}
 		currentCommit = parent
-		currentLines = parentLines
 	}
 
 	out := &BlameOut{

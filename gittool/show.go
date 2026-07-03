@@ -68,6 +68,7 @@ type ShowOut struct {
 	Patch          string     `json:"patch,omitempty"`
 	PatchBytes     int        `json:"patchBytes,omitempty"`
 	PatchTruncated bool       `json:"patchTruncated,omitempty"`
+	OutputMeta     OutputMeta `json:"outputMeta,omitzero"`
 	Note           string     `json:"note,omitempty"`
 }
 
@@ -129,14 +130,20 @@ func show(ctx context.Context, snap gitToolSnapshot, args ShowArgs) (*ShowOut, e
 	if err != nil {
 		return nil, err
 	}
+	maxBytes := normalizePositiveInt(args.MaxBytes, defaultDiffMaxBytes, 1024, hardDiffMaxBytes)
 
 	limited, truncated := limitStringBytes(
 		patch.String(),
-		normalizePositiveInt(args.MaxBytes, defaultDiffMaxBytes, 1024, hardDiffMaxBytes),
+		maxBytes,
 	)
 	out.Patch = limited
 	out.PatchBytes = len(limited)
 	out.PatchTruncated = truncated
+	out.OutputMeta = OutputMeta{
+		Bytes:     len(limited),
+		Truncated: truncated,
+		MaxBytes:  maxBytes,
+	}
 
 	return out, nil
 }

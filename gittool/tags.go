@@ -2,9 +2,10 @@ package gittool
 
 import (
 	"context"
-	"path/filepath"
+	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/flexigpt/llmtools-go/spec"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -49,8 +50,16 @@ type TagsArgs struct {
 }
 
 type TagInfo struct {
-	Name string `json:"name"`
-	Hash string `json:"hash"`
+	Name        string    `json:"name"`
+	Hash        string    `json:"hash"`
+	ShortHash   string    `json:"shortHash"`
+	Annotated   bool      `json:"annotated"`
+	TargetHash  string    `json:"targetHash,omitempty"`
+	TargetType  string    `json:"targetType,omitempty"`
+	TaggerName  string    `json:"taggerName,omitempty"`
+	TaggerEmail string    `json:"taggerEmail,omitempty"`
+	TaggerWhen  time.Time `json:"taggerWhen,omitzero"`
+	Message     string    `json:"message,omitempty"`
 }
 
 type TagsOut struct {
@@ -91,7 +100,7 @@ func tags(ctx context.Context, snap gitToolSnapshot, args TagsArgs) (*TagsOut, e
 		}
 		name := strings.TrimPrefix(string(ref.Name()), "refs/tags/")
 		if pattern != "" {
-			ok, err := filepath.Match(pattern, name)
+			ok, err := path.Match(pattern, name)
 			if err != nil {
 				return err
 			}
@@ -99,10 +108,25 @@ func tags(ctx context.Context, snap gitToolSnapshot, args TagsArgs) (*TagsOut, e
 				return nil
 			}
 		}
-		out.Tags = append(out.Tags, TagInfo{
-			Name: name,
-			Hash: ref.Hash().String(),
-		})
+		hash := ref.Hash().String()
+		info := TagInfo{
+			Name:      name,
+			Hash:      hash,
+			ShortHash: shortHash(hash),
+		}
+		if tagObj, err := repo.TagObject(ref.Hash()); err == nil {
+			info.Annotated = true
+			info.TargetHash = tagObj.Target.String()
+			info.TargetType = string(rune(tagObj.TargetType))
+			info.TaggerName = tagObj.Tagger.Name
+			info.TaggerEmail = tagObj.Tagger.Email
+			info.TaggerWhen = tagObj.Tagger.When
+			info.Message = strings.TrimRight(tagObj.Message, "\r\n")
+		} else if obj, objErr := repo.Object(plumbing.AnyObject, ref.Hash()); objErr == nil {
+			info.TargetHash = ref.Hash().String()
+			info.TargetType = string(rune(obj.Type()))
+		}
+		out.Tags = append(out.Tags, info)
 		return nil
 	}); err != nil {
 		return nil, err

@@ -87,9 +87,11 @@ type ReadBlobOut struct {
 	Content        string       `json:"content,omitempty"`
 	Bytes          int          `json:"bytes"`
 	Truncated      bool         `json:"truncated"`
+	MaxBytes       int          `json:"maxBytes"`
 	IsBinary       bool         `json:"isBinary"`
 	ContentOmitted bool         `json:"contentOmitted"`
 	OmissionReason string       `json:"omissionReason,omitempty"`
+	OutputMeta     OutputMeta   `json:"outputMeta"`
 }
 
 func readBlob(ctx context.Context, snap gitToolSnapshot, args ReadBlobArgs) (*ReadBlobOut, error) {
@@ -154,7 +156,13 @@ func readBlob(ctx context.Context, snap gitToolSnapshot, args ReadBlobArgs) (*Re
 		Encoding:  encoding,
 		Bytes:     len(data),
 		Truncated: truncated,
+		MaxBytes:  maxBytes,
 		IsBinary:  isBinary,
+		OutputMeta: OutputMeta{
+			Bytes:     len(data),
+			Truncated: truncated,
+			MaxBytes:  maxBytes,
+		},
 	}
 
 	switch encoding {

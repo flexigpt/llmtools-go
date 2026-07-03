@@ -47,9 +47,25 @@ const (
 	defaultFindMaxVisited  = 20000
 	hardFindMaxVisited     = 100000
 	maxLineDiffMatrixCells = 2000000
+	defaultGrepMaxMatches  = 100
+	hardGrepMaxMatches     = 1000
+	defaultGrepMaxFiles    = 10000
+	hardGrepMaxFiles       = 50000
+	defaultHistoryMaxCount = 50
+	hardHistoryMaxCount    = 500
+	defaultHistoryMaxWalk  = 2000
+	hardHistoryMaxWalk     = 20000
 )
 
 var errStopIteration = errors.New("stop git iteration")
+
+type OutputMeta struct {
+	Bytes              int  `json:"bytes"`
+	Truncated          bool `json:"truncated"`
+	OmittedBinaryFiles int  `json:"omittedBinaryFiles"`
+	SkippedLargeFiles  int  `json:"skippedLargeFiles"`
+	MaxBytes           int  `json:"maxBytes"`
+}
 
 type gitToolSnapshot struct {
 	policy             fspolicy.FSPolicy
@@ -178,6 +194,9 @@ func validateLocalBranchName(name string) error {
 	if len(n) > maxRefNameLength {
 		return fmt.Errorf("branch name too long: max %d bytes", maxRefNameLength)
 	}
+	if n == "@" {
+		return errors.New(`branch name "@" is invalid`)
+	}
 	if strings.HasPrefix(n, "-") {
 		return fmt.Errorf("branch name %q is invalid: must not start with '-'", n)
 	}
@@ -211,6 +230,9 @@ func validateTagName(name string) error {
 	}
 	if len(n) > maxRefNameLength {
 		return fmt.Errorf("tag name too long: max %d bytes", maxRefNameLength)
+	}
+	if n == "@" {
+		return errors.New(`tag name "@" is invalid`)
 	}
 	if strings.HasPrefix(n, "-") {
 		return fmt.Errorf("tag name %q is invalid: must not start with '-'", n)
@@ -328,6 +350,20 @@ func normalizePositiveInt(value, def, minNum, maxNum int) int {
 		value = maxNum
 	}
 	return value
+}
+
+func normalizeOptionalInt(value *int, def, minNum, maxNum int) int {
+	if value == nil {
+		return def
+	}
+	v := *value
+	if v < minNum {
+		return minNum
+	}
+	if v > maxNum {
+		return maxNum
+	}
+	return v
 }
 
 func limitStringBytes(s string, maxBytes int) (string, bool) {
@@ -450,21 +486,28 @@ type CommitInfo struct {
 }
 
 func commitInfo(c *object.Commit) CommitInfo {
+	if c == nil {
+		return CommitInfo{}
+	}
 	subject, body := splitCommitMessage(c.Message)
 	hash := c.Hash.String()
-	short := hash
-	if len(short) > 12 {
-		short = short[:12]
-	}
 	return CommitInfo{
 		Hash:        hash,
-		ShortHash:   short,
+		ShortHash:   shortHash(hash),
 		AuthorName:  c.Author.Name,
 		AuthorEmail: c.Author.Email,
 		AuthorWhen:  c.Author.When,
 		Subject:     subject,
 		Body:        body,
 	}
+}
+
+func shortHash(hash string) string {
+	short := hash
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	return short
 }
 
 func splitCommitMessage(msg string) (subject, line string) {
@@ -549,15 +592,36 @@ func filterObjectChangesByPaths(changes object.Changes, filters []string) object
 	}
 	filtered := make(object.Changes, 0, len(changes))
 	for _, change := range changes {
-		p := change.From.Name
-		if p == "" {
-			p = change.To.Name
-		}
-		if matchesRepoRelativePathFilter(p, filters) {
+		from, to, _ := objectChangePaths(change)
+		if matchesRepoRelativePathFilter(from, filters) || matchesRepoRelativePathFilter(to, filters) {
 			filtered = append(filtered, change)
 		}
 	}
 	return filtered
+}
+
+func objectChangePaths(change *object.Change) (from, to, display string) {
+	if change == nil {
+		return "", "", ""
+	}
+	if change.From.Name != "" {
+		from = change.From.Name
+	}
+	if change.To.Name != "" {
+		to = change.To.Name
+	}
+	display = to
+	if display == "" {
+		display = from
+	}
+	return from, to, display
+}
+
+type treePathIdentity struct {
+	Exists bool
+	Hash   string
+	Mode   string
+	Size   int64
 }
 
 func indexEntriesByPath(repo *git.Repository) (map[string]index.Entry, error) {
@@ -630,6 +694,22 @@ func treePathContentLimited(
 		return nil, false, false, err
 	}
 	return data, true, truncated, nil
+}
+
+func treePathBlobIdentity(tree *object.Tree, p string) treePathIdentity {
+	if tree == nil {
+		return treePathIdentity{}
+	}
+	f, err := tree.File(p)
+	if err != nil {
+		return treePathIdentity{}
+	}
+	return treePathIdentity{
+		Exists: true,
+		Hash:   f.Hash.String(),
+		Mode:   f.Mode.String(),
+		Size:   f.Size,
+	}
 }
 
 func worktreePathContentLimited(
@@ -710,15 +790,49 @@ func unifiedFileDiff(
 	newTruncated bool,
 	contextLines int,
 ) (part string, binaryOmitted, largeSkipped bool) {
+	return unifiedFileDiffPaths(
+		p,
+		p,
+		oldData,
+		oldExists,
+		oldTruncated,
+		newData,
+		newExists,
+		newTruncated,
+		contextLines,
+	)
+}
+
+func unifiedFileDiffPaths(
+	oldPath string,
+	newPath string,
+	oldData []byte,
+	oldExists bool,
+	oldTruncated bool,
+	newData []byte,
+	newExists bool,
+	newTruncated bool,
+	contextLines int,
+) (part string, binaryOmitted, largeSkipped bool) {
 	if oldExists && newExists && bytes.Equal(oldData, newData) {
 		return "", false, false
 	}
 	if !oldExists && !newExists {
 		return "", false, false
 	}
+	displayPath := newPath
+	if displayPath == "" {
+		displayPath = oldPath
+	}
+	if oldPath == "" {
+		oldPath = displayPath
+	}
+	if newPath == "" {
+		newPath = displayPath
+	}
 
 	var b strings.Builder
-	writeDiffHeader(&b, p, oldExists, newExists)
+	writeDiffHeader(&b, oldPath, newPath)
 
 	if oldTruncated || newTruncated {
 		b.WriteString("[diff omitted: file exceeds per-file read limit]\n")
@@ -736,14 +850,14 @@ func unifiedFileDiff(
 		b.WriteString("Binary files ")
 		if oldExists {
 			b.WriteString("a/")
-			b.WriteString(p)
+			b.WriteString(oldPath)
 		} else {
 			b.WriteString("/dev/null")
 		}
 		b.WriteString(" and ")
 		if newExists {
 			b.WriteString("b/")
-			b.WriteString(p)
+			b.WriteString(newPath)
 		} else {
 			b.WriteString("/dev/null")
 		}
@@ -753,14 +867,14 @@ func unifiedFileDiff(
 
 	if oldExists {
 		b.WriteString("--- a/")
-		b.WriteString(p)
+		b.WriteString(oldPath)
 		b.WriteString("\n")
 	} else {
 		b.WriteString("--- /dev/null\n")
 	}
 	if newExists {
 		b.WriteString("+++ b/")
-		b.WriteString(p)
+		b.WriteString(newPath)
 		b.WriteString("\n")
 	} else {
 		b.WriteString("+++ /dev/null\n")
@@ -774,12 +888,53 @@ func unifiedFileDiff(
 	return b.String(), false, false
 }
 
-func writeDiffHeader(b *strings.Builder, p string, oldExists, newExists bool) {
+func writeDiffHeader(b *strings.Builder, oldPath, newPath string) {
 	b.WriteString("diff --git a/")
-	b.WriteString(p)
+	b.WriteString(oldPath)
 	b.WriteString(" b/")
-	b.WriteString(p)
+	b.WriteString(newPath)
 	b.WriteString("\n")
+}
+
+func treeChangesUnifiedDiff(
+	ctx context.Context,
+	baseTree *object.Tree,
+	targetTree *object.Tree,
+	changes object.Changes,
+	contextLines int,
+) (diffText string, omittedBinaryFiles, skippedLargeFiles int, err error) {
+	var b strings.Builder
+	for _, change := range changes {
+		if err := ctx.Err(); err != nil {
+			return "", 0, 0, err
+		}
+		oldPath, newPath, displayPath := objectChangePaths(change)
+		oldData, oldExists, oldTruncated, err := treePathContentLimited(baseTree, oldPath, hardBlobReadBytes)
+		if err != nil {
+			return "", 0, 0, err
+		}
+		newData, newExists, newTruncated, err := treePathContentLimited(targetTree, newPath, hardBlobReadBytes)
+		if err != nil {
+			return "", 0, 0, err
+		}
+		if oldPath == "" {
+			oldPath = displayPath
+		}
+		if newPath == "" {
+			newPath = displayPath
+		}
+		part, binaryOmitted, largeSkipped := unifiedFileDiffPaths(
+			oldPath, newPath, oldData, oldExists, oldTruncated, newData, newExists, newTruncated, contextLines,
+		)
+		if binaryOmitted {
+			omittedBinaryFiles++
+		}
+		if largeSkipped {
+			skippedLargeFiles++
+		}
+		b.WriteString(part)
+	}
+	return b.String(), omittedBinaryFiles, skippedLargeFiles, nil
 }
 
 type diffRecord struct {
@@ -976,9 +1131,10 @@ func formatUnifiedRange(start, count int) string {
 }
 
 func writeDiffRecord(b *strings.Builder, op diffOp) {
-	b.WriteByte(op.Kind)
 	if op.Kind == '=' {
 		b.WriteByte(' ')
+	} else {
+		b.WriteByte(op.Kind)
 	}
 	b.WriteString(op.Line.Text)
 	b.WriteByte('\n')

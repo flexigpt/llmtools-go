@@ -125,6 +125,9 @@ func (gt *GitTool) CreateBranchTool() spec.Tool { return toolutil.CloneTool(crea
 func (gt *GitTool) CheckoutTool() spec.Tool     { return toolutil.CloneTool(checkoutTool) }
 func (gt *GitTool) InitTool() spec.Tool         { return toolutil.CloneTool(initTool) }
 func (gt *GitTool) BlameTool() spec.Tool        { return toolutil.CloneTool(blameTool) }
+func (gt *GitTool) FileHistoryTool() spec.Tool  { return toolutil.CloneTool(fileHistoryTool) }
+func (gt *GitTool) RepoInfoTool() spec.Tool     { return toolutil.CloneTool(repoInfoTool) }
+func (gt *GitTool) GrepTool() spec.Tool         { return toolutil.CloneTool(grepTool) }
 
 func (gt *GitTool) Status(ctx context.Context, args StatusArgs) (*StatusOut, error) {
 	return toolutil.WithRecoveryResp(func() (*StatusOut, error) {
@@ -294,5 +297,32 @@ func (gt *GitTool) Blame(ctx context.Context, args BlameArgs) (*BlameOut, error)
 			ctx = context.Background()
 		}
 		return blame(ctx, gt.snapshot(), args)
+	})
+}
+
+func (gt *GitTool) FileHistory(ctx context.Context, args FileHistoryArgs) (*FileHistoryOut, error) {
+	return toolutil.WithRecoveryResp(func() (*FileHistoryOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		return fileHistory(ctx, gt.snapshot(), args)
+	})
+}
+
+func (gt *GitTool) RepoInfo(ctx context.Context, args RepoInfoArgs) (*RepoInfoOut, error) {
+	return toolutil.WithRecoveryResp(func() (*RepoInfoOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		return repoInfo(ctx, gt.snapshot(), args)
+	})
+}
+
+func (gt *GitTool) Grep(ctx context.Context, args GrepArgs) (*GrepOut, error) {
+	return toolutil.WithRecoveryResp(func() (*GrepOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		return grep(ctx, gt.snapshot(), args)
 	})
 }

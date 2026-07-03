@@ -182,6 +182,9 @@ func RegisterBuiltins(r *Registry) error {
 	if err := RegisterTypedAsTextTool(r, gt.AddTool(), gt.Add); err != nil {
 		return err
 	}
+	if err := RegisterTypedAsTextTool(r, gt.ResetTool(), gt.Reset); err != nil {
+		return err
+	}
 	if err := RegisterTypedAsTextTool(r, gt.CommitTool(), gt.Commit); err != nil {
 		return err
 	}
@@ -195,6 +198,15 @@ func RegisterBuiltins(r *Registry) error {
 		return err
 	}
 	if err := RegisterTypedAsTextTool(r, gt.BlameTool(), gt.Blame); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.FileHistoryTool(), gt.FileHistory); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.RepoInfoTool(), gt.RepoInfo); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.GrepTool(), gt.Grep); err != nil {
 		return err
 	}
 

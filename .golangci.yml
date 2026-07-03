@@ -379,6 +379,8 @@ linters:
     goconst:
       ignore-string-values:
         - "deleted"
+        - "modified"
+        - "added"
 
     gocritic:
       # As of golangci-lint v2.0.2 this enabled 102 checks and disables below 4.

@@ -86,22 +86,23 @@ type DiffArgs struct {
 	Base         string   `json:"base,omitempty"`
 	Target       string   `json:"target,omitempty"`
 	Paths        []string `json:"paths,omitempty"`
-	ContextLines int      `json:"contextLines,omitempty"`
+	ContextLines *int     `json:"contextLines,omitempty"`
 	MaxBytes     int      `json:"maxBytes,omitempty"`
 }
 
 type DiffOut struct {
-	RepoPath           string   `json:"repoPath"`
-	Kind               DiffKind `json:"kind"`
-	Base               string   `json:"base,omitempty"`
-	Target             string   `json:"target,omitempty"`
-	Paths              []string `json:"paths,omitempty"`
-	ContextLines       int      `json:"contextLines"`
-	Diff               string   `json:"diff"`
-	Bytes              int      `json:"bytes"`
-	Truncated          bool     `json:"truncated"`
-	OmittedBinaryFiles int      `json:"omittedBinaryFiles"`
-	SkippedLargeFiles  int      `json:"skippedLargeFiles"`
+	RepoPath           string     `json:"repoPath"`
+	Kind               DiffKind   `json:"kind"`
+	Base               string     `json:"base,omitempty"`
+	Target             string     `json:"target,omitempty"`
+	Paths              []string   `json:"paths,omitempty"`
+	ContextLines       int        `json:"contextLines"`
+	Diff               string     `json:"diff"`
+	Bytes              int        `json:"bytes"`
+	Truncated          bool       `json:"truncated"`
+	OmittedBinaryFiles int        `json:"omittedBinaryFiles"`
+	SkippedLargeFiles  int        `json:"skippedLargeFiles"`
+	OutputMeta         OutputMeta `json:"outputMeta"`
 }
 
 func diff(ctx context.Context, snap gitToolSnapshot, args DiffArgs) (*DiffOut, error) {
@@ -120,7 +121,7 @@ func diff(ctx context.Context, snap gitToolSnapshot, args DiffArgs) (*DiffOut, e
 		kind = DiffKindWorking
 	}
 
-	contextLines := normalizePositiveInt(args.ContextLines, defaultContextLines, 0, 20)
+	contextLines := normalizeOptionalInt(args.ContextLines, defaultContextLines, 0, 20)
 	maxBytes := normalizePositiveInt(args.MaxBytes, defaultDiffMaxBytes, 1024, hardDiffMaxBytes)
 	pathFilters, err := normalizeRepoRelativePaths(args.Paths, true)
 	if err != nil {
@@ -259,11 +260,20 @@ func diff(ctx context.Context, snap gitToolSnapshot, args DiffArgs) (*DiffOut, e
 			return nil, err
 		}
 		changes = filterObjectChangesByPaths(changes, pathFilters)
-		patch, err := changes.Patch()
-		if err != nil {
-			return nil, err
+		if len(pathFilters) == 0 && contextLines == defaultContextLines {
+			patch, err := baseTree.Patch(targetTree)
+			if err != nil {
+				return nil, err
+			}
+			diffText = patch.String()
+		} else {
+			diffText, omittedBinaryFiles, skippedLargeFiles, err = treeChangesUnifiedDiff(
+				ctx, baseTree, targetTree, changes, contextLines,
+			)
+			if err != nil {
+				return nil, err
+			}
 		}
-		diffText = patch.String()
 		args.Target = target
 
 	default:
@@ -283,5 +293,12 @@ func diff(ctx context.Context, snap gitToolSnapshot, args DiffArgs) (*DiffOut, e
 		Truncated:          truncated,
 		OmittedBinaryFiles: omittedBinaryFiles,
 		SkippedLargeFiles:  skippedLargeFiles,
+		OutputMeta: OutputMeta{
+			Bytes:              len(limited),
+			Truncated:          truncated,
+			OmittedBinaryFiles: omittedBinaryFiles,
+			SkippedLargeFiles:  skippedLargeFiles,
+			MaxBytes:           maxBytes,
+		},
 	}, nil
 }
