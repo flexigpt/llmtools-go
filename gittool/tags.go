@@ -117,14 +117,14 @@ func tags(ctx context.Context, snap gitToolSnapshot, args TagsArgs) (*TagsOut, e
 		if tagObj, err := repo.TagObject(ref.Hash()); err == nil {
 			info.Annotated = true
 			info.TargetHash = tagObj.Target.String()
-			info.TargetType = string(rune(tagObj.TargetType))
+			info.TargetType = tagObj.TargetType.String()
 			info.TaggerName = tagObj.Tagger.Name
 			info.TaggerEmail = tagObj.Tagger.Email
 			info.TaggerWhen = tagObj.Tagger.When
 			info.Message = strings.TrimRight(tagObj.Message, "\r\n")
 		} else if obj, objErr := repo.Object(plumbing.AnyObject, ref.Hash()); objErr == nil {
 			info.TargetHash = ref.Hash().String()
-			info.TargetType = string(rune(obj.Type()))
+			info.TargetType = obj.Type().String()
 		}
 		out.Tags = append(out.Tags, info)
 		return nil

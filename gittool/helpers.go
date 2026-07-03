@@ -197,6 +197,9 @@ func validateLocalBranchName(name string) error {
 	if n == "@" {
 		return errors.New(`branch name "@" is invalid`)
 	}
+	if strings.HasPrefix(n, "refs/") {
+		return fmt.Errorf("branch name %q is invalid: pass a plain branch name, not a full ref", n)
+	}
 	if strings.HasPrefix(n, "-") {
 		return fmt.Errorf("branch name %q is invalid: must not start with '-'", n)
 	}
