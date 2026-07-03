@@ -94,6 +94,10 @@ func commit(ctx context.Context, snap gitToolSnapshot, args CommitArgs) (*Commit
 		return nil, err
 	}
 
+	if err := ensureNoIndexConflicts(repo, wt); err != nil {
+		return nil, err
+	}
+
 	authorName, authorEmail := resolveAuthor(repo, snap, args.AuthorName, args.AuthorEmail)
 	now := time.Now()
 

@@ -56,12 +56,14 @@ type StatusOut struct {
 	HeadHash           string         `json:"headHash,omitempty"`
 	Branch             string         `json:"branch,omitempty"`
 	DetachedHead       bool           `json:"detachedHead"`
+	UnbornHead         bool           `json:"unbornHead"`
 	IsClean            bool           `json:"isClean"`
 	DefaultAuthorName  string         `json:"defaultAuthorName,omitempty"`
 	DefaultAuthorEmail string         `json:"defaultAuthorEmail,omitempty"`
 	Remotes            []RemoteInfo   `json:"remotes,omitempty"`
 	Entries            []StatusEntry  `json:"entries,omitempty"`
 	Summary            map[string]int `json:"summary,omitempty"`
+	IndexState         IndexState     `json:"indexState"`
 }
 
 func status(ctx context.Context, snap gitToolSnapshot, args StatusArgs) (*StatusOut, error) {
@@ -79,15 +81,17 @@ func status(ctx context.Context, snap gitToolSnapshot, args StatusArgs) (*Status
 		return nil, err
 	}
 
-	branch, hash, detached := headInfo(repo)
+	branch, hash, detached, unborn := headInfoDetailed(repo)
 	out := &StatusOut{
 		RepoPath:     abs,
 		HeadHash:     hash,
 		Branch:       branch,
 		DetachedHead: detached,
+		UnbornHead:   unborn,
 		IsClean:      st.IsClean(),
 		Summary:      make(map[string]int),
 	}
+	out.IndexState, _ = detectIndexState(repo, wt)
 
 	paths := make([]string, 0, len(st))
 	for p := range st {

@@ -167,10 +167,19 @@ func RegisterBuiltins(r *Registry) error {
 	if err := RegisterTypedAsTextTool(r, gt.DeleteTagTool(), gt.DeleteTag); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, gt.AddTool(), gt.Add); err != nil {
+	if err := RegisterTypedAsTextTool(r, gt.ChangedFilesTool(), gt.ChangedFiles); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, gt.ResetTool(), gt.Reset); err != nil {
+	if err := RegisterTypedAsTextTool(r, gt.ListTreeTool(), gt.ListTree); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.ReadBlobTool(), gt.ReadBlob); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.FindReposTool(), gt.FindRepos); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.AddTool(), gt.Add); err != nil {
 		return err
 	}
 	if err := RegisterTypedAsTextTool(r, gt.CommitTool(), gt.Commit); err != nil {

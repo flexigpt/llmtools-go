@@ -114,6 +114,10 @@ func (gt *GitTool) BranchesTool() spec.Tool     { return toolutil.CloneTool(bran
 func (gt *GitTool) TagsTool() spec.Tool         { return toolutil.CloneTool(tagsTool) }
 func (gt *GitTool) CreateTagTool() spec.Tool    { return toolutil.CloneTool(createTagTool) }
 func (gt *GitTool) DeleteTagTool() spec.Tool    { return toolutil.CloneTool(deleteTagTool) }
+func (gt *GitTool) ChangedFilesTool() spec.Tool { return toolutil.CloneTool(changedFilesTool) }
+func (gt *GitTool) ListTreeTool() spec.Tool     { return toolutil.CloneTool(listTreeTool) }
+func (gt *GitTool) ReadBlobTool() spec.Tool     { return toolutil.CloneTool(readBlobTool) }
+func (gt *GitTool) FindReposTool() spec.Tool    { return toolutil.CloneTool(findReposTool) }
 func (gt *GitTool) AddTool() spec.Tool          { return toolutil.CloneTool(addTool) }
 func (gt *GitTool) ResetTool() spec.Tool        { return toolutil.CloneTool(resetTool) }
 func (gt *GitTool) CommitTool() spec.Tool       { return toolutil.CloneTool(commitTool) }
@@ -191,6 +195,42 @@ func (gt *GitTool) DeleteTag(ctx context.Context, args DeleteTagArgs) (*DeleteTa
 			ctx = context.Background()
 		}
 		return deleteTag(ctx, gt.snapshot(), args)
+	})
+}
+
+func (gt *GitTool) ChangedFiles(ctx context.Context, args ChangedFilesArgs) (*ChangedFilesOut, error) {
+	return toolutil.WithRecoveryResp(func() (*ChangedFilesOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		return changedFiles(ctx, gt.snapshot(), args)
+	})
+}
+
+func (gt *GitTool) ListTree(ctx context.Context, args ListTreeArgs) (*ListTreeOut, error) {
+	return toolutil.WithRecoveryResp(func() (*ListTreeOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		return listTree(ctx, gt.snapshot(), args)
+	})
+}
+
+func (gt *GitTool) ReadBlob(ctx context.Context, args ReadBlobArgs) (*ReadBlobOut, error) {
+	return toolutil.WithRecoveryResp(func() (*ReadBlobOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		return readBlob(ctx, gt.snapshot(), args)
+	})
+}
+
+func (gt *GitTool) FindRepos(ctx context.Context, args FindReposArgs) (*FindReposOut, error) {
+	return toolutil.WithRecoveryResp(func() (*FindReposOut, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		return findRepos(ctx, gt.snapshot(), args)
 	})
 }
 

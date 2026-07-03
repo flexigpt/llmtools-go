@@ -74,6 +74,9 @@ func add(ctx context.Context, snap gitToolSnapshot, args AddArgs) (*AddOut, erro
 	}
 
 	if args.All {
+		if snap.blockSymlinks {
+			return nil, errors.New("all=true is not allowed when symlink blocking is enabled; pass explicit paths")
+		}
 		if _, err := wt.Add("."); err != nil {
 			return nil, err
 		}
@@ -99,6 +102,11 @@ func add(ctx context.Context, snap gitToolSnapshot, args AddArgs) (*AddOut, erro
 	normalized = sortedStrings(normalized)
 
 	for _, p := range normalized {
+		if snap.blockSymlinks {
+			if err := validateNoSymlinkTraversal(abs, p); err != nil {
+				return nil, err
+			}
+		}
 		if _, err := wt.Add(p); err != nil {
 			return nil, err
 		}

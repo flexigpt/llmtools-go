@@ -376,6 +376,10 @@ linters:
     exhaustive:
       default-signifies-exhaustive: true
 
+    goconst:
+      ignore-string-values:
+        - "deleted"
+
     gocritic:
       # As of golangci-lint v2.0.2 this enabled 102 checks and disables below 4.
       enable-all: true

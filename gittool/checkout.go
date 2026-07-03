@@ -112,6 +112,10 @@ func checkout(ctx context.Context, snap gitToolSnapshot, args CheckoutArgs) (*Ch
 		opts.Hash = *hash
 	}
 
+	if err := ensureNoIndexConflicts(repo, wt); err != nil {
+		return nil, err
+	}
+
 	if err := wt.Checkout(opts); err != nil {
 		return nil, err
 	}

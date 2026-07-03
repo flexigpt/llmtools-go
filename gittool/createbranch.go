@@ -116,6 +116,9 @@ func createBranch(ctx context.Context, snap gitToolSnapshot, args CreateBranchAr
 	}
 
 	if args.Checkout {
+		if err := ensureNoIndexConflicts(repo, wt); err != nil {
+			return nil, err
+		}
 		if err := wt.Checkout(&git.CheckoutOptions{
 			Branch: branchRefName,
 		}); err != nil {

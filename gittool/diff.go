@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/flexigpt/llmtools-go/spec"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 const diffFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/gittool/diff.Diff"
@@ -90,15 +91,17 @@ type DiffArgs struct {
 }
 
 type DiffOut struct {
-	RepoPath     string   `json:"repoPath"`
-	Kind         DiffKind `json:"kind"`
-	Base         string   `json:"base,omitempty"`
-	Target       string   `json:"target,omitempty"`
-	Paths        []string `json:"paths,omitempty"`
-	ContextLines int      `json:"contextLines"`
-	Diff         string   `json:"diff"`
-	Bytes        int      `json:"bytes"`
-	Truncated    bool     `json:"truncated"`
+	RepoPath           string   `json:"repoPath"`
+	Kind               DiffKind `json:"kind"`
+	Base               string   `json:"base,omitempty"`
+	Target             string   `json:"target,omitempty"`
+	Paths              []string `json:"paths,omitempty"`
+	ContextLines       int      `json:"contextLines"`
+	Diff               string   `json:"diff"`
+	Bytes              int      `json:"bytes"`
+	Truncated          bool     `json:"truncated"`
+	OmittedBinaryFiles int      `json:"omittedBinaryFiles"`
+	SkippedLargeFiles  int      `json:"skippedLargeFiles"`
 }
 
 func diff(ctx context.Context, snap gitToolSnapshot, args DiffArgs) (*DiffOut, error) {
@@ -126,6 +129,8 @@ func diff(ctx context.Context, snap gitToolSnapshot, args DiffArgs) (*DiffOut, e
 
 	var diffText string
 	var abs string
+	var omittedBinaryFiles int
+	var skippedLargeFiles int
 
 	switch kind {
 	case DiffKindWorking:
@@ -146,15 +151,29 @@ func diff(ctx context.Context, snap gitToolSnapshot, args DiffArgs) (*DiffOut, e
 		paths := statusDiffPaths(st, DiffKindWorking, pathFilters)
 		var b strings.Builder
 		for _, p := range paths {
-			oldData, oldExists, err := indexPathContent(repo, idx, p, int64(maxBytes)+1)
+			oldData, oldExists, oldTruncated, err := indexPathContentLimited(repo, idx, p, hardBlobReadBytes)
 			if err != nil {
 				return nil, err
 			}
-			newData, newExists, err := worktreePathContent(wt, p, int64(maxBytes)+1)
+			if snap.blockSymlinks {
+				if err := validateNoSymlinkTraversal(abs, p); err != nil {
+					return nil, err
+				}
+			}
+			newData, newExists, newTruncated, err := worktreePathContentLimited(wt, p, hardBlobReadBytes)
 			if err != nil {
 				return nil, err
 			}
-			b.WriteString(unifiedFileDiff(p, oldData, oldExists, newData, newExists, contextLines))
+			part, binaryOmitted, largeSkipped := unifiedFileDiff(
+				p, oldData, oldExists, oldTruncated, newData, newExists, newTruncated, contextLines,
+			)
+			if binaryOmitted {
+				omittedBinaryFiles++
+			}
+			if largeSkipped {
+				skippedLargeFiles++
+			}
+			b.WriteString(part)
 		}
 		diffText = b.String()
 
@@ -169,13 +188,11 @@ func diff(ctx context.Context, snap gitToolSnapshot, args DiffArgs) (*DiffOut, e
 		if err != nil {
 			return nil, err
 		}
-		headCommit, err := resolveCommit(repo, revisionHead)
-		if err != nil {
-			return nil, err
-		}
-		headTree, err := headCommit.Tree()
-		if err != nil {
-			return nil, err
+		var headTree *object.Tree
+		if headCommit, err := resolveCommit(repo, revisionHead); err == nil {
+			if tree, treeErr := headCommit.Tree(); treeErr == nil {
+				headTree = tree
+			}
 		}
 		idx, err := indexEntriesByPath(repo)
 		if err != nil {
@@ -184,15 +201,24 @@ func diff(ctx context.Context, snap gitToolSnapshot, args DiffArgs) (*DiffOut, e
 		paths := statusDiffPaths(st, DiffKindStaged, pathFilters)
 		var b strings.Builder
 		for _, p := range paths {
-			oldData, oldExists, err := treePathContent(headTree, p, int64(maxBytes)+1)
+			oldData, oldExists, oldTruncated, err := treePathContentLimited(headTree, p, hardBlobReadBytes)
 			if err != nil {
 				return nil, err
 			}
-			newData, newExists, err := indexPathContent(repo, idx, p, int64(maxBytes)+1)
+			newData, newExists, newTruncated, err := indexPathContentLimited(repo, idx, p, hardBlobReadBytes)
 			if err != nil {
 				return nil, err
 			}
-			b.WriteString(unifiedFileDiff(p, oldData, oldExists, newData, newExists, contextLines))
+			part, binaryOmitted, largeSkipped := unifiedFileDiff(
+				p, oldData, oldExists, oldTruncated, newData, newExists, newTruncated, contextLines,
+			)
+			if binaryOmitted {
+				omittedBinaryFiles++
+			}
+			if largeSkipped {
+				skippedLargeFiles++
+			}
+			b.WriteString(part)
 		}
 		diffText = b.String()
 
@@ -228,23 +254,16 @@ func diff(ctx context.Context, snap gitToolSnapshot, args DiffArgs) (*DiffOut, e
 		if err != nil {
 			return nil, err
 		}
-		paths, err := treeDiffPaths(baseTree, targetTree, pathFilters)
+		changes, err := baseTree.Diff(targetTree)
 		if err != nil {
 			return nil, err
 		}
-		var b strings.Builder
-		for _, p := range paths {
-			oldData, oldExists, err := treePathContent(baseTree, p, int64(maxBytes)+1)
-			if err != nil {
-				return nil, err
-			}
-			newData, newExists, err := treePathContent(targetTree, p, int64(maxBytes)+1)
-			if err != nil {
-				return nil, err
-			}
-			b.WriteString(unifiedFileDiff(p, oldData, oldExists, newData, newExists, contextLines))
+		changes = filterObjectChangesByPaths(changes, pathFilters)
+		patch, err := changes.Patch()
+		if err != nil {
+			return nil, err
 		}
-		diffText = b.String()
+		diffText = patch.String()
 		args.Target = target
 
 	default:
@@ -253,14 +272,16 @@ func diff(ctx context.Context, snap gitToolSnapshot, args DiffArgs) (*DiffOut, e
 
 	limited, truncated := limitStringBytes(diffText, maxBytes)
 	return &DiffOut{
-		RepoPath:     abs,
-		Kind:         kind,
-		Base:         strings.TrimSpace(args.Base),
-		Target:       strings.TrimSpace(args.Target),
-		Paths:        pathFilters,
-		ContextLines: contextLines,
-		Diff:         limited,
-		Bytes:        len(limited),
-		Truncated:    truncated,
+		RepoPath:           abs,
+		Kind:               kind,
+		Base:               strings.TrimSpace(args.Base),
+		Target:             strings.TrimSpace(args.Target),
+		Paths:              pathFilters,
+		ContextLines:       contextLines,
+		Diff:               limited,
+		Bytes:              len(limited),
+		Truncated:          truncated,
+		OmittedBinaryFiles: omittedBinaryFiles,
+		SkippedLargeFiles:  skippedLargeFiles,
 	}, nil
 }

@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -28,6 +29,7 @@ const (
 	hardDiffMaxBytes    = 2 * 1024 * 1024
 	hardBlobReadBytes   = 4 * 1024 * 1024
 	defaultLogMaxCount  = 10
+	defaultTreeMaxCount = 1000
 	hardLogMaxCount     = 100
 	maxStagePaths       = 500
 	maxRevisionLength   = 256
@@ -36,10 +38,22 @@ const (
 	maxCommitMsgBytes   = 128 * 1024
 )
 
+const (
+	hardTreeMaxCount       = 10000
+	defaultFindMaxDepth    = 5
+	hardFindMaxDepth       = 12
+	defaultFindMaxRepos    = 100
+	hardFindMaxRepos       = 1000
+	defaultFindMaxVisited  = 20000
+	hardFindMaxVisited     = 100000
+	maxLineDiffMatrixCells = 2000000
+)
+
 var errStopIteration = errors.New("stop git iteration")
 
 type gitToolSnapshot struct {
 	policy             fspolicy.FSPolicy
+	blockSymlinks      bool
 	defaultAuthorName  string
 	defaultAuthorEmail string
 }
@@ -49,6 +63,7 @@ func (gt *GitTool) snapshot() gitToolSnapshot {
 	defer gt.mu.RUnlock()
 	return gitToolSnapshot{
 		policy:             gt.policy,
+		blockSymlinks:      gt.cfg.blockSymlinks,
 		defaultAuthorName:  gt.cfg.defaultAuthorName,
 		defaultAuthorEmail: gt.cfg.defaultAuthorEmail,
 	}
@@ -118,10 +133,20 @@ func resolveCommit(repo *git.Repository, revision string) (*object.Commit, error
 	}
 
 	commit, err := repo.CommitObject(*hash)
-	if err != nil {
-		return nil, fmt.Errorf("load commit %q: %w", rev, err)
+	if err == nil {
+		return commit, nil
 	}
-	return commit, nil
+
+	tag, tagErr := repo.TagObject(*hash)
+	if tagErr == nil {
+		commit, commitErr := tag.Commit()
+		if commitErr == nil {
+			return commit, nil
+		}
+		return nil, fmt.Errorf("resolve annotated tag %q to commit: %w", rev, commitErr)
+	}
+
+	return nil, fmt.Errorf("load commit %q: %w", rev, err)
 }
 
 func validateRevision(rev string) error {
@@ -238,21 +263,40 @@ func normalizeRepoRelativePath(p string) (string, error) {
 	if strings.ContainsRune(trimmed, '\x00') {
 		return "", errors.New("path contains NUL byte")
 	}
-	if filepath.IsAbs(trimmed) || path.IsAbs(filepath.ToSlash(trimmed)) {
+	slashed := strings.ReplaceAll(trimmed, `\`, `/`)
+	if filepath.IsAbs(trimmed) ||
+		path.IsAbs(slashed) ||
+		strings.HasPrefix(slashed, "//") ||
+		hasWindowsVolumeName(slashed) {
 		return "", fmt.Errorf("path must be repository-relative: %q", p)
 	}
 
-	cleaned := path.Clean(filepath.ToSlash(trimmed))
+	cleaned := path.Clean(slashed)
 	if cleaned == "." {
 		return ".", nil
 	}
-	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+	if cleaned == ".." ||
+		strings.HasPrefix(cleaned, "../") ||
+		strings.Contains(cleaned, "/../") ||
+		strings.HasPrefix(cleaned, "//") ||
+		hasWindowsVolumeName(cleaned) {
 		return "", fmt.Errorf("path escapes repository root: %q", p)
 	}
 	if strings.HasPrefix(cleaned, "-") {
 		return "", fmt.Errorf("path %q is invalid: must not start with '-'", p)
 	}
 	return cleaned, nil
+}
+
+func hasWindowsVolumeName(p string) bool {
+	if len(p) < 2 {
+		return false
+	}
+	if p[1] != ':' {
+		return false
+	}
+	r := rune(p[0])
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 }
 
 func normalizeRepoRelativePaths(paths []string, allowEmpty bool) ([]string, error) {
@@ -305,15 +349,94 @@ func limitStringBytes(s string, maxBytes int) (string, bool) {
 }
 
 func headInfo(repo *git.Repository) (branch, hash string, detached bool) {
+	branch, hash, detached, _ = headInfoDetailed(repo)
+	return branch, hash, detached
+}
+
+func headInfoDetailed(repo *git.Repository) (branch, hash string, detached, unborn bool) {
 	ref, err := repo.Head()
 	if err != nil {
-		return "", "", false
+		return "", "", false, true
 	}
 	hash = ref.Hash().String()
 	if ref.Name().IsBranch() {
-		return ref.Name().Short(), hash, false
+		return ref.Name().Short(), hash, false, false
 	}
-	return "", hash, true
+	return "", hash, true, false
+}
+
+type IndexState struct {
+	Entries       int      `json:"entries"`
+	HasConflicts  bool     `json:"hasConflicts"`
+	ConflictPaths []string `json:"conflictPaths,omitempty"`
+}
+
+func detectIndexState(repo *git.Repository, wt *git.Worktree) (IndexState, error) {
+	state := IndexState{}
+	if repo != nil {
+		if idx, err := repo.Storer.Index(); err == nil && idx != nil {
+			state.Entries = len(idx.Entries)
+		}
+	}
+	if wt == nil {
+		return state, nil
+	}
+
+	st, err := wt.Status()
+	if err != nil {
+		return state, err
+	}
+
+	seen := make(map[string]bool)
+	for p, fs := range st {
+		if statusCodeIsConflict(fs.Staging) || statusCodeIsConflict(fs.Worktree) {
+			if !seen[p] {
+				state.ConflictPaths = append(state.ConflictPaths, p)
+				seen[p] = true
+			}
+		}
+	}
+	sort.Strings(state.ConflictPaths)
+	state.HasConflicts = len(state.ConflictPaths) > 0
+	return state, nil
+}
+
+func ensureNoIndexConflicts(repo *git.Repository, wt *git.Worktree) error {
+	state, err := detectIndexState(repo, wt)
+	if err != nil {
+		return err
+	}
+	if state.HasConflicts {
+		return fmt.Errorf("repository has unresolved index conflicts: %s", strings.Join(state.ConflictPaths, ", "))
+	}
+	return nil
+}
+
+func statusCodeIsConflict(code git.StatusCode) bool {
+	return string(code) == "U"
+}
+
+func statusCodeName(code git.StatusCode) string {
+	switch string(code) {
+	case " ":
+		return "unmodified"
+	case "?":
+		return "untracked"
+	case "M":
+		return "modified"
+	case "A":
+		return "added"
+	case "D":
+		return "deleted"
+	case "R":
+		return "renamed"
+	case "C":
+		return "copied"
+	case "U":
+		return "unmerged"
+	default:
+		return string(code)
+	}
 }
 
 type CommitInfo struct {
@@ -420,38 +543,21 @@ func statusDiffPaths(st git.Status, kind DiffKind, filters []string) []string {
 	return paths
 }
 
-func treeDiffPaths(a, b *object.Tree, filters []string) ([]string, error) {
-	paths := make(map[string]bool)
-	if a != nil {
-		iter := a.Files()
-		defer iter.Close()
-		if err := iter.ForEach(func(f *object.File) error {
-			if matchesRepoRelativePathFilter(f.Name, filters) {
-				paths[f.Name] = true
-			}
-			return nil
-		}); err != nil {
-			return nil, err
+func filterObjectChangesByPaths(changes object.Changes, filters []string) object.Changes {
+	if len(filters) == 0 {
+		return changes
+	}
+	filtered := make(object.Changes, 0, len(changes))
+	for _, change := range changes {
+		p := change.From.Name
+		if p == "" {
+			p = change.To.Name
+		}
+		if matchesRepoRelativePathFilter(p, filters) {
+			filtered = append(filtered, change)
 		}
 	}
-	if b != nil {
-		iter := b.Files()
-		defer iter.Close()
-		if err := iter.ForEach(func(f *object.File) error {
-			if matchesRepoRelativePathFilter(f.Name, filters) {
-				paths[f.Name] = true
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-	}
-	out := make([]string, 0, len(paths))
-	for p := range paths {
-		out = append(out, p)
-	}
-	sort.Strings(out)
-	return out, nil
+	return filtered
 }
 
 func indexEntriesByPath(repo *git.Repository) (map[string]index.Entry, error) {
@@ -467,21 +573,18 @@ func indexEntriesByPath(repo *git.Repository) (map[string]index.Entry, error) {
 	return out, nil
 }
 
-func indexPathContent(
+func indexPathContentLimited(
 	repo *git.Repository,
 	entries map[string]index.Entry,
 	p string,
 	maxBytes int64,
-) (data []byte, exists bool, err error) {
+) (data []byte, exists, truncated bool, err error) {
 	entry, ok := entries[p]
 	if !ok {
-		return nil, false, nil
+		return nil, false, false, nil
 	}
-	data, _, err = blobContent(repo, entry.Hash, maxBytes)
-	if err != nil {
-		return nil, false, err
-	}
-	return data, true, nil
+	data, truncated, err = blobContent(repo, entry.Hash, maxBytes)
+	return data, true, truncated, err
 }
 
 func blobContent(repo *git.Repository, hash plumbing.Hash, maxBytes int64) (data []byte, ok bool, err error) {
@@ -501,39 +604,52 @@ func blobContent(repo *git.Repository, hash plumbing.Hash, maxBytes int64) (data
 }
 
 func treePathContent(tree *object.Tree, p string, maxBytes int64) (data []byte, ok bool, err error) {
+	data, ok, _, err = treePathContentLimited(tree, p, maxBytes)
+	return data, ok, err
+}
+
+func treePathContentLimited(
+	tree *object.Tree,
+	p string,
+	maxBytes int64,
+) (data []byte, ok, truncated bool, err error) {
 	if tree == nil {
-		return nil, false, nil
+		return nil, false, false, nil
 	}
 	f, err := tree.File(p)
 	if err != nil {
-		return nil, false, nil
+		return nil, false, false, nil
 	}
 	r, err := f.Reader()
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	defer r.Close()
-	data, _, err = readLimited(r, maxBytes)
+	data, truncated, err = readLimited(r, maxBytes)
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
-	return data, true, nil
+	return data, true, truncated, nil
 }
 
-func worktreePathContent(wt *git.Worktree, p string, maxBytes int64) (data []byte, ok bool, err error) {
+func worktreePathContentLimited(
+	wt *git.Worktree,
+	p string,
+	maxBytes int64,
+) (data []byte, ok, truncated bool, err error) {
 	f, err := wt.Filesystem.Open(p)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, false, nil
+			return nil, false, false, nil
 		}
-		return nil, false, err
+		return nil, false, false, err
 	}
 	defer f.Close()
-	data, _, err = readLimited(f, maxBytes)
+	data, truncated, err = readLimited(f, maxBytes)
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
-	return data, true, nil
+	return data, true, truncated, nil
 }
 
 func readLimited(r io.Reader, maxBytes int64) (data []byte, ok bool, err error) {
@@ -552,30 +668,62 @@ func readLimited(r io.Reader, maxBytes int64) (data []byte, ok bool, err error) 
 	return data, false, nil
 }
 
+func validateNoSymlinkTraversal(root, rel string) error {
+	if rel == "." {
+		return nil
+	}
+	cleaned, err := normalizeRepoRelativePath(rel)
+	if err != nil {
+		return err
+	}
+	cur := root
+	parts := strings.Split(cleaned, "/")
+	for i, part := range parts {
+		if part == "" || part == "." {
+			continue
+		}
+		cur = filepath.Join(cur, part)
+		info, err := os.Lstat(cur)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) && i == len(parts)-1 {
+				return nil
+			}
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("path traverses symlink: %s", cleaned)
+		}
+	}
+	return nil
+}
+
 func unifiedFileDiff(
 	p string,
 	oldData []byte,
 	oldExists bool,
+	oldTruncated bool,
 	newData []byte,
 	newExists bool,
+	newTruncated bool,
 	contextLines int,
-) string {
-	_ = contextLines
+) (part string, binaryOmitted, largeSkipped bool) {
 	if oldExists && newExists && bytes.Equal(oldData, newData) {
-		return ""
+		return "", false, false
 	}
 	if !oldExists && !newExists {
-		return ""
+		return "", false, false
 	}
 
 	var b strings.Builder
-	b.WriteString("diff --git ")
-	b.WriteString("a/")
-	b.WriteString(p)
-	b.WriteString(" ")
-	b.WriteString("b/")
-	b.WriteString(p)
-	b.WriteString("\n")
+	writeDiffHeader(&b, p, oldExists, newExists)
+
+	if oldTruncated || newTruncated {
+		b.WriteString("[diff omitted: file exceeds per-file read limit]\n")
+		return b.String(), false, true
+	}
 
 	if !oldExists {
 		b.WriteString("new file mode 100644\n")
@@ -600,7 +748,7 @@ func unifiedFileDiff(
 			b.WriteString("/dev/null")
 		}
 		b.WriteString(" differ\n")
-		return b.String()
+		return b.String(), true, false
 	}
 
 	if oldExists {
@@ -618,34 +766,224 @@ func unifiedFileDiff(
 		b.WriteString("+++ /dev/null\n")
 	}
 
-	oldLines := splitDiffLines(string(oldData))
-	newLines := splitDiffLines(string(newData))
-	fmt.Fprintf(&b, "@@ -1,%d +1,%d @@\n", len(oldLines), len(newLines))
-	for _, line := range oldLines {
-		writeDiffLine(&b, "-", line)
+	body := unifiedLineDiff(string(oldData), string(newData), contextLines)
+	if body == "" {
+		return "", false, false
 	}
-	for _, line := range newLines {
-		writeDiffLine(&b, "+", line)
+	b.WriteString(body)
+	return b.String(), false, false
+}
+
+func writeDiffHeader(b *strings.Builder, p string, oldExists, newExists bool) {
+	b.WriteString("diff --git a/")
+	b.WriteString(p)
+	b.WriteString(" b/")
+	b.WriteString(p)
+	b.WriteString("\n")
+}
+
+type diffRecord struct {
+	Text       string
+	HasNewline bool
+}
+
+type diffOp struct {
+	Kind    byte
+	Line    diffRecord
+	OldLine int
+	NewLine int
+}
+
+func splitDiffRecords(s string) []diffRecord {
+	if s == "" {
+		return nil
+	}
+	out := make([]diffRecord, 0, strings.Count(s, "\n")+1)
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\n' {
+			continue
+		}
+		out = append(out, diffRecord{
+			Text:       s[start:i],
+			HasNewline: true,
+		})
+		start = i + 1
+	}
+	if start < len(s) {
+		out = append(out, diffRecord{
+			Text:       s[start:],
+			HasNewline: false,
+		})
+	}
+	return out
+}
+
+func unifiedLineDiff(oldText, newText string, contextLines int) string {
+	if contextLines < 0 {
+		contextLines = defaultContextLines
+	}
+	oldLines := splitDiffRecords(oldText)
+	newLines := splitDiffRecords(newText)
+	ops := buildDiffOps(oldLines, newLines)
+	if len(ops) == 0 {
+		return ""
+	}
+	ranges := diffHunkRanges(ops, contextLines)
+	if len(ranges) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	for _, r := range ranges {
+		hops := ops[r[0]:r[1]]
+		oldStart, oldCount, newStart, newCount := hunkStats(hops)
+		fmt.Fprintf(
+			&b,
+			"@@ -%s +%s @@\n",
+			formatUnifiedRange(oldStart, oldCount),
+			formatUnifiedRange(newStart, newCount),
+		)
+		for _, op := range hops {
+			writeDiffRecord(&b, op)
+		}
 	}
 	return b.String()
 }
 
-func splitDiffLines(s string) []string {
-	if s == "" {
+func buildDiffOps(oldLines, newLines []diffRecord) []diffOp {
+	n := len(oldLines)
+	m := len(newLines)
+	if n == 0 && m == 0 {
 		return nil
 	}
-	lines := strings.SplitAfter(s, "\n")
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
+	if (n+1)*(m+1) > maxLineDiffMatrixCells {
+		return buildFullReplaceOps(oldLines, newLines)
 	}
-	return lines
+
+	width := m + 1
+	dp := make([]int, (n+1)*(m+1))
+	for i := n - 1; i >= 0; i-- {
+		for j := m - 1; j >= 0; j-- {
+			if diffRecordsEqual(oldLines[i], newLines[j]) {
+				dp[i*width+j] = dp[(i+1)*width+j+1] + 1
+				continue
+			}
+			a := dp[(i+1)*width+j]
+			b := dp[i*width+j+1]
+			dp[i*width+j] = max(a, b)
+		}
+	}
+
+	ops := make([]diffOp, 0, n+m)
+	i, j := 0, 0
+	for i < n || j < m {
+		switch {
+		case i < n && j < m && diffRecordsEqual(oldLines[i], newLines[j]):
+			ops = append(ops, diffOp{Kind: '=', Line: oldLines[i], OldLine: i + 1, NewLine: j + 1})
+			i++
+			j++
+		case j < m && (i == n || dp[i*width+j+1] >= dp[(i+1)*width+j]):
+			ops = append(ops, diffOp{Kind: '+', Line: newLines[j], OldLine: i + 1, NewLine: j + 1})
+			j++
+		case i < n:
+			ops = append(ops, diffOp{Kind: '-', Line: oldLines[i], OldLine: i + 1, NewLine: j + 1})
+			i++
+		}
+	}
+	return ops
 }
 
-func writeDiffLine(b *strings.Builder, prefix, line string) {
-	b.WriteString(prefix)
-	b.WriteString(line)
-	if !strings.HasSuffix(line, "\n") {
-		b.WriteString("\n")
+func buildFullReplaceOps(oldLines, newLines []diffRecord) []diffOp {
+	ops := make([]diffOp, 0, len(oldLines)+len(newLines))
+	for i, line := range oldLines {
+		ops = append(ops, diffOp{Kind: '-', Line: line, OldLine: i + 1, NewLine: 1})
+	}
+	for i, line := range newLines {
+		ops = append(ops, diffOp{Kind: '+', Line: line, OldLine: len(oldLines) + 1, NewLine: i + 1})
+	}
+	return ops
+}
+
+func diffRecordsEqual(a, b diffRecord) bool {
+	return a.Text == b.Text && a.HasNewline == b.HasNewline
+}
+
+func diffHunkRanges(ops []diffOp, contextLines int) [][2]int {
+	var ranges [][2]int
+	for i := 0; i < len(ops); {
+		for i < len(ops) && ops[i].Kind == '=' {
+			i++
+		}
+		if i >= len(ops) {
+			break
+		}
+
+		start := max(i-contextLines, 0)
+		lastChange := i
+		j := i + 1
+		for j < len(ops) {
+			if ops[j].Kind != '=' {
+				lastChange = j
+			}
+			if j-lastChange > contextLines {
+				break
+			}
+			j++
+		}
+		end := min(lastChange+contextLines+1, len(ops))
+		if len(ranges) > 0 && start <= ranges[len(ranges)-1][1] {
+			if end > ranges[len(ranges)-1][1] {
+				ranges[len(ranges)-1][1] = end
+			}
+		} else {
+			ranges = append(ranges, [2]int{start, end})
+		}
+		i = end
+	}
+	return ranges
+}
+
+func hunkStats(ops []diffOp) (oldStart, oldCount, newStart, newCount int) {
+	for _, op := range ops {
+		if op.Kind != '+' {
+			oldCount++
+			if oldStart == 0 {
+				oldStart = op.OldLine
+			}
+		}
+		if op.Kind != '-' {
+			newCount++
+			if newStart == 0 {
+				newStart = op.NewLine
+			}
+		}
+	}
+	if oldStart == 0 {
+		oldStart = max(ops[0].OldLine-1, 0)
+	}
+	if newStart == 0 {
+		newStart = max(ops[0].NewLine-1, 0)
+	}
+	return oldStart, oldCount, newStart, newCount
+}
+
+func formatUnifiedRange(start, count int) string {
+	if count == 1 {
+		return strconv.Itoa(start)
+	}
+	return fmt.Sprintf("%d,%d", start, count)
+}
+
+func writeDiffRecord(b *strings.Builder, op diffOp) {
+	b.WriteByte(op.Kind)
+	if op.Kind == '=' {
+		b.WriteByte(' ')
+	}
+	b.WriteString(op.Line.Text)
+	b.WriteByte('\n')
+	if !op.Line.HasNewline {
+		b.WriteString("\\ No newline at end of file\n")
 	}
 }
 
