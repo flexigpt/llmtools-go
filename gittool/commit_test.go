@@ -2,6 +2,7 @@ package gittool
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/go-git/go-git/v5"
@@ -111,5 +112,46 @@ func TestCommitAllLeavesUntrackedFilesAndRejectsEmptyMessage(t *testing.T) {
 	_, err = tool.Commit(ctx, CommitArgs{RepoPath: repoRel, Message: "   "})
 	if err == nil {
 		t.Fatal("Commit(empty message) error = nil, want error")
+	}
+}
+
+func TestCommitUsesExplicitAuthorAndRejectsOversizedMessage(t *testing.T) {
+	base := t.TempDir()
+	repoAbs := filepath.Join(base, testRepoDirName)
+	repoRel := filepath.FromSlash(testRepoDirName)
+
+	repo := mustInitRepo(t, repoAbs, false)
+	mustWriteFile(t, repoAbs, testFileName, testFileContent)
+	_ = mustCommitAll(t, repo, "initial commit")
+	mustSetRepoUserConfig(t, repo, "Configured Name", "configured@example.invalid")
+
+	mustWriteFile(t, repoAbs, testFileName, testModifiedFileContents)
+
+	tool := newTestGitTool(t, base)
+	ctx := t.Context()
+
+	if _, err := tool.Add(ctx, AddArgs{RepoPath: repoRel, Paths: []string{testFileName}}); err != nil {
+		t.Fatalf("Add(before explicit author commit) error = %v", err)
+	}
+
+	out, err := tool.Commit(ctx, CommitArgs{
+		RepoPath:    repoRel,
+		Message:     "commit with explicit author",
+		AuthorName:  "Override Name",
+		AuthorEmail: "override@example.invalid",
+	})
+	if err != nil {
+		t.Fatalf("Commit(explicit author) error = %v", err)
+	}
+	if out.AuthorName != "Override Name" || out.AuthorEmail != "override@example.invalid" {
+		t.Fatalf("Commit(explicit author).author = (%q, %q), want explicit args", out.AuthorName, out.AuthorEmail)
+	}
+	if out.All {
+		t.Fatal("Commit(explicit author).All = true, want false")
+	}
+
+	_, err = tool.Commit(ctx, CommitArgs{RepoPath: repoRel, Message: strings.Repeat("x", maxCommitMsgBytes+1)})
+	if err == nil {
+		t.Fatal("Commit(oversized message) error = nil, want error")
 	}
 }

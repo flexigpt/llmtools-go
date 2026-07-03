@@ -75,6 +75,36 @@ func TestListTreeRecursiveAndNonRecursive(t *testing.T) {
 	}
 }
 
+func TestListTreeTruncatesAtMaxEntries(t *testing.T) {
+	base := t.TempDir()
+	repoAbs := filepath.Join(base, testRepoDirName)
+	repoRel := filepath.FromSlash(testRepoDirName)
+
+	repo := mustInitRepo(t, repoAbs, false)
+	mustWriteFile(t, repoAbs, testFileName, testFileContent)
+	mustWriteFile(t, repoAbs, filepath.FromSlash("dir/sub.txt"), "sub file\n")
+	_ = mustCommitAll(t, repo, "tree fixtures")
+
+	tool := newTestGitTool(t, base)
+	ctx := t.Context()
+
+	out, err := tool.ListTree(ctx, ListTreeArgs{
+		RepoPath:   repoRel,
+		Recursive:  new(true),
+		Path:       ".",
+		MaxEntries: 1,
+	})
+	if err != nil {
+		t.Fatalf("ListTree(maxEntries=1) error = %v", err)
+	}
+	if !out.Truncated {
+		t.Fatal("ListTree(maxEntries=1).Truncated = false, want true")
+	}
+	if out.Count != 1 || len(out.Entries) != 1 {
+		t.Fatalf("ListTree(maxEntries=1).Entries = %#v, want 1 entry", out.Entries)
+	}
+}
+
 func TestListTreeMissingPathErrors(t *testing.T) {
 	base := t.TempDir()
 	repoAbs := filepath.Join(base, testRepoDirName)

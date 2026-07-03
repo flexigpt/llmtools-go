@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 )
 
@@ -64,22 +65,49 @@ func TestRepoInfoReportsRepositoryMetadata(t *testing.T) {
 	}
 }
 
-func TestRepoInfoDetectsBareRepository(t *testing.T) {
+func TestRepoInfoDetectsDetachedAndBareRepository(t *testing.T) {
 	base := t.TempDir()
+	repoAbs := filepath.Join(base, testRepoDirName)
 	bareAbs := filepath.Join(base, testBareRepoDirName)
+
+	repo := mustInitRepo(t, repoAbs, false)
+	mustWriteFile(t, repoAbs, testFileName, testFileContent)
+	commitHash := mustCommitAll(t, repo, "detached target")
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree() error = %v", err)
+	}
+	if err := wt.Checkout(&git.CheckoutOptions{Hash: commitHash, Force: true}); err != nil {
+		t.Fatalf("Checkout(detached) error = %v", err)
+	}
 
 	mustInitRepo(t, bareAbs, true)
 	tool := newTestGitTool(t, base)
 	ctx := t.Context()
 
-	out, err := tool.RepoInfo(ctx, RepoInfoArgs{RepoPath: filepath.FromSlash(testBareRepoDirName)})
+	detachedOut, err := tool.RepoInfo(ctx, RepoInfoArgs{RepoPath: filepath.FromSlash(testRepoDirName)})
+	if err != nil {
+		t.Fatalf("RepoInfo(detached) error = %v", err)
+	}
+	if !detachedOut.DetachedHead {
+		t.Fatal("RepoInfo(detached).DetachedHead = false, want true")
+	}
+	if detachedOut.Branch != "" {
+		t.Fatalf("RepoInfo(detached).Branch = %q, want empty", detachedOut.Branch)
+	}
+	if detachedOut.HeadHash != commitHash.String() {
+		t.Fatalf("RepoInfo(detached).HeadHash = %q, want %q", detachedOut.HeadHash, commitHash.String())
+	}
+
+	bareOut, err := tool.RepoInfo(ctx, RepoInfoArgs{RepoPath: filepath.FromSlash(testBareRepoDirName)})
 	if err != nil {
 		t.Fatalf("RepoInfo(bare) error = %v", err)
 	}
-	if !out.Bare {
+	if !bareOut.Bare {
 		t.Fatal("RepoInfo(bare).Bare = false, want true")
 	}
-	if out.GitDir != bareAbs {
-		t.Fatalf("RepoInfo(bare).GitDir = %q, want %q", out.GitDir, bareAbs)
+	if bareOut.GitDir != bareAbs {
+		t.Fatalf("RepoInfo(bare).GitDir = %q, want %q", bareOut.GitDir, bareAbs)
 	}
 }

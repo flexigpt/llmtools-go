@@ -12,6 +12,7 @@ func TestGrepMatchesTextIgnoresBinaryAndTruncates(t *testing.T) {
 
 	repo := mustInitRepo(t, repoAbs, false)
 	mustWriteFile(t, repoAbs, "search.txt", "one\nalpha\nBeta\nALPHA\nomega\n")
+	mustWriteFile(t, repoAbs, "literal.txt", "a.*\n")
 	mustWriteBinaryFile(t, repoAbs, testBinaryFileName, []byte(testBinaryContent))
 	_ = mustCommitAll(t, repo, "grep fixtures")
 
@@ -30,8 +31,8 @@ func TestGrepMatchesTextIgnoresBinaryAndTruncates(t *testing.T) {
 	if out.Count != 2 || len(out.Matches) != 2 {
 		t.Fatalf("Grep().Matches = %#v, want 2 matches", out.Matches)
 	}
-	if out.FilesVisited != 2 {
-		t.Fatalf("Grep().FilesVisited = %d, want 2", out.FilesVisited)
+	if out.FilesVisited != 3 {
+		t.Fatalf("Grep().FilesVisited = %d, want 3", out.FilesVisited)
 	}
 	if out.OmittedBinaryFiles != 1 {
 		t.Fatalf("Grep().OmittedBinaryFiles = %d, want 1", out.OmittedBinaryFiles)
@@ -47,6 +48,25 @@ func TestGrepMatchesTextIgnoresBinaryAndTruncates(t *testing.T) {
 	}
 	if out.Matches[1].Path != "search.txt" || out.Matches[1].LineNumber != 4 {
 		t.Fatalf("Grep().Matches[1] = %#v, want line 4 in search.txt", out.Matches[1])
+	}
+
+	literal, err := tool.Grep(ctx, GrepArgs{
+		RepoPath: repoRel,
+		Pattern:  "a.*",
+		Literal:  true,
+		Paths:    []string{"literal.txt"},
+	})
+	if err != nil {
+		t.Fatalf("Grep(literal) error = %v", err)
+	}
+	if literal.Count != 1 || len(literal.Matches) != 1 {
+		t.Fatalf("Grep(literal).Matches = %#v, want 1 match", literal.Matches)
+	}
+	if literal.Matches[0].Path != "literal.txt" || literal.Matches[0].Line != "a.*" {
+		t.Fatalf("Grep(literal).Matches[0] = %#v, want literal a.* line", literal.Matches[0])
+	}
+	if len(literal.Paths) != 1 || literal.Paths[0] != "literal.txt" {
+		t.Fatalf("Grep(literal).Paths = %#v, want [literal.txt]", literal.Paths)
 	}
 
 	truncated, err := tool.Grep(ctx, GrepArgs{

@@ -81,6 +81,41 @@ func TestFindReposFindsNestedAndBareRepositories(t *testing.T) {
 	}
 }
 
+func TestFindReposTruncatesByMaxRepos(t *testing.T) {
+	base := t.TempDir()
+
+	firstRepoAbs := filepath.Join(base, "a", "repo1")
+	secondRepoAbs := filepath.Join(base, "b", "repo2")
+	if err := os.MkdirAll(firstRepoAbs, 0o700); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", firstRepoAbs, err)
+	}
+	if err := os.MkdirAll(secondRepoAbs, 0o700); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", secondRepoAbs, err)
+	}
+	_ = mustInitRepo(t, firstRepoAbs, false)
+	_ = mustInitRepo(t, secondRepoAbs, false)
+
+	tool := newTestGitTool(t, base)
+	ctx := t.Context()
+
+	out, err := tool.FindRepos(ctx, FindReposArgs{
+		RootPath:       ".",
+		IncludeBare:    new(false),
+		MaxDepth:       5,
+		MaxRepos:       1,
+		MaxVisitedDirs: 100,
+	})
+	if err != nil {
+		t.Fatalf("FindRepos(maxRepos=1) error = %v", err)
+	}
+	if !out.Truncated {
+		t.Fatal("FindRepos(maxRepos=1).Truncated = false, want true")
+	}
+	if out.Count != 1 || len(out.Repos) != 1 {
+		t.Fatalf("FindRepos(maxRepos=1).Repos = %#v, want 1 repo", out.Repos)
+	}
+}
+
 func TestFindReposRejectsInvalidRoots(t *testing.T) {
 	base := t.TempDir()
 	tool := newTestGitTool(t, base)

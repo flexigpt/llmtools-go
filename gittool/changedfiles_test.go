@@ -74,6 +74,41 @@ func TestChangedFilesWorkingStagedAndRefs(t *testing.T) {
 	}
 }
 
+func TestChangedFilesPathFilterAndUnknownKindDefaultToWorking(t *testing.T) {
+	base := t.TempDir()
+	repoAbs := filepath.Join(base, testRepoDirName)
+	repoRel := filepath.FromSlash(testRepoDirName)
+
+	repo := mustInitRepo(t, repoAbs, false)
+	mustWriteFile(t, repoAbs, testFileName, testFileContent)
+	mustWriteFile(t, repoAbs, testSecondFileName, testSecondFileContents)
+	_ = mustCommitAll(t, repo, "first commit")
+
+	mustWriteFile(t, repoAbs, testFileName, testModifiedFileContents)
+	mustWriteFile(t, repoAbs, testSecondFileName, "another change\n")
+
+	tool := newTestGitTool(t, base)
+	ctx := t.Context()
+
+	out, err := tool.ChangedFiles(ctx, ChangedFilesArgs{
+		RepoPath: repoRel,
+		Kind:     DiffKind("unexpected"),
+		Paths:    []string{testFileName},
+	})
+	if err != nil {
+		t.Fatalf("ChangedFiles(unknown kind) error = %v", err)
+	}
+	if out.Kind != DiffKindWorking {
+		t.Fatalf("ChangedFiles(unknown kind).Kind = %q, want %q", out.Kind, DiffKindWorking)
+	}
+	if len(out.Files) != 1 || out.Files[0].Path != testFileName || out.Files[0].Status != "modified" {
+		t.Fatalf("ChangedFiles(path filtered) = %#v, want only modified tracked file", out.Files)
+	}
+	if len(out.Paths) != 1 || out.Paths[0] != testFileName {
+		t.Fatalf("ChangedFiles(path filtered).Paths = %#v, want [%q]", out.Paths, testFileName)
+	}
+}
+
 func TestChangedFilesRequiresBaseForRefs(t *testing.T) {
 	base := t.TempDir()
 	repoAbs := filepath.Join(base, testRepoDirName)

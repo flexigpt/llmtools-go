@@ -121,3 +121,55 @@ func TestDiffTruncatesByMaxBytes(t *testing.T) {
 		t.Fatalf("Diff(truncated).Diff = %q, want truncation marker", out.Diff)
 	}
 }
+
+func TestDiffHonorsPathFiltersAndCountsBinaryFiles(t *testing.T) {
+	base := t.TempDir()
+	repoAbs := filepath.Join(base, testRepoDirName)
+	repoRel := filepath.FromSlash(testRepoDirName)
+
+	repo := mustInitRepo(t, repoAbs, false)
+	mustWriteFile(t, repoAbs, testFileName, testFileContent)
+	mustWriteBinaryFile(t, repoAbs, testBinaryFileName, []byte(testBinaryContent))
+	_ = mustCommitAll(t, repo, "diff fixtures")
+
+	mustWriteFile(t, repoAbs, testFileName, testModifiedFileContents)
+	mustWriteBinaryFile(t, repoAbs, testBinaryFileName, []byte{0xff, 0xfe, 0x01})
+
+	tool := newTestGitTool(t, base)
+	ctx := t.Context()
+
+	filtered, err := tool.Diff(ctx, DiffArgs{
+		RepoPath: repoRel,
+		Kind:     DiffKindWorking,
+		Paths:    []string{testFileName},
+	})
+	if err != nil {
+		t.Fatalf("Diff(path filtered) error = %v", err)
+	}
+	if len(filtered.Paths) != 1 || filtered.Paths[0] != testFileName {
+		t.Fatalf("Diff(path filtered).Paths = %#v, want [%q]", filtered.Paths, testFileName)
+	}
+	if !strings.Contains(filtered.Diff, testFileName) {
+		t.Fatalf("Diff(path filtered) missing tracked file diff: %q", filtered.Diff)
+	}
+	if strings.Contains(filtered.Diff, testBinaryFileName) {
+		t.Fatalf("Diff(path filtered) unexpectedly contains binary file: %q", filtered.Diff)
+	}
+	if filtered.OmittedBinaryFiles != 0 {
+		t.Fatalf("Diff(path filtered).OmittedBinaryFiles = %d, want 0", filtered.OmittedBinaryFiles)
+	}
+
+	all, err := tool.Diff(ctx, DiffArgs{
+		RepoPath: repoRel,
+		Kind:     DiffKindWorking,
+	})
+	if err != nil {
+		t.Fatalf("Diff(all) error = %v", err)
+	}
+	if all.OmittedBinaryFiles != 1 {
+		t.Fatalf("Diff(all).OmittedBinaryFiles = %d, want 1", all.OmittedBinaryFiles)
+	}
+	if !strings.Contains(all.Diff, "Binary files a/"+testBinaryFileName) {
+		t.Fatalf("Diff(all) missing binary diff marker: %q", all.Diff)
+	}
+}

@@ -91,4 +91,9 @@ func TestCreateTagCreatesLightweightAndAnnotatedTags(t *testing.T) {
 	if err == nil {
 		t.Fatal("CreateTag(duplicate) error = nil, want error")
 	}
+
+	_, err = tool.Tags(ctx, TagsArgs{RepoPath: repoRel, Pattern: "["})
+	if err == nil {
+		t.Fatal("Tags(invalid pattern) error = nil, want error")
+	}
 }

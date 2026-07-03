@@ -52,6 +52,9 @@ func TestStatusReportsCleanAndDirtyState(t *testing.T) {
 	if clean.IndexState.HasConflicts {
 		t.Fatal("Status(clean).IndexState.HasConflicts = true, want false")
 	}
+	if clean.Summary != nil {
+		t.Fatalf("Status(clean).Summary = %#v, want nil", clean.Summary)
+	}
 
 	mustWriteFile(t, repoAbs, testFileName, testModifiedFileContents)
 	mustWriteFile(t, repoAbs, testSecondFileName, testSecondFileContents)
@@ -72,8 +75,20 @@ func TestStatusReportsCleanAndDirtyState(t *testing.T) {
 	if dirty.Entries[0].Worktree != "M" || dirty.Entries[0].Staging != " " {
 		t.Fatalf("Status(dirty) modified entry = %#v, want worktree M / staging space", dirty.Entries[0])
 	}
-	if dirty.Entries[1].Worktree != "?" {
-		t.Fatalf("Status(dirty) untracked entry = %#v, want worktree ?", dirty.Entries[1])
+	if dirty.Entries[1].Worktree != "?" || dirty.Entries[1].Staging != "?" {
+		t.Fatalf("Status(dirty) untracked entry = %#v, want worktree ? / staging ?", dirty.Entries[1])
+	}
+	if dirty.Summary["staging: "] != 1 {
+		t.Fatalf("Status(dirty).Summary[staging: ] = %d, want 1", dirty.Summary["staging: "])
+	}
+	if dirty.Summary["staging:?"] != 1 {
+		t.Fatalf("Status(dirty).Summary[staging:?] = %d, want 1", dirty.Summary["staging:?"])
+	}
+	if dirty.Summary["worktree:M"] != 1 {
+		t.Fatalf("Status(dirty).Summary[worktree:M] = %d, want 1", dirty.Summary["worktree:M"])
+	}
+	if dirty.Summary["worktree:?"] != 1 {
+		t.Fatalf("Status(dirty).Summary[worktree:?] = %d, want 1", dirty.Summary["worktree:?"])
 	}
 }
 
