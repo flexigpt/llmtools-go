@@ -179,7 +179,7 @@ func validateParsedURL(u *url.URL, allowPrivateNetwork bool) error {
 	if u == nil {
 		return errors.New("url is nil")
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
+	if u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS {
 		return fmt.Errorf("unsupported url scheme %q; only http and https are allowed", u.Scheme)
 	}
 	if u.Host == "" {
@@ -215,7 +215,7 @@ func validateParsedURL(u *url.URL, allowPrivateNetwork bool) error {
 
 func isBlockedHostname(host string) bool {
 	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
-	return host == "localhost" ||
+	return host == localhost ||
 		strings.HasSuffix(host, ".localhost") ||
 		host == "local" ||
 		strings.HasSuffix(host, ".local")

@@ -38,7 +38,7 @@ const (
 	testCommandWhitespaceOnly   = " \n\t "
 	testCommandEchoBSpaced      = " echo b "
 	testCommandPwd              = "pwd"
-	testCommandPwdAndPrintfFOO  = `pwd; printf '%s' "$FOO"` //nolint:gosec // Test creds.
+	testCommandPwdAndPrintfFOO  = `pwd; printf '%s' "$FOO"`
 	testStdoutHello             = "hello"
 	testStdoutBar               = "bar"
 	testStdoutBaz               = "baz"

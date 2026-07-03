@@ -21,6 +21,10 @@ const (
 
 	maxUserAgentLength = 512
 	maxRedirectsLimit  = 10
+
+	schemeHTTPS = "https"
+	schemeHTTP  = "http"
+	localhost   = "localhost"
 )
 
 type webToolConfig struct {
@@ -140,7 +144,7 @@ func WithProxyURL(proxyRawURL string) WebToolOption {
 		if err != nil {
 			return fmt.Errorf("invalid proxy url: %w", err)
 		}
-		if u.Scheme != "http" && u.Scheme != "https" {
+		if u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS {
 			return errors.New("proxy url scheme must be http or https")
 		}
 		if u.Host == "" {

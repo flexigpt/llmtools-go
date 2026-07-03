@@ -36,7 +36,7 @@ var fetchURLTool = spec.Tool{
 	Version:       spec.VersionOne,
 	DisplayName:   "Fetch URL",
 	Description:   "Fetch an HTTP/HTTPS URL. Default auto mode returns compact text for HTML/text/PDF and image/file outputs for binary URLs. Use startIndex to continue truncated text.",
-	Tags:          []string{"web", "fetchurl"},
+	Tags:          []string{"web", "fetch"},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",
@@ -395,7 +395,7 @@ func isGenericBinaryContentType(ct string) bool {
 
 func isPDFContentType(ct, rawURL string) bool {
 	ct = normalizeContentType(ct)
-	if ct == "application/pdf" {
+	if ct == string(ioutil.MIMEApplicationPDF) {
 		return true
 	}
 	return strings.EqualFold(extensionFromURL(rawURL), ".pdf")
@@ -408,7 +408,7 @@ func isImageContentType(ct string) bool {
 
 func isHTMLContentType(ct string) bool {
 	ct = normalizeContentType(ct)
-	return ct == "text/html" ||
+	return ct == string(ioutil.MIMEBaseTextHTML) ||
 		ct == "application/xhtml+xml" ||
 		strings.Contains(ct, "html")
 }
@@ -429,7 +429,7 @@ func isTextLikeContentType(ct string) bool {
 	}
 
 	switch ct {
-	case "application/json",
+	case string(ioutil.MIMEApplicationJSON),
 		"application/xml",
 		"application/javascript",
 		"application/ecmascript",
@@ -508,7 +508,7 @@ func filenameFromURL(rawURL, contentType string, header http.Header) string {
 	switch {
 	case strings.HasPrefix(contentType, "image/"):
 		return "image" + ext
-	case contentType == "application/pdf":
+	case contentType == string(ioutil.MIMEApplicationPDF):
 		return "document.pdf"
 	default:
 		return "download" + ext

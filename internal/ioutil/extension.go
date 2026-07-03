@@ -118,6 +118,7 @@ const (
 	MIMETextPlain    MIMEType = "text/plain; charset=utf-8"
 	MIMETextMarkdown MIMEType = "text/markdown; charset=utf-8"
 	MIMETextHTML     MIMEType = "text/html; charset=utf-8"
+	MIMEBaseTextHTML MIMEType = "text/html"
 	MIMETextCSS      MIMEType = "text/css; charset=utf-8"
 
 	MIMEApplicationJSON MIMEType = "application/json"

@@ -111,14 +111,14 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	scriptPath := filepath.Join(scriptDir, testScriptHello)
-	//nolint:gosec // Execution script.
+
 	if err := os.WriteFile(scriptPath, []byte(testScriptHelloContent), 0o700); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
 	// Another script for direct execution with execute bit.
 	execScriptPath := filepath.Join(scriptDir, testScriptDirect)
-	if err := os.WriteFile( //nolint:gosec // Execution script.
+	if err := os.WriteFile(
 		execScriptPath,
 		[]byte(testScriptDirectContent),
 		0o700,
@@ -486,7 +486,7 @@ func TestRunScript_WindowsCmdScript(t *testing.T) {
 	td := t.TempDir()
 	scriptPath := filepath.Join(td, "hello.cmd")
 	body := "@echo off\r\n<nul set /p dummy=hello\r\nexit /b 0\r\n"
-	//nolint:gosec // Hand crafted.
+
 	if err := os.WriteFile(scriptPath, []byte(body), 0o700); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}

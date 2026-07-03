@@ -478,6 +478,7 @@ linters:
       - path: '(.+)_test\.go'
         linters:
           - goconst
+          - gosec
 
 issues:
   max-issues-per-linter: 0
