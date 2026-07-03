@@ -59,7 +59,7 @@ var diffTool = spec.Tool{
 		"type": "integer",
 		"description": "Maximum diff bytes returned. Hard capped by the implementation.",
 		"default": 1048576,
-		"minimum": 1024,
+		"minimum": 34,
 		"maximum": 2097152
 	}
 },
@@ -122,7 +122,7 @@ func diff(ctx context.Context, snap gitToolSnapshot, args DiffArgs) (*DiffOut, e
 	}
 
 	contextLines := normalizeOptionalInt(args.ContextLines, defaultContextLines, 0, 20)
-	maxBytes := normalizePositiveInt(args.MaxBytes, defaultDiffMaxBytes, 1024, hardDiffMaxBytes)
+	maxBytes := normalizePositiveInt(args.MaxBytes, defaultDiffMaxBytes, 64, hardDiffMaxBytes)
 	pathFilters, err := normalizeRepoRelativePaths(args.Paths, true)
 	if err != nil {
 		return nil, err

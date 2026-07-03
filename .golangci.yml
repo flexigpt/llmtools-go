@@ -412,7 +412,8 @@ linters:
           alias: gitHTTP
         - pkg: "github.com/go-git/go-git/v5/plumbing/transport/ssh"
           alias: gitSSH
-
+        - pkg: github.com/JohannesKaufmann/html-to-markdown/v2
+          alias: html2md
     nakedret:
       # No naked returns, ever.
       max-func-lines: 0 # Default: 30

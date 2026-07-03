@@ -125,6 +125,14 @@ func fileHistory(ctx context.Context, snap gitToolSnapshot, args FileHistoryArgs
 		return nil, err
 	}
 
+	startTree, err := start.Tree()
+	if err != nil {
+		return nil, err
+	}
+	if !treePathBlobIdentity(startTree, p).Exists {
+		return nil, errors.New("path does not exist at revision")
+	}
+
 	out := &FileHistoryOut{
 		RepoPath:        abs,
 		Path:            p,

@@ -76,12 +76,21 @@ type ListTreeArgs struct {
 	MaxEntries  int    `json:"maxEntries,omitempty"`
 }
 
+type TreeModeKind string
+
+const (
+	TreeModeKindTree      TreeModeKind = "tree"
+	TreeModeKindSymlink   TreeModeKind = "symlink"
+	TreeModeKindSubmodule TreeModeKind = "submodule"
+	TreeModeKindBlob      TreeModeKind = "blob"
+)
+
 type TreeEntryInfo struct {
-	Path string `json:"path"`
-	Kind string `json:"kind"`
-	Mode string `json:"mode"`
-	Hash string `json:"hash"`
-	Size int64  `json:"size,omitempty"`
+	Path string       `json:"path"`
+	Kind TreeModeKind `json:"kind"`
+	Mode string       `json:"mode"`
+	Hash string       `json:"hash"`
+	Size int64        `json:"size,omitempty"`
 }
 
 type ListTreeOut struct {
@@ -220,15 +229,15 @@ func listTree(ctx context.Context, snap gitToolSnapshot, args ListTreeArgs) (*Li
 	return out, nil
 }
 
-func treeModeKind(mode filemode.FileMode) string {
+func treeModeKind(mode filemode.FileMode) TreeModeKind {
 	switch mode {
 	case filemode.Dir:
-		return "tree"
+		return TreeModeKindTree
 	case filemode.Symlink:
-		return "symlink"
+		return TreeModeKindSymlink
 	case filemode.Submodule:
-		return "submodule"
+		return TreeModeKindSubmodule
 	default:
-		return "blob"
+		return TreeModeKindBlob
 	}
 }

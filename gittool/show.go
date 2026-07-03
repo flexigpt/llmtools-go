@@ -40,7 +40,7 @@ var showTool = spec.Tool{
 		"type": "integer",
 		"description": "Maximum patch bytes returned. Hard capped by the implementation.",
 		"default": 1048576,
-		"minimum": 1024,
+		"minimum": 64,
 		"maximum": 2097152
 	}
 },
@@ -130,7 +130,7 @@ func show(ctx context.Context, snap gitToolSnapshot, args ShowArgs) (*ShowOut, e
 	if err != nil {
 		return nil, err
 	}
-	maxBytes := normalizePositiveInt(args.MaxBytes, defaultDiffMaxBytes, 1024, hardDiffMaxBytes)
+	maxBytes := normalizePositiveInt(args.MaxBytes, defaultDiffMaxBytes, 64, hardDiffMaxBytes)
 
 	limited, truncated := limitStringBytes(
 		patch.String(),

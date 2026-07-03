@@ -19,6 +19,7 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 	"github.com/flexigpt/llmtools-go/texttool"
+	"github.com/flexigpt/llmtools-go/webtool"
 )
 
 // Registry provides lookup/register for Go tools by funcID, with json.RawMessage I/O.
@@ -121,6 +122,15 @@ func RegisterBuiltins(r *Registry) error {
 	}
 
 	if err := RegisterTypedAsTextTool(r, it.ReadImageTool(), it.ReadImage); err != nil {
+		return err
+	}
+
+	wt, err := webtool.NewWebTool()
+	if err != nil {
+		return err
+	}
+
+	if err := RegisterOutputsTool(r, wt.FetchURLTool(), wt.FetchURL); err != nil {
 		return err
 	}
 
