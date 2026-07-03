@@ -41,8 +41,9 @@ func TestCommitCreatesCommitFromStagedChangesAndUsesRepoConfig(t *testing.T) {
 	if out.ShortHash != out.Hash[:12] {
 		t.Fatalf("Commit().ShortHash = %q, want prefix of %q", out.ShortHash, out.Hash)
 	}
-	if out.RepoPath != repoAbs {
-		t.Fatalf("Commit().RepoPath = %q, want %q", out.RepoPath, repoAbs)
+	assertSamePath(t, out.RepoPath, repoAbs)
+	if out.When.IsZero() {
+		t.Fatal("Commit().When = zero, want commit timestamp")
 	}
 
 	reopened, err := git.PlainOpen(repoAbs)

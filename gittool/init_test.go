@@ -26,12 +26,8 @@ func TestInitCreatesRepositoryWithRelativePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
-	if out.RepoPath != repoAbs {
-		t.Fatalf("Init().RepoPath = %q, want %q", out.RepoPath, repoAbs)
-	}
-	if out.GitDir != filepath.Join(repoAbs, ".git") {
-		t.Fatalf("Init().GitDir = %q, want %q", out.GitDir, filepath.Join(repoAbs, ".git"))
-	}
+	assertSamePath(t, out.RepoPath, repoAbs)
+	assertSamePath(t, out.GitDir, filepath.Join(repoAbs, ".git"))
 	if out.Bare {
 		t.Fatal("Init().Bare = true, want false")
 	}
@@ -68,12 +64,8 @@ func TestInitCreatesRepositoryWithParents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Init(createParents=true) error = %v", err)
 	}
-	if out.RepoPath != repoAbs {
-		t.Fatalf("Init().RepoPath = %q, want %q", out.RepoPath, repoAbs)
-	}
-	if out.GitDir != filepath.Join(repoAbs, ".git") {
-		t.Fatalf("Init().GitDir = %q, want %q", out.GitDir, filepath.Join(repoAbs, ".git"))
-	}
+	assertSamePath(t, out.RepoPath, repoAbs)
+	assertSamePath(t, out.GitDir, filepath.Join(repoAbs, ".git"))
 
 	repo, err := git.PlainOpen(repoAbs)
 	if err != nil {
@@ -102,9 +94,7 @@ func TestInitCreatesBareRepository(t *testing.T) {
 	if !out.Bare {
 		t.Fatal("Init().Bare = false, want true")
 	}
-	if out.GitDir != repoAbs {
-		t.Fatalf("Init().GitDir = %q, want %q", out.GitDir, repoAbs)
-	}
+	assertSamePath(t, out.GitDir, repoAbs)
 
 	repo, err := git.PlainOpen(repoAbs)
 	if err != nil {

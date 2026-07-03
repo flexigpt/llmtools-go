@@ -25,9 +25,7 @@ func TestStatusReportsCleanAndDirtyState(t *testing.T) {
 		t.Fatalf("Status(clean) error = %v", err)
 	}
 	branch, headHash, _ := headInfo(repo)
-	if clean.RepoPath != repoAbs {
-		t.Fatalf("Status(clean).RepoPath = %q, want %q", clean.RepoPath, repoAbs)
-	}
+	assertSamePath(t, clean.RepoPath, repoAbs)
 	if clean.HeadHash != headHash {
 		t.Fatalf("Status(clean).HeadHash = %q, want %q", clean.HeadHash, headHash)
 	}
@@ -36,6 +34,12 @@ func TestStatusReportsCleanAndDirtyState(t *testing.T) {
 	}
 	if clean.Branch != branch {
 		t.Fatalf("Status(clean).Branch = %q, want %q", clean.Branch, branch)
+	}
+	if clean.DetachedHead {
+		t.Fatal("Status(clean).DetachedHead = true, want false")
+	}
+	if clean.UnbornHead {
+		t.Fatal("Status(clean).UnbornHead = true, want false")
 	}
 	if !clean.IsClean {
 		t.Fatal("Status(clean).IsClean = false, want true")
@@ -63,6 +67,7 @@ func TestStatusReportsCleanAndDirtyState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status(dirty) error = %v", err)
 	}
+	assertSamePath(t, dirty.RepoPath, repoAbs)
 	if dirty.IsClean {
 		t.Fatal("Status(dirty).IsClean = true, want false")
 	}

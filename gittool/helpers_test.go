@@ -4,14 +4,17 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -35,6 +38,101 @@ const (
 	testSecondFileContents   = "new content\n"
 	testModifiedFileContents = "alpha\nbeta modified\n"
 )
+
+func canonForPolicyExpectations(p string) string {
+	p = filepath.Clean(p)
+	p = evalTestSymlinksBestEffort(p)
+	if runtime.GOOS != toolutil.GOOSDarwin {
+		return p
+	}
+
+	aliases := map[string]string{
+		"/var":  "/private/var",
+		"/tmp":  "/private/tmp",
+		"/etc":  "/private/etc",
+		"/bin":  "/usr/bin",
+		"/sbin": "/usr/sbin",
+		"/lib":  "/usr/lib",
+	}
+	sep := string(os.PathSeparator)
+	for from, to := range aliases {
+		if p == from {
+			return to
+		}
+		if strings.HasPrefix(p, from+sep) {
+			return to + p[len(from):]
+		}
+	}
+	return p
+}
+
+func evalTestSymlinksBestEffort(p string) string {
+	p = filepath.Clean(p)
+	tried := p
+	remainder := ""
+
+	for range 64 {
+		if resolved, err := filepath.EvalSymlinks(tried); err == nil && resolved != "" {
+			resolved = filepath.Clean(resolved)
+			if remainder == "" {
+				return resolved
+			}
+			return filepath.Join(resolved, remainder)
+		}
+
+		parent := filepath.Dir(tried)
+		if parent == tried {
+			return p
+		}
+
+		base := filepath.Base(tried)
+		if remainder == "" {
+			remainder = base
+		} else {
+			remainder = filepath.Join(base, remainder)
+		}
+		tried = parent
+	}
+	return p
+}
+
+func normalizePathForCompare(pathValue string) string {
+	pathValue = strings.TrimSpace(pathValue)
+	if pathValue == "" {
+		return ""
+	}
+
+	pathValue = strings.ReplaceAll(pathValue, "\\", "/")
+	preserveUNC := runtime.GOOS == toolutil.GOOSWindows && strings.HasPrefix(pathValue, "//")
+	if preserveUNC {
+		pathValue = "//" + collapseRepeatedSlashes(strings.TrimLeft(pathValue[2:], "/"))
+	} else {
+		pathValue = collapseRepeatedSlashes(pathValue)
+	}
+
+	pathValue = path.Clean(pathValue)
+	if preserveUNC && strings.HasPrefix(pathValue, "/") && !strings.HasPrefix(pathValue, "//") {
+		pathValue = "/" + pathValue
+	}
+	if pathValue == "." {
+		pathValue = ""
+	}
+
+	if runtime.GOOS == toolutil.GOOSWindows {
+		pathValue = strings.ToLower(pathValue)
+	}
+
+	return pathValue
+}
+
+func assertSamePath(t *testing.T, got, want string) {
+	t.Helper()
+	gotNorm := normalizePathForCompare(canonForPolicyExpectations(got))
+	wantNorm := normalizePathForCompare(canonForPolicyExpectations(want))
+	if gotNorm != wantNorm {
+		t.Fatalf("path = %q, want %q", got, want)
+	}
+}
 
 func newTestGitTool(t *testing.T, base string) *GitTool {
 	t.Helper()
@@ -73,12 +171,12 @@ func mustWriteBinaryFile(t *testing.T, root, rel string, contents []byte) {
 	}
 }
 
-func mustInitRepo(t *testing.T, path string, bare bool) *git.Repository {
+func mustInitRepo(t *testing.T, pathIn string, bare bool) *git.Repository {
 	t.Helper()
 
-	repo, err := git.PlainInitWithOptions(path, &git.PlainInitOptions{Bare: bare})
+	repo, err := git.PlainInitWithOptions(pathIn, &git.PlainInitOptions{Bare: bare})
 	if err != nil {
-		t.Fatalf("PlainInitWithOptions(%q) error = %v", path, err)
+		t.Fatalf("PlainInitWithOptions(%q) error = %v", pathIn, err)
 	}
 	return repo
 }
@@ -394,6 +492,13 @@ func TestLimitStringBytesReadLimitedAndBinaryDetection(t *testing.T) {
 	if isBinaryData(nil) {
 		t.Fatal("isBinaryData(nil) = true, want false")
 	}
+}
+
+func collapseRepeatedSlashes(s string) string {
+	for strings.Contains(s, "//") {
+		s = strings.ReplaceAll(s, "//", "/")
+	}
+	return s
 }
 
 func sortStringsCopy(in []string) []string {

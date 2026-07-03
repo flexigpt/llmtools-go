@@ -31,6 +31,11 @@ func TestFindReposFindsNestedAndBareRepositories(t *testing.T) {
 	tool := newTestGitTool(t, base)
 	ctx := t.Context()
 
+	wantRoot := canonForPolicyExpectations(base)
+	wantWorkRepo := canonForPolicyExpectations(workRepoAbs)
+	wantNestedRepo := canonForPolicyExpectations(nestedRepoAbs)
+	wantBareRepo := canonForPolicyExpectations(bareRepoAbs)
+
 	withBare, err := tool.FindRepos(ctx, FindReposArgs{
 		RootPath:       ".",
 		IncludeBare:    new(true),
@@ -41,6 +46,10 @@ func TestFindReposFindsNestedAndBareRepositories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindRepos(includeBare=true) error = %v", err)
 	}
+	assertSamePath(t, withBare.RootPath, wantRoot)
+	if !withBare.IncludeBare {
+		t.Fatal("FindRepos(includeBare=true).IncludeBare = false, want true")
+	}
 	if withBare.Count != 3 || len(withBare.Repos) != 3 {
 		t.Fatalf("FindRepos(includeBare=true).Repos = %#v, want 3 repos", withBare.Repos)
 	}
@@ -48,13 +57,59 @@ func TestFindReposFindsNestedAndBareRepositories(t *testing.T) {
 	if !reflect.DeepEqual(paths, sortStringsCopy(paths)) {
 		t.Fatalf("FindRepos(includeBare=true).Repos not sorted by path: %#v", withBare.Repos)
 	}
+
+	wantRepos := map[string]FoundRepoInfo{
+		normalizePathForCompare(wantBareRepo): {
+			RepoPath: wantBareRepo,
+			GitDir:   wantBareRepo,
+			Bare:     true,
+		},
+		normalizePathForCompare(wantNestedRepo): {
+			RepoPath: wantNestedRepo,
+			GitDir:   filepath.Join(wantNestedRepo, ".git"),
+			Bare:     false,
+		},
+		normalizePathForCompare(wantWorkRepo): {
+			RepoPath: wantWorkRepo,
+			GitDir:   filepath.Join(wantWorkRepo, ".git"),
+			Bare:     false,
+		},
+	}
+
 	var bareSeen bool
 	for _, repo := range withBare.Repos {
-		if repo.RepoPath == bareRepoAbs {
+		key := normalizePathForCompare(repo.RepoPath)
+		want, ok := wantRepos[key]
+		if !ok {
+			t.Fatalf("FindRepos(includeBare=true) unexpected repo: %#v", repo)
+		}
+		assertSamePath(t, repo.RepoPath, want.RepoPath)
+		assertSamePath(t, repo.GitDir, want.GitDir)
+		if repo.Bare != want.Bare {
+			t.Fatalf("FindRepos(includeBare=true) bare flag for %q = %v, want %v", repo.RepoPath, repo.Bare, want.Bare)
+		}
+		if repo.HeadHash != "" {
+			t.Fatalf(
+				"FindRepos(includeBare=true) head hash for %q = %q, want empty unborn head",
+				repo.RepoPath,
+				repo.HeadHash,
+			)
+		}
+		if repo.Branch != "" {
+			t.Fatalf(
+				"FindRepos(includeBare=true) branch for %q = %q, want empty unborn head",
+				repo.RepoPath,
+				repo.Branch,
+			)
+		}
+		if repo.DetachedHead {
+			t.Fatalf("FindRepos(includeBare=true) detached flag for %q = true, want false", repo.RepoPath)
+		}
+		if !repo.UnbornHead {
+			t.Fatalf("FindRepos(includeBare=true) unborn flag for %q = false, want true", repo.RepoPath)
+		}
+		if key == normalizePathForCompare(wantBareRepo) {
 			bareSeen = true
-			if !repo.Bare {
-				t.Fatalf("FindRepos(includeBare=true) bare repo = %#v, want bare", repo)
-			}
 		}
 	}
 	if !bareSeen {
@@ -71,12 +126,19 @@ func TestFindReposFindsNestedAndBareRepositories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindRepos(includeBare=false) error = %v", err)
 	}
+	assertSamePath(t, withoutBare.RootPath, wantRoot)
+	if withoutBare.IncludeBare {
+		t.Fatal("FindRepos(includeBare=false).IncludeBare = true, want false")
+	}
 	if withoutBare.Count != 2 || len(withoutBare.Repos) != 2 {
 		t.Fatalf("FindRepos(includeBare=false).Repos = %#v, want 2 repos", withoutBare.Repos)
 	}
 	for _, repo := range withoutBare.Repos {
 		if repo.Bare {
 			t.Fatalf("FindRepos(includeBare=false) unexpectedly returned bare repo: %#v", repo)
+		}
+		if normalizePathForCompare(repo.RepoPath) == normalizePathForCompare(wantBareRepo) {
+			t.Fatalf("FindRepos(includeBare=false) returned bare repo path: %#v", repo)
 		}
 	}
 }
@@ -107,6 +169,10 @@ func TestFindReposTruncatesByMaxRepos(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("FindRepos(maxRepos=1) error = %v", err)
+	}
+	assertSamePath(t, out.RootPath, canonForPolicyExpectations(base))
+	if out.IncludeBare {
+		t.Fatal("FindRepos(maxRepos=1).IncludeBare = true, want false")
 	}
 	if !out.Truncated {
 		t.Fatal("FindRepos(maxRepos=1).Truncated = false, want true")

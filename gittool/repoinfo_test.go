@@ -2,8 +2,10 @@ package gittool
 
 import (
 	"path/filepath"
+	"runtime"
 	"testing"
 
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 )
@@ -36,14 +38,13 @@ func TestRepoInfoReportsRepositoryMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RepoInfo() error = %v", err)
 	}
-	if out.RepoPath != repoAbs {
-		t.Fatalf("RepoInfo().RepoPath = %q, want %q", out.RepoPath, repoAbs)
-	}
-	if out.GitDir != filepath.Join(repoAbs, ".git") {
-		t.Fatalf("RepoInfo().GitDir = %q, want %q", out.GitDir, filepath.Join(repoAbs, ".git"))
-	}
+	assertSamePath(t, out.RepoPath, repoAbs)
+	assertSamePath(t, out.GitDir, filepath.Join(repoAbs, ".git"))
 	if out.Bare {
 		t.Fatal("RepoInfo().Bare = true, want false")
+	}
+	if out.UnbornHead {
+		t.Fatal("RepoInfo().UnbornHead = true, want false")
 	}
 	if out.Branch != baseBranch {
 		t.Fatalf("RepoInfo().Branch = %q, want %q", out.Branch, baseBranch)
@@ -90,6 +91,7 @@ func TestRepoInfoDetectsDetachedAndBareRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RepoInfo(detached) error = %v", err)
 	}
+	assertSamePath(t, detachedOut.RepoPath, repoAbs)
 	if !detachedOut.DetachedHead {
 		t.Fatal("RepoInfo(detached).DetachedHead = false, want true")
 	}
@@ -99,15 +101,37 @@ func TestRepoInfoDetectsDetachedAndBareRepository(t *testing.T) {
 	if detachedOut.HeadHash != commitHash.String() {
 		t.Fatalf("RepoInfo(detached).HeadHash = %q, want %q", detachedOut.HeadHash, commitHash.String())
 	}
+	if detachedOut.UnbornHead {
+		t.Fatal("RepoInfo(detached).UnbornHead = true, want false")
+	}
 
 	bareOut, err := tool.RepoInfo(ctx, RepoInfoArgs{RepoPath: filepath.FromSlash(testBareRepoDirName)})
 	if err != nil {
 		t.Fatalf("RepoInfo(bare) error = %v", err)
 	}
+	assertSamePath(t, bareOut.RepoPath, bareAbs)
 	if !bareOut.Bare {
 		t.Fatal("RepoInfo(bare).Bare = false, want true")
 	}
-	if bareOut.GitDir != bareAbs {
-		t.Fatalf("RepoInfo(bare).GitDir = %q, want %q", bareOut.GitDir, bareAbs)
+	if bareOut.Branch != "" {
+		t.Fatalf("RepoInfo(bare).Branch = %q, want empty", bareOut.Branch)
+	}
+	if bareOut.DetachedHead {
+		t.Fatal("RepoInfo(bare).DetachedHead = true, want false")
+	}
+	if !bareOut.UnbornHead {
+		t.Fatal("RepoInfo(bare).UnbornHead = false, want true")
+	}
+	assertSamePath(t, bareOut.GitDir, bareAbs)
+}
+
+func TestNormalizePathForCompare(t *testing.T) {
+	got := normalizePathForCompare(`A\B//./C/../D`)
+	want := "A/B/D"
+	if runtime.GOOS == toolutil.GOOSWindows {
+		want = "a/b/d"
+	}
+	if got != want {
+		t.Fatalf("normalizePathForCompare() = %q, want %q", got, want)
 	}
 }
