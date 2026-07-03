@@ -14,6 +14,8 @@ Go-native, cross-platform tools for common local tasks, plus a small registry th
   - [Execute tools](#execute-tools)
   - [Text processing tools](#text-processing-tools)
   - [Image tools](#image-tools)
+  - [Git tools](#git-tools)
+  - [Web fetching tools](#web-fetching-tools)
 - [Package overview](#package-overview)
 - [Registry](#registry)
 - [Tool outputs](#tool-outputs)
@@ -102,6 +104,19 @@ Grouped under `imagetool`.
 
 - `readimage`: read intrinsic metadata and optionally include base64 content.
 
+### Git tools
+
+- `gittool` provides pure-Go local Git repository inspection and editing.
+- Read-oriented tools include `gitstatus`, `gitdiff`, `gitlog`, `gitshow`, `gitbranch`, `gittag`, `gitchangedfiles`, `gitlisttree`, `gitreadblob`, `gitfindrepos`, `gitblame`, `gitfilehistory`, `gitrepoinfo`, and `gitgrep`.
+- Write-oriented tools include `gitadd`, `gitreset`, `gitcommit`, `gitinit`, `gitcreatebranch`, `gitcheckout`, `gitcreatetag`, and `gitdeletetag`.
+
+### Web fetching tools
+
+- `webtool` provides `fetchurl` for HTTP and HTTPS URLs.
+- In `auto` mode, HTML, text, and PDF responses return compact text, while binary responses return `image` or `file` outputs.
+- `fetchurl` also supports `encoding=text` and `encoding=binary`, `startIndex` for truncated text continuation, and `raw=true` for decoded text without Markdown extraction.
+- By default, localhost, private, link-local, multicast, and reserved addresses are blocked and redirects are revalidated.
+
 ## Package overview
 
 - `llmtools`: registry and tool registration helpers.
@@ -110,6 +125,8 @@ Grouped under `imagetool`.
 - `exectool`: shell command execution and script execution.
 - `texttool`: safe, deterministic line-based text editing and unified-diff patching tools.
 - `imagetool`: image tools.
+- `gittool`: pure-Go local Git repository tools for reading, editing, and history inspection.
+- `webtool`: HTTP/HTTPS fetching with compact text extraction and binary/file outputs.
 
 ## Registry
 
@@ -120,6 +137,7 @@ The registry provides:
 - per-registry default call timeout via `WithDefaultCallTimeout`
 - per-call timeout override via `llmtools.WithCallTimeout(...)`
 - panic-to-error recovery around tool execution
+- builtin registration for filesystem, image, execute, git, text, and web fetch tools via `NewBuiltinRegistry()`
 
 ## Tool outputs
 
