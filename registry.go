@@ -12,6 +12,7 @@ import (
 
 	"github.com/flexigpt/llmtools-go/exectool"
 	"github.com/flexigpt/llmtools-go/fstool"
+	"github.com/flexigpt/llmtools-go/gittool"
 	"github.com/flexigpt/llmtools-go/imagetool"
 	"github.com/flexigpt/llmtools-go/internal/jsonutil"
 	"github.com/flexigpt/llmtools-go/internal/logutil"
@@ -134,6 +135,57 @@ func RegisterBuiltins(r *Registry) error {
 		return err
 	}
 	if err := RegisterTypedAsTextTool(r, et.RunScriptTool(), et.RunScript); err != nil {
+		return err
+	}
+
+	gt, err := gittool.NewGitTool()
+	if err != nil {
+		return err
+	}
+
+	if err := RegisterTypedAsTextTool(r, gt.StatusTool(), gt.Status); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.DiffTool(), gt.Diff); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.LogTool(), gt.Log); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.ShowTool(), gt.Show); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.BranchesTool(), gt.Branches); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.TagsTool(), gt.Tags); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.CreateTagTool(), gt.CreateTag); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.DeleteTagTool(), gt.DeleteTag); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.AddTool(), gt.Add); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.ResetTool(), gt.Reset); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.CommitTool(), gt.Commit); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.CreateBranchTool(), gt.CreateBranch); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.CheckoutTool(), gt.Checkout); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.InitTool(), gt.Init); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, gt.BlameTool(), gt.Blame); err != nil {
 		return err
 	}
 
