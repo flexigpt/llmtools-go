@@ -1,9 +1,79 @@
 package gittool
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestAddRejectsSymlinkTraversalWhenSupported(t *testing.T) {
+	base := t.TempDir()
+	repoAbs := filepath.Join(base, testRepoDirName)
+	repoRel := filepath.FromSlash(testRepoDirName)
+
+	repo := mustInitRepo(t, repoAbs, false)
+	mustWriteFile(t, repoAbs, testFileName, testFileContent)
+	_ = mustCommitAll(t, repo, testCommitMessage)
+	mustWriteFile(t, repoAbs, "target.txt", "target\n")
+	if err := os.Symlink("target.txt", filepath.Join(repoAbs, "link.txt")); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	tool, err := NewGitTool(WithWorkBaseDir(base), WithAllowedRoots([]string{base}), WithBlockSymlinks(true))
+	if err != nil {
+		t.Fatalf("NewGitTool() error = %v", err)
+	}
+
+	_, err = tool.Add(t.Context(), AddArgs{RepoPath: repoRel, Paths: []string{"link.txt"}})
+	if err == nil {
+		t.Fatal("Add(symlink path with blocking) error = nil, want error")
+	}
+}
+
+func TestCommitUsesFallbackAuthorWhenConfigIsEmpty(t *testing.T) {
+	base := t.TempDir()
+	repoAbs := filepath.Join(base, testRepoDirName)
+	repoRel := filepath.FromSlash(testRepoDirName)
+
+	repo := mustInitRepo(t, repoAbs, false)
+	mustWriteFile(t, repoAbs, testFileName, testFileContent)
+	_ = mustCommitAll(t, repo, "initial commit")
+	mustWriteFile(t, repoAbs, testFileName, testModifiedFileContents)
+
+	tool, err := NewGitTool(
+		WithWorkBaseDir(base),
+		WithAllowedRoots([]string{base}),
+		WithDefaultAuthor("Fallback Name", "fallback@example.invalid"),
+	)
+	if err != nil {
+		t.Fatalf("NewGitTool() error = %v", err)
+	}
+
+	if _, err := tool.Add(t.Context(), AddArgs{RepoPath: repoRel, Paths: []string{testFileName}}); err != nil {
+		t.Fatalf("Add(before fallback-author commit) error = %v", err)
+	}
+
+	out, err := tool.Commit(t.Context(), CommitArgs{
+		RepoPath: repoRel,
+		Message:  "second commit",
+	})
+	if err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	if out.AuthorName != "Fallback Name" || out.AuthorEmail != "fallback@example.invalid" {
+		t.Fatalf("Commit().author = (%q, %q), want fallback author", out.AuthorName, out.AuthorEmail)
+	}
+	if out.All {
+		t.Fatal("Commit().All = true, want false")
+	}
+	if out.Hash == "" || out.ShortHash == "" {
+		t.Fatalf("Commit().hashes = (%q, %q), want populated hashes", out.Hash, out.ShortHash)
+	}
+	if !strings.HasPrefix(out.Hash, out.ShortHash) {
+		t.Fatalf("Commit().ShortHash = %q, want prefix of %q", out.ShortHash, out.Hash)
+	}
+}
 
 func TestAddStagesExplicitPathsAndAll(t *testing.T) {
 	base := t.TempDir()

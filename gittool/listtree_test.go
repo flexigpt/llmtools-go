@@ -6,6 +6,51 @@ import (
 	"testing"
 )
 
+func TestListTreeSubtreeAndDirectoryFiltering(t *testing.T) {
+	base := t.TempDir()
+	repoAbs := filepath.Join(base, testRepoDirName)
+	repoRel := filepath.FromSlash(testRepoDirName)
+
+	repo := mustInitRepo(t, repoAbs, false)
+	mustWriteFile(t, repoAbs, testFileName, testFileContent)
+	mustWriteFile(t, repoAbs, filepath.FromSlash("dir/sub.txt"), "sub file\n")
+	_ = mustCommitAll(t, repo, "tree fixtures")
+
+	tool := newTestGitTool(t, base)
+	ctx := t.Context()
+
+	noDirs, err := tool.ListTree(ctx, ListTreeArgs{
+		RepoPath:    repoRel,
+		Path:        ".",
+		Recursive:   new(false),
+		IncludeDirs: false,
+	})
+	if err != nil {
+		t.Fatalf("ListTree(root non-recursive, no dirs) error = %v", err)
+	}
+	if len(noDirs.Entries) != 1 {
+		t.Fatalf("ListTree(root non-recursive, no dirs).Entries len = %d, want 1", len(noDirs.Entries))
+	}
+	if noDirs.Entries[0].Path != testFileName || noDirs.Entries[0].Kind != TreeModeKindBlob {
+		t.Fatalf("ListTree(root non-recursive, no dirs)[0] = %#v, want root blob only", noDirs.Entries[0])
+	}
+
+	subtree, err := tool.ListTree(ctx, ListTreeArgs{
+		RepoPath:  repoRel,
+		Path:      "dir",
+		Recursive: new(false),
+	})
+	if err != nil {
+		t.Fatalf("ListTree(subtree) error = %v", err)
+	}
+	if len(subtree.Entries) != 1 {
+		t.Fatalf("ListTree(subtree).Entries len = %d, want 1", len(subtree.Entries))
+	}
+	if subtree.Entries[0].Path != "dir/sub.txt" || subtree.Entries[0].Kind != TreeModeKindBlob {
+		t.Fatalf("ListTree(subtree)[0] = %#v, want dir/sub.txt blob", subtree.Entries[0])
+	}
+}
+
 func TestListTreeRecursiveAndNonRecursive(t *testing.T) {
 	base := t.TempDir()
 	repoAbs := filepath.Join(base, testRepoDirName)

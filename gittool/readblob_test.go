@@ -6,6 +6,28 @@ import (
 	"testing"
 )
 
+func TestReadBlobRejectsInvalidEncoding(t *testing.T) {
+	base := t.TempDir()
+	repoAbs := filepath.Join(base, testRepoDirName)
+	repoRel := filepath.FromSlash(testRepoDirName)
+
+	repo := mustInitRepo(t, repoAbs, false)
+	mustWriteFile(t, repoAbs, testFileName, testFileContent)
+	_ = mustCommitAll(t, repo, "blob fixtures")
+
+	tool := newTestGitTool(t, base)
+	ctx := t.Context()
+
+	_, err := tool.ReadBlob(ctx, ReadBlobArgs{
+		RepoPath: repoRel,
+		Path:     testFileName,
+		Encoding: BlobEncoding("bogus"),
+	})
+	if err == nil {
+		t.Fatal("ReadBlob(invalid encoding) error = nil, want error")
+	}
+}
+
 func TestReadBlobHandlesTextBinaryAndTruncation(t *testing.T) {
 	base := t.TempDir()
 	repoAbs := filepath.Join(base, testRepoDirName)

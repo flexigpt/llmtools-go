@@ -6,6 +6,40 @@ import (
 	"time"
 )
 
+func TestLogDefaultCountAndInvalidRevision(t *testing.T) {
+	base := t.TempDir()
+	repoAbs := filepath.Join(base, testRepoDirName)
+	repoRel := filepath.FromSlash(testRepoDirName)
+
+	repo := mustInitRepo(t, repoAbs, false)
+	mustWriteFile(t, repoAbs, testFileName, "one\n")
+	_ = mustCommitAll(t, repo, "first commit")
+	mustWriteFile(t, repoAbs, testFileName, "two\n")
+	_ = mustCommitAll(t, repo, "second commit")
+
+	tool := newTestGitTool(t, base)
+	ctx := t.Context()
+
+	out, err := tool.Log(ctx, LogArgs{RepoPath: repoRel, MaxCount: 0})
+	if err != nil {
+		t.Fatalf("Log(maxCount=0) error = %v", err)
+	}
+	if out.Revision != revisionHead {
+		t.Fatalf("Log(maxCount=0).Revision = %q, want %q", out.Revision, revisionHead)
+	}
+	if out.MaxCount != defaultLogMaxCount {
+		t.Fatalf("Log(maxCount=0).MaxCount = %d, want %d", out.MaxCount, defaultLogMaxCount)
+	}
+	if len(out.Commits) != 2 {
+		t.Fatalf("Log(maxCount=0).Commits len = %d, want 2", len(out.Commits))
+	}
+
+	_, err = tool.Log(ctx, LogArgs{RepoPath: repoRel, Revision: "-bad"})
+	if err == nil {
+		t.Fatal("Log(invalid revision) error = nil, want error")
+	}
+}
+
 func TestLogFiltersByCountAndTimeBounds(t *testing.T) {
 	base := t.TempDir()
 	repoAbs := filepath.Join(base, testRepoDirName)

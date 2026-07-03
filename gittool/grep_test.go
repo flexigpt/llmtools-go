@@ -5,6 +5,42 @@ import (
 	"testing"
 )
 
+func TestGrepTruncatesByMaxFiles(t *testing.T) {
+	base := t.TempDir()
+	repoAbs := filepath.Join(base, testRepoDirName)
+	repoRel := filepath.FromSlash(testRepoDirName)
+
+	repo := mustInitRepo(t, repoAbs, false)
+	mustWriteFile(t, repoAbs, "a.txt", "alpha one\n")
+	mustWriteFile(t, repoAbs, "b.txt", "alpha two\n")
+	_ = mustCommitAll(t, repo, "grep fixtures")
+
+	tool := newTestGitTool(t, base)
+	ctx := t.Context()
+
+	out, err := tool.Grep(ctx, GrepArgs{
+		RepoPath:   repoRel,
+		Pattern:    "alpha",
+		MaxFiles:   1,
+		MaxMatches: 10,
+	})
+	if err != nil {
+		t.Fatalf("Grep(maxFiles=1) error = %v", err)
+	}
+	if !out.Truncated || !out.OutputMeta.Truncated {
+		t.Fatalf("Grep(maxFiles=1).Truncated = (%v, %v), want true", out.Truncated, out.OutputMeta.Truncated)
+	}
+	if out.FilesVisited != 2 {
+		t.Fatalf("Grep(maxFiles=1).FilesVisited = %d, want 2", out.FilesVisited)
+	}
+	if out.Count != 1 || len(out.Matches) != 1 {
+		t.Fatalf("Grep(maxFiles=1).Matches = %#v, want 1 match", out.Matches)
+	}
+	if out.Matches[0].Path != "a.txt" {
+		t.Fatalf("Grep(maxFiles=1).Matches[0].Path = %q, want %q", out.Matches[0].Path, "a.txt")
+	}
+}
+
 func TestGrepMatchesTextIgnoresBinaryAndTruncates(t *testing.T) {
 	base := t.TempDir()
 	repoAbs := filepath.Join(base, testRepoDirName)

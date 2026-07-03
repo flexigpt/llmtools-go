@@ -7,6 +7,53 @@ import (
 	"testing"
 )
 
+func TestFindReposHonorsDepthAndVisitedLimits(t *testing.T) {
+	base := t.TempDir()
+	rootRepo := mustInitRepo(t, base, false)
+	_ = rootRepo
+	deepRepoAbs := filepath.Join(base, "nested", "repo")
+	_ = mustInitRepo(t, deepRepoAbs, false)
+
+	tool := newTestGitTool(t, base)
+	ctx := t.Context()
+
+	depthLimited, err := tool.FindRepos(ctx, FindReposArgs{
+		RootPath:       ".",
+		IncludeBare:    new(false),
+		MaxDepth:       1,
+		MaxRepos:       10,
+		MaxVisitedDirs: 100,
+	})
+	if err != nil {
+		t.Fatalf("FindRepos(maxDepth=1) error = %v", err)
+	}
+	assertSamePath(t, depthLimited.RootPath, base)
+	if depthLimited.Count != 1 || len(depthLimited.Repos) != 1 {
+		t.Fatalf("FindRepos(maxDepth=1.Repos = %#v, want only the root repository", depthLimited.Repos)
+	}
+	if depthLimited.SkippedByDepth == 0 {
+		t.Fatal("FindRepos(maxDepth=1).SkippedByDepth = 0, want skipped nested directories")
+	}
+	assertSamePath(t, depthLimited.Repos[0].RepoPath, base)
+
+	visitedLimited, err := tool.FindRepos(ctx, FindReposArgs{
+		RootPath:       ".",
+		IncludeBare:    new(false),
+		MaxDepth:       5,
+		MaxRepos:       10,
+		MaxVisitedDirs: 1,
+	})
+	if err != nil {
+		t.Fatalf("FindRepos(maxVisitedDirs=1) error = %v", err)
+	}
+	if !visitedLimited.Truncated {
+		t.Fatal("FindRepos(maxVisitedDirs=1).Truncated = false, want true")
+	}
+	if visitedLimited.Count != 1 || len(visitedLimited.Repos) != 1 {
+		t.Fatalf("FindRepos(maxVisitedDirs=1).Repos = %#v, want only the root repository", visitedLimited.Repos)
+	}
+}
+
 func TestFindReposFindsNestedAndBareRepositories(t *testing.T) {
 	base := t.TempDir()
 

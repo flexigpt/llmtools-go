@@ -93,6 +93,34 @@ func TestDiffWorkingStagedAndRefs(t *testing.T) {
 	}
 }
 
+func TestDiffDefaultsUnknownKind(t *testing.T) {
+	base := t.TempDir()
+	repoAbs := filepath.Join(base, testRepoDirName)
+	repoRel := filepath.FromSlash(testRepoDirName)
+
+	repo := mustInitRepo(t, repoAbs, false)
+	mustWriteFile(t, repoAbs, testFileName, testFileContent)
+	_ = mustCommitAll(t, repo, "diff fixtures")
+	mustWriteFile(t, repoAbs, testFileName, testModifiedFileContents)
+
+	tool := newTestGitTool(t, base)
+	ctx := t.Context()
+
+	out, err := tool.Diff(ctx, DiffArgs{
+		RepoPath: repoRel,
+		Kind:     DiffKind("unexpected"),
+	})
+	if err != nil {
+		t.Fatalf("Diff(default kind) error = %v", err)
+	}
+	if out.Kind != DiffKindWorking {
+		t.Fatalf("Diff(default kind).Kind = %q, want %q", out.Kind, DiffKindWorking)
+	}
+	if !strings.Contains(out.Diff, "diff --git a/"+testFileName+" b/"+testFileName) {
+		t.Fatalf("Diff(default kind).Diff = %q, want tracked file diff", out.Diff)
+	}
+}
+
 func TestDiffTruncatesByMaxBytes(t *testing.T) {
 	base := t.TempDir()
 	repoAbs := filepath.Join(base, testRepoDirName)

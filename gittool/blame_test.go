@@ -5,6 +5,36 @@ import (
 	"testing"
 )
 
+func TestBlameEmptyFileReturnsNoLines(t *testing.T) {
+	base := t.TempDir()
+	repoAbs := filepath.Join(base, testRepoDirName)
+	repoRel := filepath.FromSlash(testRepoDirName)
+
+	repo := mustInitRepo(t, repoAbs, false)
+	mustWriteFile(t, repoAbs, "empty.txt", "")
+	_ = mustCommitAll(t, repo, "empty file commit")
+
+	tool := newTestGitTool(t, base)
+	ctx := t.Context()
+
+	out, err := tool.Blame(ctx, BlameArgs{RepoPath: repoRel, Path: "empty.txt"})
+	if err != nil {
+		t.Fatalf("Blame(empty file) error = %v", err)
+	}
+	if len(out.Lines) != 0 {
+		t.Fatalf("Blame(empty file).Lines len = %d, want 0", len(out.Lines))
+	}
+	if out.StartLine != 1 || out.EndLine != 0 {
+		t.Fatalf("Blame(empty file) range = (%d, %d), want (1, 0)", out.StartLine, out.EndLine)
+	}
+	if out.Note != "best-effort first-parent blame" {
+		t.Fatalf("Blame(empty file).Note = %q, want best-effort note", out.Note)
+	}
+	if out.MaxCommits != 200 {
+		t.Fatalf("Blame(empty file).MaxCommits = %d, want 200", out.MaxCommits)
+	}
+}
+
 func TestBlameAssignsLinesAndRespectsRanges(t *testing.T) {
 	base := t.TempDir()
 	repoAbs := filepath.Join(base, testRepoDirName)

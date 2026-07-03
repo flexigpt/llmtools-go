@@ -6,6 +6,42 @@ import (
 	"testing"
 )
 
+func TestChangedFilesDefaultsKindAndTruncatesByMaxCount(t *testing.T) {
+	base := t.TempDir()
+	repoAbs := filepath.Join(base, testRepoDirName)
+	repoRel := filepath.FromSlash(testRepoDirName)
+
+	repo := mustInitRepo(t, repoAbs, false)
+	mustWriteFile(t, repoAbs, testFileName, testFileContent)
+	_ = mustCommitAll(t, repo, "changed-files fixtures")
+	mustWriteFile(t, repoAbs, testFileName, testModifiedFileContents)
+	mustWriteFile(t, repoAbs, testSecondFileName, testSecondFileContents)
+
+	tool := newTestGitTool(t, base)
+	ctx := t.Context()
+
+	out, err := tool.ChangedFiles(ctx, ChangedFilesArgs{
+		RepoPath: repoRel,
+		Kind:     DiffKind("unexpected"),
+		MaxCount: 1,
+	})
+	if err != nil {
+		t.Fatalf("ChangedFiles(default kind) error = %v", err)
+	}
+	if out.Kind != DiffKindWorking {
+		t.Fatalf("ChangedFiles(default kind).Kind = %q, want %q", out.Kind, DiffKindWorking)
+	}
+	if !out.Truncated {
+		t.Fatal("ChangedFiles(maxCount=1).Truncated = false, want true")
+	}
+	if out.Count != 1 || len(out.Files) != 1 {
+		t.Fatalf("ChangedFiles(maxCount=1).Files = %#v, want 1 entry", out.Files)
+	}
+	if out.Files[0].Path != testFileName || out.Files[0].Status != "modified" {
+		t.Fatalf("ChangedFiles(maxCount=1)[0] = %#v, want modified tracked file", out.Files[0])
+	}
+}
+
 func TestChangedFilesWorkingStagedAndRefs(t *testing.T) {
 	base := t.TempDir()
 	repoAbs := filepath.Join(base, testRepoDirName)
