@@ -242,30 +242,6 @@ func walkFileHistoryAllParents(
 	return nil
 }
 
-func commitTouchesPathFirstParent(c *object.Commit, p string) (touched bool, status string, err error) {
-	tree, err := c.Tree()
-	if err != nil {
-		return false, "", err
-	}
-	cur := treePathBlobIdentity(tree, p)
-	if c.NumParents() == 0 {
-		if cur.Exists {
-			return true, "added", nil
-		}
-		return false, "", nil
-	}
-	parent, err := c.Parent(0)
-	if err != nil {
-		return false, "", err
-	}
-	parentTree, err := parent.Tree()
-	if err != nil {
-		return false, "", err
-	}
-	prev := treePathBlobIdentity(parentTree, p)
-	return identitiesDiffer(cur, prev)
-}
-
 func commitTouchesPathAnyParent(c *object.Commit, p string) (touched bool, status string, err error) {
 	if c.NumParents() == 0 {
 		return commitTouchesPathFirstParent(c, p)
@@ -294,6 +270,30 @@ func commitTouchesPathAnyParent(c *object.Commit, p string) (touched bool, statu
 		}
 	}
 	return false, "", nil
+}
+
+func commitTouchesPathFirstParent(c *object.Commit, p string) (touched bool, status string, err error) {
+	tree, err := c.Tree()
+	if err != nil {
+		return false, "", err
+	}
+	cur := treePathBlobIdentity(tree, p)
+	if c.NumParents() == 0 {
+		if cur.Exists {
+			return true, "added", nil
+		}
+		return false, "", nil
+	}
+	parent, err := c.Parent(0)
+	if err != nil {
+		return false, "", err
+	}
+	parentTree, err := parent.Tree()
+	if err != nil {
+		return false, "", err
+	}
+	prev := treePathBlobIdentity(parentTree, p)
+	return identitiesDiffer(cur, prev)
 }
 
 func identitiesDiffer(cur, prev treePathIdentity) (touched bool, status string, err error) {

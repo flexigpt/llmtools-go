@@ -373,21 +373,6 @@ func inferContentType(headerCT, rawURL string, data []byte) string {
 	return string(ioutil.MIMEApplicationOctetStream)
 }
 
-func normalizeContentType(ct string) string {
-	ct = strings.TrimSpace(ct)
-	if ct == "" {
-		return ""
-	}
-	mt, _, err := mime.ParseMediaType(ct)
-	if err == nil && strings.TrimSpace(mt) != "" {
-		return strings.ToLower(strings.TrimSpace(mt))
-	}
-	if i := strings.Index(ct, ";"); i >= 0 {
-		ct = ct[:i]
-	}
-	return strings.ToLower(strings.TrimSpace(ct))
-}
-
 func isGenericBinaryContentType(ct string) bool {
 	ct = normalizeContentType(ct)
 	return ct == "" || strings.Contains(ct, "octet-stream") || strings.Contains(ct, "binary")
@@ -526,6 +511,21 @@ func extensionForContentType(contentType string) string {
 		return ""
 	}
 	return exts[0]
+}
+
+func normalizeContentType(ct string) string {
+	ct = strings.TrimSpace(ct)
+	if ct == "" {
+		return ""
+	}
+	mt, _, err := mime.ParseMediaType(ct)
+	if err == nil && strings.TrimSpace(mt) != "" {
+		return strings.ToLower(strings.TrimSpace(mt))
+	}
+	if i := strings.Index(ct, ";"); i >= 0 {
+		ct = ct[:i]
+	}
+	return strings.ToLower(strings.TrimSpace(ct))
 }
 
 func sanitizeFilename(name string) string {

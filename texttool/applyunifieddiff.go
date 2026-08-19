@@ -534,44 +534,6 @@ func validateApplyUnifiedDiffArgs(args ApplyUnifiedDiffArgs) error {
 	return nil
 }
 
-func newApplyUnifiedDiffDiagnostic(
-	level ApplyUnifiedDiffDiagnosticLevel,
-	code string,
-	format string,
-	args ...any,
-) ApplyUnifiedDiffDiagnostic {
-	message := format
-	if len(args) > 0 {
-		message = fmt.Sprintf(format, args...)
-	}
-	return ApplyUnifiedDiffDiagnostic{
-		Level:   level,
-		Code:    code,
-		Message: message,
-	}
-}
-
-func infoDiagnostic(code, format string, args ...any) ApplyUnifiedDiffDiagnostic {
-	return newApplyUnifiedDiffDiagnostic(ApplyUnifiedDiffDiagnosticLevelInfo, code, format, args...)
-}
-
-func warningDiagnostic(code, format string, args ...any) ApplyUnifiedDiffDiagnostic {
-	return newApplyUnifiedDiffDiagnostic(ApplyUnifiedDiffDiagnosticLevelWarning, code, format, args...)
-}
-
-func errorDiagnostic(code, format string, args ...any) ApplyUnifiedDiffDiagnostic {
-	return newApplyUnifiedDiffDiagnostic(ApplyUnifiedDiffDiagnosticLevelError, code, format, args...)
-}
-
-func cloneApplyUnifiedDiffDiagnostics(in []ApplyUnifiedDiffDiagnostic) []ApplyUnifiedDiffDiagnostic {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]ApplyUnifiedDiffDiagnostic, len(in))
-	copy(out, in)
-	return out
-}
-
 func aggregatePlannedStatus(
 	files []ApplyUnifiedDiffFileOut,
 	dryRun bool,
@@ -3788,24 +3750,6 @@ func estimateSingleEditStart(editStart, prefixLen int) int {
 	return max(0, editStart-prefixLen)
 }
 
-func hunkBlocks(h parsedHunk) (oldBlock []string, oldKinds []byte, newBlock []string) {
-	for _, line := range h.Lines {
-		switch line.Kind {
-		case '+':
-			newBlock = append(newBlock, line.Text)
-		case '-':
-			oldBlock = append(oldBlock, line.Text)
-			oldKinds = append(oldKinds, '-')
-		default:
-			oldBlock = append(oldBlock, line.Text)
-			oldKinds = append(oldKinds, ' ')
-			newBlock = append(newBlock, line.Text)
-		}
-	}
-
-	return oldBlock, oldKinds, newBlock
-}
-
 func hunkInsertHint(h parsedHunk, delta int) int {
 	if h.OldCount == 0 {
 		return h.OldStart + delta
@@ -4267,6 +4211,44 @@ func findBestScoredWindow(
 	}
 }
 
+func infoDiagnostic(code, format string, args ...any) ApplyUnifiedDiffDiagnostic {
+	return newApplyUnifiedDiffDiagnostic(ApplyUnifiedDiffDiagnosticLevelInfo, code, format, args...)
+}
+
+func warningDiagnostic(code, format string, args ...any) ApplyUnifiedDiffDiagnostic {
+	return newApplyUnifiedDiffDiagnostic(ApplyUnifiedDiffDiagnosticLevelWarning, code, format, args...)
+}
+
+func errorDiagnostic(code, format string, args ...any) ApplyUnifiedDiffDiagnostic {
+	return newApplyUnifiedDiffDiagnostic(ApplyUnifiedDiffDiagnosticLevelError, code, format, args...)
+}
+
+func newApplyUnifiedDiffDiagnostic(
+	level ApplyUnifiedDiffDiagnosticLevel,
+	code string,
+	format string,
+	args ...any,
+) ApplyUnifiedDiffDiagnostic {
+	message := format
+	if len(args) > 0 {
+		message = fmt.Sprintf(format, args...)
+	}
+	return ApplyUnifiedDiffDiagnostic{
+		Level:   level,
+		Code:    code,
+		Message: message,
+	}
+}
+
+func cloneApplyUnifiedDiffDiagnostics(in []ApplyUnifiedDiffDiagnostic) []ApplyUnifiedDiffDiagnostic {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ApplyUnifiedDiffDiagnostic, len(in))
+	copy(out, in)
+	return out
+}
+
 func fuzzyHintPenalty(start, hint int) float64 {
 	return float64(min(absInt(start-hint), hunkNearbyLineTolerance)) * 0.001
 }
@@ -4345,6 +4327,24 @@ func renderCreateFileContentFromHunks(hunks []parsedHunk) ([]string, bool) {
 	}
 
 	return desired, true
+}
+
+func hunkBlocks(h parsedHunk) (oldBlock []string, oldKinds []byte, newBlock []string) {
+	for _, line := range h.Lines {
+		switch line.Kind {
+		case '+':
+			newBlock = append(newBlock, line.Text)
+		case '-':
+			oldBlock = append(oldBlock, line.Text)
+			oldKinds = append(oldKinds, '-')
+		default:
+			oldBlock = append(oldBlock, line.Text)
+			oldKinds = append(oldKinds, ' ')
+			newBlock = append(newBlock, line.Text)
+		}
+	}
+
+	return oldBlock, oldKinds, newBlock
 }
 
 func lineEquals(a, b string, mode compareMode) bool {
@@ -4612,18 +4612,6 @@ func (h parsedHunk) hasOldContent() bool {
 	return false
 }
 
-func isDevNull(inPath string) bool {
-	return strings.TrimSpace(inPath) == pathDevNull
-}
-
-func isAbsoluteDiffPath(inPath string) bool {
-	inPath = strings.TrimSpace(inPath)
-	if inPath == "" || isDevNull(inPath) {
-		return false
-	}
-	return filepath.IsAbs(filepath.FromSlash(inPath))
-}
-
 func allPatchPathCandidatesAreRelative(paths []string) bool {
 	found := false
 	for _, candidate := range paths {
@@ -4638,6 +4626,18 @@ func allPatchPathCandidatesAreRelative(paths []string) bool {
 	return found
 }
 
+func isAbsoluteDiffPath(inPath string) bool {
+	inPath = strings.TrimSpace(inPath)
+	if inPath == "" || isDevNull(inPath) {
+		return false
+	}
+	return filepath.IsAbs(filepath.FromSlash(inPath))
+}
+
 func isNoNewlineAtEOFMarker(line string) bool {
 	return strings.HasPrefix(strings.TrimSpace(line), `\ No newline at end of file`)
+}
+
+func isDevNull(inPath string) bool {
+	return strings.TrimSpace(inPath) == pathDevNull
 }

@@ -39,250 +39,6 @@ const (
 	testModifiedFileContents = "alpha\nbeta modified\n"
 )
 
-func canonForPolicyExpectations(p string) string {
-	p = filepath.Clean(p)
-	p = evalTestSymlinksBestEffort(p)
-	if runtime.GOOS != toolutil.GOOSDarwin {
-		return p
-	}
-
-	aliases := map[string]string{
-		"/var":  "/private/var",
-		"/tmp":  "/private/tmp",
-		"/etc":  "/private/etc",
-		"/bin":  "/usr/bin",
-		"/sbin": "/usr/sbin",
-		"/lib":  "/usr/lib",
-	}
-	sep := string(os.PathSeparator)
-	for from, to := range aliases {
-		if p == from {
-			return to
-		}
-		if strings.HasPrefix(p, from+sep) {
-			return to + p[len(from):]
-		}
-	}
-	return p
-}
-
-func evalTestSymlinksBestEffort(p string) string {
-	p = filepath.Clean(p)
-	tried := p
-	remainder := ""
-
-	for range 64 {
-		if resolved, err := filepath.EvalSymlinks(tried); err == nil && resolved != "" {
-			resolved = filepath.Clean(resolved)
-			if remainder == "" {
-				return resolved
-			}
-			return filepath.Join(resolved, remainder)
-		}
-
-		parent := filepath.Dir(tried)
-		if parent == tried {
-			return p
-		}
-
-		base := filepath.Base(tried)
-		if remainder == "" {
-			remainder = base
-		} else {
-			remainder = filepath.Join(base, remainder)
-		}
-		tried = parent
-	}
-	return p
-}
-
-func normalizePathForCompare(pathValue string) string {
-	pathValue = strings.TrimSpace(pathValue)
-	if pathValue == "" {
-		return ""
-	}
-
-	pathValue = strings.ReplaceAll(pathValue, "\\", "/")
-	preserveUNC := runtime.GOOS == toolutil.GOOSWindows && strings.HasPrefix(pathValue, "//")
-	if preserveUNC {
-		pathValue = "//" + collapseRepeatedSlashes(strings.TrimLeft(pathValue[2:], "/"))
-	} else {
-		pathValue = collapseRepeatedSlashes(pathValue)
-	}
-
-	pathValue = path.Clean(pathValue)
-	if preserveUNC && strings.HasPrefix(pathValue, "/") && !strings.HasPrefix(pathValue, "//") {
-		pathValue = "/" + pathValue
-	}
-	if pathValue == "." {
-		pathValue = ""
-	}
-
-	if runtime.GOOS == toolutil.GOOSWindows {
-		pathValue = strings.ToLower(pathValue)
-	}
-
-	return pathValue
-}
-
-func assertSamePath(t *testing.T, got, want string) {
-	t.Helper()
-	gotNorm := normalizePathForCompare(canonForPolicyExpectations(got))
-	wantNorm := normalizePathForCompare(canonForPolicyExpectations(want))
-	if gotNorm != wantNorm {
-		t.Fatalf("path = %q, want %q", got, want)
-	}
-}
-
-func newTestGitTool(t *testing.T, base string) *GitTool {
-	t.Helper()
-
-	tool, err := NewGitTool(
-		WithWorkBaseDir(base),
-		WithAllowedRoots([]string{base}),
-	)
-	if err != nil {
-		t.Fatalf("NewGitTool() error = %v", err)
-	}
-	return tool
-}
-
-func mustWriteFile(t *testing.T, root, rel, contents string) {
-	t.Helper()
-
-	full := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
-		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(full), err)
-	}
-	if err := os.WriteFile(full, []byte(contents), 0o600); err != nil {
-		t.Fatalf("WriteFile(%q) error = %v", full, err)
-	}
-}
-
-func mustWriteBinaryFile(t *testing.T, root, rel string, contents []byte) {
-	t.Helper()
-
-	full := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
-		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(full), err)
-	}
-	if err := os.WriteFile(full, contents, 0o600); err != nil {
-		t.Fatalf("WriteFile(%q) error = %v", full, err)
-	}
-}
-
-func mustInitRepo(t *testing.T, pathIn string, bare bool) *git.Repository {
-	t.Helper()
-
-	repo, err := git.PlainInitWithOptions(pathIn, &git.PlainInitOptions{Bare: bare})
-	if err != nil {
-		t.Fatalf("PlainInitWithOptions(%q) error = %v", pathIn, err)
-	}
-	return repo
-}
-
-func mustCommitAll(t *testing.T, repo *git.Repository, message string) plumbing.Hash {
-	t.Helper()
-	return mustCommitAllAt(t, repo, message, time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC))
-}
-
-func mustCommitAllAt(t *testing.T, repo *git.Repository, message string, when time.Time) plumbing.Hash {
-	t.Helper()
-
-	wt, err := repo.Worktree()
-	if err != nil {
-		t.Fatalf("Worktree() error = %v", err)
-	}
-	if _, err := wt.Add("."); err != nil {
-		t.Fatalf("Add(\".\") error = %v", err)
-	}
-
-	hash, err := wt.Commit(message, &git.CommitOptions{
-		Author: &object.Signature{
-			Name:  testAuthorName,
-			Email: testAuthorEmail,
-			When:  when,
-		},
-		Committer: &object.Signature{
-			Name:  testAuthorName,
-			Email: testAuthorEmail,
-			When:  when,
-		},
-	})
-	if err != nil {
-		t.Fatalf("Commit(%q) error = %v", message, err)
-	}
-	return hash
-}
-
-func mustSetRepoUserConfig(t *testing.T, repo *git.Repository, name, email string) {
-	t.Helper()
-
-	cfg, err := repo.Config()
-	if err != nil {
-		t.Fatalf("Config() error = %v", err)
-	}
-	cfg.User.Name = name
-	cfg.User.Email = email
-	if err := repo.Storer.SetConfig(cfg); err != nil {
-		t.Fatalf("SetConfig() error = %v", err)
-	}
-}
-
-func mustCreateRemote(t *testing.T, repo *git.Repository, name, url string) *git.Remote {
-	t.Helper()
-
-	remote, err := repo.CreateRemote(&config.RemoteConfig{
-		Name: name,
-		URLs: []string{url},
-	})
-	if err != nil {
-		t.Fatalf("CreateRemote(%q, %q) error = %v", name, url, err)
-	}
-	return remote
-}
-
-func mustPushRefs(t *testing.T, ctx context.Context, remote *git.Remote, refSpecs []config.RefSpec) {
-	t.Helper()
-
-	if remote == nil {
-		t.Fatal("mustPushRefs() remote is nil")
-	}
-	if err := remote.PushContext(ctx, &git.PushOptions{RefSpecs: refSpecs}); err != nil {
-		t.Fatalf("PushContext() error = %v", err)
-	}
-}
-
-func mustFetchRefs(t *testing.T, ctx context.Context, remote *git.Remote, refSpecs []config.RefSpec) {
-	t.Helper()
-
-	if remote == nil {
-		t.Fatal("mustFetchRefs() remote is nil")
-	}
-	if err := remote.FetchContext(
-		ctx,
-		&git.FetchOptions{RefSpecs: refSpecs},
-	); err != nil &&
-		!errors.Is(err, git.NoErrAlreadyUpToDate) {
-		t.Fatalf("FetchContext() error = %v", err)
-	}
-}
-
-func mustCheckoutBranch(t *testing.T, repo *git.Repository, name string, create bool) {
-	t.Helper()
-
-	wt, err := repo.Worktree()
-	if err != nil {
-		t.Fatalf("Worktree() error = %v", err)
-	}
-	if err := wt.Checkout(&git.CheckoutOptions{
-		Branch: plumbing.NewBranchReferenceName(name),
-		Create: create,
-	}); err != nil {
-		t.Fatalf("Checkout(branch=%q, create=%v) error = %v", name, create, err)
-	}
-}
-
 func TestMustInitRepoAndCommit(t *testing.T) {
 	root := t.TempDir()
 	repo := mustInitRepo(t, root, false)
@@ -491,6 +247,250 @@ func TestLimitStringBytesReadLimitedAndBinaryDetection(t *testing.T) {
 	}
 	if isBinaryData(nil) {
 		t.Fatal("isBinaryData(nil) = true, want false")
+	}
+}
+
+func assertSamePath(t *testing.T, got, want string) {
+	t.Helper()
+	gotNorm := normalizePathForCompare(canonForPolicyExpectations(got))
+	wantNorm := normalizePathForCompare(canonForPolicyExpectations(want))
+	if gotNorm != wantNorm {
+		t.Fatalf("path = %q, want %q", got, want)
+	}
+}
+
+func normalizePathForCompare(pathValue string) string {
+	pathValue = strings.TrimSpace(pathValue)
+	if pathValue == "" {
+		return ""
+	}
+
+	pathValue = strings.ReplaceAll(pathValue, "\\", "/")
+	preserveUNC := runtime.GOOS == toolutil.GOOSWindows && strings.HasPrefix(pathValue, "//")
+	if preserveUNC {
+		pathValue = "//" + collapseRepeatedSlashes(strings.TrimLeft(pathValue[2:], "/"))
+	} else {
+		pathValue = collapseRepeatedSlashes(pathValue)
+	}
+
+	pathValue = path.Clean(pathValue)
+	if preserveUNC && strings.HasPrefix(pathValue, "/") && !strings.HasPrefix(pathValue, "//") {
+		pathValue = "/" + pathValue
+	}
+	if pathValue == "." {
+		pathValue = ""
+	}
+
+	if runtime.GOOS == toolutil.GOOSWindows {
+		pathValue = strings.ToLower(pathValue)
+	}
+
+	return pathValue
+}
+
+func newTestGitTool(t *testing.T, base string) *GitTool {
+	t.Helper()
+
+	tool, err := NewGitTool(
+		WithWorkBaseDir(base),
+		WithAllowedRoots([]string{base}),
+	)
+	if err != nil {
+		t.Fatalf("NewGitTool() error = %v", err)
+	}
+	return tool
+}
+
+func canonForPolicyExpectations(p string) string {
+	p = filepath.Clean(p)
+	p = evalTestSymlinksBestEffort(p)
+	if runtime.GOOS != toolutil.GOOSDarwin {
+		return p
+	}
+
+	aliases := map[string]string{
+		"/var":  "/private/var",
+		"/tmp":  "/private/tmp",
+		"/etc":  "/private/etc",
+		"/bin":  "/usr/bin",
+		"/sbin": "/usr/sbin",
+		"/lib":  "/usr/lib",
+	}
+	sep := string(os.PathSeparator)
+	for from, to := range aliases {
+		if p == from {
+			return to
+		}
+		if strings.HasPrefix(p, from+sep) {
+			return to + p[len(from):]
+		}
+	}
+	return p
+}
+
+func evalTestSymlinksBestEffort(p string) string {
+	p = filepath.Clean(p)
+	tried := p
+	remainder := ""
+
+	for range 64 {
+		if resolved, err := filepath.EvalSymlinks(tried); err == nil && resolved != "" {
+			resolved = filepath.Clean(resolved)
+			if remainder == "" {
+				return resolved
+			}
+			return filepath.Join(resolved, remainder)
+		}
+
+		parent := filepath.Dir(tried)
+		if parent == tried {
+			return p
+		}
+
+		base := filepath.Base(tried)
+		if remainder == "" {
+			remainder = base
+		} else {
+			remainder = filepath.Join(base, remainder)
+		}
+		tried = parent
+	}
+	return p
+}
+
+func mustWriteFile(t *testing.T, root, rel, contents string) {
+	t.Helper()
+
+	full := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(full), err)
+	}
+	if err := os.WriteFile(full, []byte(contents), 0o600); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", full, err)
+	}
+}
+
+func mustWriteBinaryFile(t *testing.T, root, rel string, contents []byte) {
+	t.Helper()
+
+	full := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(full), err)
+	}
+	if err := os.WriteFile(full, contents, 0o600); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", full, err)
+	}
+}
+
+func mustInitRepo(t *testing.T, pathIn string, bare bool) *git.Repository {
+	t.Helper()
+
+	repo, err := git.PlainInitWithOptions(pathIn, &git.PlainInitOptions{Bare: bare})
+	if err != nil {
+		t.Fatalf("PlainInitWithOptions(%q) error = %v", pathIn, err)
+	}
+	return repo
+}
+
+func mustCommitAll(t *testing.T, repo *git.Repository, message string) plumbing.Hash {
+	t.Helper()
+	return mustCommitAllAt(t, repo, message, time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC))
+}
+
+func mustCommitAllAt(t *testing.T, repo *git.Repository, message string, when time.Time) plumbing.Hash {
+	t.Helper()
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree() error = %v", err)
+	}
+	if _, err := wt.Add("."); err != nil {
+		t.Fatalf("Add(\".\") error = %v", err)
+	}
+
+	hash, err := wt.Commit(message, &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  testAuthorName,
+			Email: testAuthorEmail,
+			When:  when,
+		},
+		Committer: &object.Signature{
+			Name:  testAuthorName,
+			Email: testAuthorEmail,
+			When:  when,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Commit(%q) error = %v", message, err)
+	}
+	return hash
+}
+
+func mustSetRepoUserConfig(t *testing.T, repo *git.Repository, name, email string) {
+	t.Helper()
+
+	cfg, err := repo.Config()
+	if err != nil {
+		t.Fatalf("Config() error = %v", err)
+	}
+	cfg.User.Name = name
+	cfg.User.Email = email
+	if err := repo.Storer.SetConfig(cfg); err != nil {
+		t.Fatalf("SetConfig() error = %v", err)
+	}
+}
+
+func mustCreateRemote(t *testing.T, repo *git.Repository, name, url string) *git.Remote {
+	t.Helper()
+
+	remote, err := repo.CreateRemote(&config.RemoteConfig{
+		Name: name,
+		URLs: []string{url},
+	})
+	if err != nil {
+		t.Fatalf("CreateRemote(%q, %q) error = %v", name, url, err)
+	}
+	return remote
+}
+
+func mustPushRefs(t *testing.T, ctx context.Context, remote *git.Remote, refSpecs []config.RefSpec) {
+	t.Helper()
+
+	if remote == nil {
+		t.Fatal("mustPushRefs() remote is nil")
+	}
+	if err := remote.PushContext(ctx, &git.PushOptions{RefSpecs: refSpecs}); err != nil {
+		t.Fatalf("PushContext() error = %v", err)
+	}
+}
+
+func mustFetchRefs(t *testing.T, ctx context.Context, remote *git.Remote, refSpecs []config.RefSpec) {
+	t.Helper()
+
+	if remote == nil {
+		t.Fatal("mustFetchRefs() remote is nil")
+	}
+	if err := remote.FetchContext(
+		ctx,
+		&git.FetchOptions{RefSpecs: refSpecs},
+	); err != nil &&
+		!errors.Is(err, git.NoErrAlreadyUpToDate) {
+		t.Fatalf("FetchContext() error = %v", err)
+	}
+}
+
+func mustCheckoutBranch(t *testing.T, repo *git.Repository, name string, create bool) {
+	t.Helper()
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree() error = %v", err)
+	}
+	if err := wt.Checkout(&git.CheckoutOptions{
+		Branch: plumbing.NewBranchReferenceName(name),
+		Create: create,
+	}); err != nil {
+		t.Fatalf("Checkout(branch=%q, create=%v) error = %v", name, create, err)
 	}
 }
 

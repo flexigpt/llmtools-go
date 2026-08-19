@@ -85,6 +85,22 @@ func (gt *GitTool) snapshot() gitToolSnapshot {
 	}
 }
 
+func openWorktree(
+	ctx context.Context,
+	snap gitToolSnapshot,
+	repoPath string,
+) (*git.Repository, *git.Worktree, string, error) {
+	repo, abs, err := openRepository(ctx, snap, repoPath)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("open git worktree %q: %w", abs, err)
+	}
+	return repo, wt, abs, nil
+}
+
 func openRepository(ctx context.Context, snap gitToolSnapshot, repoPath string) (*git.Repository, string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, "", err
@@ -116,22 +132,6 @@ func openRepository(ctx context.Context, snap gitToolSnapshot, repoPath string) 
 	}
 
 	return repo, abs, nil
-}
-
-func openWorktree(
-	ctx context.Context,
-	snap gitToolSnapshot,
-	repoPath string,
-) (*git.Repository, *git.Worktree, string, error) {
-	repo, abs, err := openRepository(ctx, snap, repoPath)
-	if err != nil {
-		return nil, nil, "", err
-	}
-	wt, err := repo.Worktree()
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("open git worktree %q: %w", abs, err)
-	}
-	return repo, wt, abs, nil
 }
 
 func resolveCommit(repo *git.Repository, revision string) (*object.Commit, error) {
@@ -280,50 +280,6 @@ func validateTagPattern(pattern string) error {
 	return nil
 }
 
-func normalizeRepoRelativePath(p string) (string, error) {
-	trimmed := strings.TrimSpace(p)
-	if trimmed == "" {
-		return "", errors.New("path is empty")
-	}
-	if strings.ContainsRune(trimmed, '\x00') {
-		return "", errors.New("path contains NUL byte")
-	}
-	slashed := strings.ReplaceAll(trimmed, `\`, `/`)
-	if filepath.IsAbs(trimmed) ||
-		path.IsAbs(slashed) ||
-		strings.HasPrefix(slashed, "//") ||
-		hasWindowsVolumeName(slashed) {
-		return "", fmt.Errorf("path must be repository-relative: %q", p)
-	}
-
-	cleaned := path.Clean(slashed)
-	if cleaned == "." {
-		return ".", nil
-	}
-	if cleaned == ".." ||
-		strings.HasPrefix(cleaned, "../") ||
-		strings.Contains(cleaned, "/../") ||
-		strings.HasPrefix(cleaned, "//") ||
-		hasWindowsVolumeName(cleaned) {
-		return "", fmt.Errorf("path escapes repository root: %q", p)
-	}
-	if strings.HasPrefix(cleaned, "-") {
-		return "", fmt.Errorf("path %q is invalid: must not start with '-'", p)
-	}
-	return cleaned, nil
-}
-
-func hasWindowsVolumeName(p string) bool {
-	if len(p) < 2 {
-		return false
-	}
-	if p[1] != ':' {
-		return false
-	}
-	r := rune(p[0])
-	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
-}
-
 func normalizeRepoRelativePaths(paths []string, allowEmpty bool) ([]string, error) {
 	if len(paths) == 0 && allowEmpty {
 		return nil, nil
@@ -404,6 +360,17 @@ func headInfoDetailed(repo *git.Repository) (branch, hash string, detached, unbo
 	return "", hash, true, false
 }
 
+func ensureNoIndexConflicts(repo *git.Repository, wt *git.Worktree) error {
+	state, err := detectIndexState(repo, wt)
+	if err != nil {
+		return err
+	}
+	if state.HasConflicts {
+		return fmt.Errorf("repository has unresolved index conflicts: %s", strings.Join(state.ConflictPaths, ", "))
+	}
+	return nil
+}
+
 type IndexState struct {
 	Entries       int      `json:"entries"`
 	HasConflicts  bool     `json:"hasConflicts"`
@@ -438,17 +405,6 @@ func detectIndexState(repo *git.Repository, wt *git.Worktree) (IndexState, error
 	sort.Strings(state.ConflictPaths)
 	state.HasConflicts = len(state.ConflictPaths) > 0
 	return state, nil
-}
-
-func ensureNoIndexConflicts(repo *git.Repository, wt *git.Worktree) error {
-	state, err := detectIndexState(repo, wt)
-	if err != nil {
-		return err
-	}
-	if state.HasConflicts {
-		return fmt.Errorf("repository has unresolved index conflicts: %s", strings.Join(state.ConflictPaths, ", "))
-	}
-	return nil
 }
 
 func statusCodeIsConflict(code git.StatusCode) bool {
@@ -555,18 +511,6 @@ func sortedStrings(in []string) []string {
 	return out
 }
 
-func matchesRepoRelativePathFilter(p string, filters []string) bool {
-	if len(filters) == 0 {
-		return true
-	}
-	for _, f := range filters {
-		if f == "." || p == f || strings.HasPrefix(p, f+"/") {
-			return true
-		}
-	}
-	return false
-}
-
 func statusDiffPaths(st git.Status, kind DiffKind, filters []string) []string {
 	paths := make([]string, 0, len(st))
 	for p, fs := range st {
@@ -603,21 +547,16 @@ func filterObjectChangesByPaths(changes object.Changes, filters []string) object
 	return filtered
 }
 
-func objectChangePaths(change *object.Change) (from, to, display string) {
-	if change == nil {
-		return "", "", ""
+func matchesRepoRelativePathFilter(p string, filters []string) bool {
+	if len(filters) == 0 {
+		return true
 	}
-	if change.From.Name != "" {
-		from = change.From.Name
+	for _, f := range filters {
+		if f == "." || p == f || strings.HasPrefix(p, f+"/") {
+			return true
+		}
 	}
-	if change.To.Name != "" {
-		to = change.To.Name
-	}
-	display = to
-	if display == "" {
-		display = from
-	}
-	return from, to, display
+	return false
 }
 
 type treePathIdentity struct {
@@ -675,30 +614,6 @@ func treePathContent(tree *object.Tree, p string, maxBytes int64) (data []byte, 
 	return data, ok, err
 }
 
-func treePathContentLimited(
-	tree *object.Tree,
-	p string,
-	maxBytes int64,
-) (data []byte, ok, truncated bool, err error) {
-	if tree == nil {
-		return nil, false, false, nil
-	}
-	f, err := tree.File(p)
-	if err != nil {
-		return nil, false, false, nil
-	}
-	r, err := f.Reader()
-	if err != nil {
-		return nil, false, false, err
-	}
-	defer r.Close()
-	data, truncated, err = readLimited(r, maxBytes)
-	if err != nil {
-		return nil, false, false, err
-	}
-	return data, true, truncated, nil
-}
-
 func treePathBlobIdentity(tree *object.Tree, p string) treePathIdentity {
 	if tree == nil {
 		return treePathIdentity{}
@@ -735,22 +650,6 @@ func worktreePathContentLimited(
 	return data, true, truncated, nil
 }
 
-func readLimited(r io.Reader, maxBytes int64) (data []byte, ok bool, err error) {
-	if maxBytes <= 0 || maxBytes > hardBlobReadBytes {
-		maxBytes = hardBlobReadBytes
-	}
-	var b bytes.Buffer
-	n, err := io.CopyN(&b, r, maxBytes+1)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, false, err
-	}
-	data = b.Bytes()
-	if n > maxBytes || int64(len(data)) > maxBytes {
-		return data[:maxBytes], true, nil
-	}
-	return data, false, nil
-}
-
 func validateNoSymlinkTraversal(root, rel string) error {
 	if rel == "." {
 		return nil
@@ -783,6 +682,50 @@ func validateNoSymlinkTraversal(root, rel string) error {
 	return nil
 }
 
+func normalizeRepoRelativePath(p string) (string, error) {
+	trimmed := strings.TrimSpace(p)
+	if trimmed == "" {
+		return "", errors.New("path is empty")
+	}
+	if strings.ContainsRune(trimmed, '\x00') {
+		return "", errors.New("path contains NUL byte")
+	}
+	slashed := strings.ReplaceAll(trimmed, `\`, `/`)
+	if filepath.IsAbs(trimmed) ||
+		path.IsAbs(slashed) ||
+		strings.HasPrefix(slashed, "//") ||
+		hasWindowsVolumeName(slashed) {
+		return "", fmt.Errorf("path must be repository-relative: %q", p)
+	}
+
+	cleaned := path.Clean(slashed)
+	if cleaned == "." {
+		return ".", nil
+	}
+	if cleaned == ".." ||
+		strings.HasPrefix(cleaned, "../") ||
+		strings.Contains(cleaned, "/../") ||
+		strings.HasPrefix(cleaned, "//") ||
+		hasWindowsVolumeName(cleaned) {
+		return "", fmt.Errorf("path escapes repository root: %q", p)
+	}
+	if strings.HasPrefix(cleaned, "-") {
+		return "", fmt.Errorf("path %q is invalid: must not start with '-'", p)
+	}
+	return cleaned, nil
+}
+
+func hasWindowsVolumeName(p string) bool {
+	if len(p) < 2 {
+		return false
+	}
+	if p[1] != ':' {
+		return false
+	}
+	r := rune(p[0])
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+}
+
 func unifiedFileDiff(
 	p string,
 	oldData []byte,
@@ -804,6 +747,104 @@ func unifiedFileDiff(
 		newTruncated,
 		contextLines,
 	)
+}
+
+func treeChangesUnifiedDiff(
+	ctx context.Context,
+	baseTree *object.Tree,
+	targetTree *object.Tree,
+	changes object.Changes,
+	contextLines int,
+) (diffText string, omittedBinaryFiles, skippedLargeFiles int, err error) {
+	var b strings.Builder
+	for _, change := range changes {
+		if err := ctx.Err(); err != nil {
+			return "", 0, 0, err
+		}
+		oldPath, newPath, displayPath := objectChangePaths(change)
+		oldData, oldExists, oldTruncated, err := treePathContentLimited(baseTree, oldPath, hardBlobReadBytes)
+		if err != nil {
+			return "", 0, 0, err
+		}
+		newData, newExists, newTruncated, err := treePathContentLimited(targetTree, newPath, hardBlobReadBytes)
+		if err != nil {
+			return "", 0, 0, err
+		}
+		if oldPath == "" {
+			oldPath = displayPath
+		}
+		if newPath == "" {
+			newPath = displayPath
+		}
+		part, binaryOmitted, largeSkipped := unifiedFileDiffPaths(
+			oldPath, newPath, oldData, oldExists, oldTruncated, newData, newExists, newTruncated, contextLines,
+		)
+		if binaryOmitted {
+			omittedBinaryFiles++
+		}
+		if largeSkipped {
+			skippedLargeFiles++
+		}
+		b.WriteString(part)
+	}
+	return b.String(), omittedBinaryFiles, skippedLargeFiles, nil
+}
+
+func objectChangePaths(change *object.Change) (from, to, display string) {
+	if change == nil {
+		return "", "", ""
+	}
+	if change.From.Name != "" {
+		from = change.From.Name
+	}
+	if change.To.Name != "" {
+		to = change.To.Name
+	}
+	display = to
+	if display == "" {
+		display = from
+	}
+	return from, to, display
+}
+
+func treePathContentLimited(
+	tree *object.Tree,
+	p string,
+	maxBytes int64,
+) (data []byte, ok, truncated bool, err error) {
+	if tree == nil {
+		return nil, false, false, nil
+	}
+	f, err := tree.File(p)
+	if err != nil {
+		return nil, false, false, nil
+	}
+	r, err := f.Reader()
+	if err != nil {
+		return nil, false, false, err
+	}
+	defer r.Close()
+	data, truncated, err = readLimited(r, maxBytes)
+	if err != nil {
+		return nil, false, false, err
+	}
+	return data, true, truncated, nil
+}
+
+func readLimited(r io.Reader, maxBytes int64) (data []byte, ok bool, err error) {
+	if maxBytes <= 0 || maxBytes > hardBlobReadBytes {
+		maxBytes = hardBlobReadBytes
+	}
+	var b bytes.Buffer
+	n, err := io.CopyN(&b, r, maxBytes+1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, false, err
+	}
+	data = b.Bytes()
+	if n > maxBytes || int64(len(data)) > maxBytes {
+		return data[:maxBytes], true, nil
+	}
+	return data, false, nil
 }
 
 func unifiedFileDiffPaths(
@@ -899,47 +940,6 @@ func writeDiffHeader(b *strings.Builder, oldPath, newPath string) {
 	b.WriteString("\n")
 }
 
-func treeChangesUnifiedDiff(
-	ctx context.Context,
-	baseTree *object.Tree,
-	targetTree *object.Tree,
-	changes object.Changes,
-	contextLines int,
-) (diffText string, omittedBinaryFiles, skippedLargeFiles int, err error) {
-	var b strings.Builder
-	for _, change := range changes {
-		if err := ctx.Err(); err != nil {
-			return "", 0, 0, err
-		}
-		oldPath, newPath, displayPath := objectChangePaths(change)
-		oldData, oldExists, oldTruncated, err := treePathContentLimited(baseTree, oldPath, hardBlobReadBytes)
-		if err != nil {
-			return "", 0, 0, err
-		}
-		newData, newExists, newTruncated, err := treePathContentLimited(targetTree, newPath, hardBlobReadBytes)
-		if err != nil {
-			return "", 0, 0, err
-		}
-		if oldPath == "" {
-			oldPath = displayPath
-		}
-		if newPath == "" {
-			newPath = displayPath
-		}
-		part, binaryOmitted, largeSkipped := unifiedFileDiffPaths(
-			oldPath, newPath, oldData, oldExists, oldTruncated, newData, newExists, newTruncated, contextLines,
-		)
-		if binaryOmitted {
-			omittedBinaryFiles++
-		}
-		if largeSkipped {
-			skippedLargeFiles++
-		}
-		b.WriteString(part)
-	}
-	return b.String(), omittedBinaryFiles, skippedLargeFiles, nil
-}
-
 type diffRecord struct {
 	Text       string
 	HasNewline bool
@@ -950,31 +950,6 @@ type diffOp struct {
 	Line    diffRecord
 	OldLine int
 	NewLine int
-}
-
-func splitDiffRecords(s string) []diffRecord {
-	if s == "" {
-		return nil
-	}
-	out := make([]diffRecord, 0, strings.Count(s, "\n")+1)
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] != '\n' {
-			continue
-		}
-		out = append(out, diffRecord{
-			Text:       s[start:i],
-			HasNewline: true,
-		})
-		start = i + 1
-	}
-	if start < len(s) {
-		out = append(out, diffRecord{
-			Text:       s[start:],
-			HasNewline: false,
-		})
-	}
-	return out
 }
 
 func unifiedLineDiff(oldText, newText string, contextLines int) string {
@@ -1007,6 +982,31 @@ func unifiedLineDiff(oldText, newText string, contextLines int) string {
 		}
 	}
 	return b.String()
+}
+
+func splitDiffRecords(s string) []diffRecord {
+	if s == "" {
+		return nil
+	}
+	out := make([]diffRecord, 0, strings.Count(s, "\n")+1)
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\n' {
+			continue
+		}
+		out = append(out, diffRecord{
+			Text:       s[start:i],
+			HasNewline: true,
+		})
+		start = i + 1
+	}
+	if start < len(s) {
+		out = append(out, diffRecord{
+			Text:       s[start:],
+			HasNewline: false,
+		})
+	}
+	return out
 }
 
 func buildDiffOps(oldLines, newLines []diffRecord) []diffOp {

@@ -237,15 +237,6 @@ func newFetchTestServer(t *testing.T) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
-func requireSingleOutput(t *testing.T, outputs []spec.ToolOutputUnion) spec.ToolOutputUnion {
-	t.Helper()
-
-	if len(outputs) != 1 {
-		t.Fatalf("len(outputs) = %d, want 1; outputs = %#v", len(outputs), outputs)
-	}
-	return outputs[0]
-}
-
 func requireTextOutput(t *testing.T, outputs []spec.ToolOutputUnion) string {
 	t.Helper()
 
@@ -283,6 +274,15 @@ func requireFileOutput(t *testing.T, outputs []spec.ToolOutputUnion) *spec.ToolO
 		t.Fatalf("output.FileItem is nil; output = %#v", output)
 	}
 	return output.FileItem
+}
+
+func requireSingleOutput(t *testing.T, outputs []spec.ToolOutputUnion) spec.ToolOutputUnion {
+	t.Helper()
+
+	if len(outputs) != 1 {
+		t.Fatalf("len(outputs) = %d, want 1; outputs = %#v", len(outputs), outputs)
+	}
+	return outputs[0]
 }
 
 func requireDecodedBase64(t *testing.T, encoded string) []byte {
