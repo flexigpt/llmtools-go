@@ -1438,30 +1438,32 @@ func parseHunkHeader(line string) (parsedHunk, ApplyUnifiedDiffDiagnostic, bool)
 	}
 
 	if m := looseHunkHeaderRE.FindStringSubmatch(line); m != nil {
-		return parsedHunk{
-				Header:   line,
-				OldStart: atoiDefault(m[1], 0),
-				OldCount: atoiDefault(m[2], 1),
-				NewStart: atoiDefault(m[3], 0),
-				NewCount: atoiDefault(m[4], 1),
-			}, warningDiagnostic(
-				"non_standard_hunk_header",
-				"non-standard hunk header %q parsed with loose rules",
-				line,
-			), true
-	}
-
-	return parsedHunk{
+		p := parsedHunk{
 			Header:   line,
-			OldStart: 0,
-			OldCount: -1,
-			NewStart: 0,
-			NewCount: -1,
-		}, warningDiagnostic(
-			"malformed_hunk_header",
-			"malformed hunk header %q; line-number hints unavailable and body will be parsed until the next patch boundary",
+			OldStart: atoiDefault(m[1], 0),
+			OldCount: atoiDefault(m[2], 1),
+			NewStart: atoiDefault(m[3], 0),
+			NewCount: atoiDefault(m[4], 1),
+		}
+		return p, warningDiagnostic(
+			"non_standard_hunk_header",
+			"non-standard hunk header %q parsed with loose rules",
 			line,
 		), true
+	}
+
+	p := parsedHunk{
+		Header:   line,
+		OldStart: 0,
+		OldCount: -1,
+		NewStart: 0,
+		NewCount: -1,
+	}
+	return p, warningDiagnostic(
+		"malformed_hunk_header",
+		"malformed hunk header %q; line-number hints unavailable and body will be parsed until the next patch boundary",
+		line,
+	), true
 }
 
 func atoiDefault(s string, def int) int {
@@ -1726,7 +1728,8 @@ func planFilePatch(
 			infoDiagnostic(
 				"mode_change_only",
 				"file content already matches; file mode can be updated from %#o to %#o",
-				tf.Perm, targetPerm),
+				tf.Perm, targetPerm,
+			),
 		)
 		result.AlreadyAppliedHunks += result.AppliedHunks
 		result.AppliedHunks = 0
@@ -2039,7 +2042,8 @@ func resetUnwrittenAppliedHunks(file *ApplyUnifiedDiffFileOut, simulatedApplied 
 			warningDiagnostic(
 				"matched_but_not_written",
 				"%d hunk(s) matched in memory but were not written for this file",
-				simulatedApplied),
+				simulatedApplied,
+			),
 		)
 	}
 	file.AppliedHunks = 0
@@ -2306,7 +2310,8 @@ func resolvePatchTarget(
 						"diff_path_unresolved",
 						"diff path %q could not be resolved: %v",
 						path,
-						resolveErr),
+						resolveErr,
+					),
 				)
 				continue
 			}
@@ -2363,7 +2368,9 @@ func resolvePatchTarget(
 					warningDiagnostic(
 						"diff_path_unresolved",
 						"diff path %q could not be resolved: %v",
-						path, err))
+						path, err,
+					),
+				)
 				continue
 			}
 
@@ -2405,7 +2412,9 @@ func resolvePatchTarget(
 					warningDiagnostic(
 						"diff_path_unresolved",
 						"diff path %q could not be resolved: %v",
-						path, err))
+						path, err,
+					),
+				)
 				continue
 			}
 			return target, allCandidates, diagnostics, "", nil
@@ -3089,11 +3098,12 @@ func applyHunkToLines(
 		diagnostics,
 		errorDiagnostic("hunk_match_failed", "old hunk block was not found and new hunk block was not already present"),
 	)
-	return hunkApplyResult{
-			Diagnostics: diagnostics,
-		}, errors.New(
-			"old hunk block was not found and new hunk block was not already present",
-		)
+	hRes := hunkApplyResult{
+		Diagnostics: diagnostics,
+	}
+	return hRes, errors.New(
+		"old hunk block was not found and new hunk block was not already present",
+	)
 }
 
 func applyMatchedOldBlock(
@@ -3174,11 +3184,12 @@ func tryApplySingleEditGroupHunk(
 			diagnostics,
 			errorDiagnostic("single_edit_match_failed", "single-edit hunk could not be applied safely"),
 		)
-		return hunkApplyResult{
-				Diagnostics: diagnostics,
-			}, true, errors.New(
-				"single-edit hunk could not be applied safely",
-			)
+		hRes := hunkApplyResult{
+			Diagnostics: diagnostics,
+		}
+		return hRes, true, errors.New(
+			"single-edit hunk could not be applied safely",
+		)
 	}
 
 	diagnostics = append([]ApplyUnifiedDiffDiagnostic{}, diagnostics...)
@@ -3208,7 +3219,8 @@ func tryApplySingleEditGroupHunk(
 			errorDiagnostic(
 				"single_edit_invalid_location",
 				"single-edit fallback selected invalid line %d",
-				match.EditStart+1),
+				match.EditStart+1,
+			),
 		}}, true, errors.New("single-edit fallback selected invalid line")
 	}
 

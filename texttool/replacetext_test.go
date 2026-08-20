@@ -352,7 +352,7 @@ func TestReplaceText_ErrorCases(t *testing.T) {
 		{
 			name: "lineHint_may_only_be_used_when_expectedCount_is_1",
 			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "A\nA\n")
+				return writeTempTextFile(t, dir, "x-*.txt", "A\nA\n") //nolint:dupword // Test.
 			},
 			args: func(path string) ReplaceTextArgs {
 				return ReplaceTextArgs{
@@ -368,7 +368,7 @@ func TestReplaceText_ErrorCases(t *testing.T) {
 		{
 			name: "match_count_mismatch_does_not_modify_file",
 			setup: func() string {
-				return writeTempTextFile(t, dir, "x-*.txt", "A\nA\n")
+				return writeTempTextFile(t, dir, "x-*.txt", "A\nA\n") //nolint:dupword // Test.
 			},
 			args: func(path string) ReplaceTextArgs {
 				return ReplaceTextArgs{
@@ -379,7 +379,7 @@ func TestReplaceText_ErrorCases(t *testing.T) {
 			},
 			wantErrSub:        testErrReplaceMatchCountMismatch,
 			checkContentAfter: true,
-			wantContentAfter:  "A\nA\n",
+			wantContentAfter:  "A\nA\n", //nolint:dupword // Test.
 		},
 		{
 			name: "lineHint_tie_does_not_break_ambiguity",

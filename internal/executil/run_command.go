@@ -343,8 +343,7 @@ func exitCodeFromWait(waitErr error, timedOut bool) int {
 	if waitErr == nil {
 		return 0
 	}
-	var ee *exec.ExitError
-	if errors.As(waitErr, &ee) {
+	if ee, ok := errors.AsType[*exec.ExitError](waitErr); ok {
 		return exitCodeFromProcessState(ee.ProcessState)
 	}
 

@@ -298,7 +298,7 @@ func TestDeleteText_ErrorCases(t *testing.T) {
 			name: "lineHint_may_only_be_used_when_expectedCount_is_1",
 			setup: func(t *testing.T) string {
 				t.Helper()
-				return writeTempTextFile(t, dir, "x-*.txt", "A\nA\n")
+				return writeTempTextFile(t, dir, "x-*.txt", "A\nA\n") //nolint:dupword // Test.
 			},
 			args: func(path string) DeleteTextArgs {
 				return DeleteTextArgs{

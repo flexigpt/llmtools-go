@@ -237,21 +237,22 @@ func TestDeleteFile(t *testing.T) {
 				if !ok {
 					t.Skipf("system trash not defined for GOOS=%q in this test", runtime.GOOS)
 				}
-
-				return src, DeleteFileArgs{
-						Path:     src,
-						TrashDir: testTrashDirAuto,
-					}, func(t *testing.T, out *DeleteFileOut) {
-						t.Helper()
-						if out == nil {
-							t.Fatalf("expected non-nil out")
-						}
-						gotDir := filepath.Clean(filepath.Dir(out.TrashedPath))
-						wantDir := filepath.Clean(canonForPolicyExpectations(wantTrash))
-						if gotDir != wantDir {
-							t.Fatalf("trashed dir=%q want=%q (trash=%q)", gotDir, wantDir, wantTrash)
-						}
+				d := DeleteFileArgs{
+					Path:     src,
+					TrashDir: testTrashDirAuto,
+				}
+				f := func(t *testing.T, out *DeleteFileOut) {
+					t.Helper()
+					if out == nil {
+						t.Fatalf("expected non-nil out")
 					}
+					gotDir := filepath.Clean(filepath.Dir(out.TrashedPath))
+					wantDir := filepath.Clean(canonForPolicyExpectations(wantTrash))
+					if gotDir != wantDir {
+						t.Fatalf("trashed dir=%q want=%q (trash=%q)", gotDir, wantDir, wantTrash)
+					}
+				}
+				return src, d, f
 			},
 			wantErr: wantErrNone,
 		},
