@@ -10,17 +10,6 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
-	"time"
-)
-
-const (
-	maxURLLength             = 4096
-	maxResponseHeaderBytes   = 1 << 20
-	defaultDialTimeout       = 30 * time.Second
-	defaultDialKeepAlive     = 30 * time.Second
-	defaultHeaderTimeout     = 15 * time.Second
-	defaultIdleConnTimeout   = 90 * time.Second
-	defaultTLSHandshakeLimit = 10 * time.Second
 )
 
 var errResponseTooLarge = errors.New("response too large")
@@ -65,7 +54,7 @@ func newHTTPClient(cfg webToolConfig) (*http.Client, error) {
 	}
 
 	transport.DialContext = secureDialContext(cfg.allowPrivateNetwork)
-	transport.MaxResponseHeaderBytes = maxResponseHeaderBytes
+	transport.MaxResponseHeaderBytes = hardResponseHeaderBytes
 	transport.ResponseHeaderTimeout = defaultHeaderTimeout
 	if cfg.timeout > 0 && cfg.timeout < transport.ResponseHeaderTimeout {
 		transport.ResponseHeaderTimeout = cfg.timeout
@@ -97,8 +86,8 @@ func defaultTransport() *http.Transport {
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       defaultIdleConnTimeout,
-		TLSHandshakeTimeout:   defaultTLSHandshakeLimit,
-		ExpectContinueTimeout: defaultTLSHandshakeLimit,
+		TLSHandshakeTimeout:   defaultTLSHandshake,
+		ExpectContinueTimeout: defaultTLSHandshake,
 	}
 }
 
@@ -174,8 +163,8 @@ func normalizeRawURL(rawURL string, allowPrivateNetwork bool) (string, *url.URL,
 	if rawURL == "" {
 		return "", nil, errors.New("url is required")
 	}
-	if len(rawURL) > maxURLLength {
-		return "", nil, fmt.Errorf("url too long (max %d bytes)", maxURLLength)
+	if len(rawURL) > hardURLLength {
+		return "", nil, fmt.Errorf("url too long (max %d bytes)", hardURLLength)
 	}
 	if strings.ContainsAny(rawURL, " \t\r\n") {
 		return "", nil, errors.New("url must not contain unescaped whitespace")
@@ -211,8 +200,8 @@ func validateParsedURL(u *url.URL, allowPrivateNetwork bool) error {
 	if u.User != nil {
 		return errors.New("url userinfo is not allowed")
 	}
-	if len(u.String()) > maxURLLength {
-		return fmt.Errorf("url too long (max %d bytes)", maxURLLength)
+	if len(u.String()) > hardURLLength {
+		return fmt.Errorf("url too long (max %d bytes)", hardURLLength)
 	}
 
 	host := strings.TrimSpace(u.Hostname())

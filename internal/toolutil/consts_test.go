@@ -24,22 +24,4 @@ func TestConstants(t *testing.T) {
 			}
 		})
 	}
-
-	const wantMaxBytes = 16 * 1024 * 1024
-	if maxToolBytes != wantMaxBytes {
-		t.Fatalf("unexpected maxToolBytes: got %d want %d", maxToolBytes, wantMaxBytes)
-	}
-	if MaxTextProcessingBytes != maxToolBytes {
-		t.Fatalf(
-			"MaxTextProcessingBytes should match maxToolBytes: got %d want %d",
-			MaxTextProcessingBytes,
-			maxToolBytes,
-		)
-	}
-	if MaxFileReadBytes != maxToolBytes {
-		t.Fatalf("MaxFileReadBytes should match maxToolBytes: got %d want %d", MaxFileReadBytes, maxToolBytes)
-	}
-	if MaxFileWriteBytes != maxToolBytes {
-		t.Fatalf("MaxFileWriteBytes should match maxToolBytes: got %d want %d", MaxFileWriteBytes, maxToolBytes)
-	}
 }

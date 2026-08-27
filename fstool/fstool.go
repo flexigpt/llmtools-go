@@ -9,6 +9,25 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
+const (
+	hardFileReadBytes int64 = 32 * 1024 * 1024
+
+	hardFileWriteBytes int64 = 32 * 1024 * 1024
+
+	defaultListDirectoryMaxEntries = 1024
+	hardListDirectoryMaxEntries    = 64000
+
+	defaultSearchFilesMaxResults = 1024
+	hardSearchFilesMaxResults    = 64000
+
+	hardSearchContentBytes int64 = 1 * 1024 * 1024
+
+	hardMIMESniffBytes int64 = 4096
+
+	hardWriteFileParentCreations = 16
+	hardTrashUniquePathAttempts  = 12
+)
+
 type fsToolConfig struct {
 	allowedRoots  []string
 	workBaseDir   string

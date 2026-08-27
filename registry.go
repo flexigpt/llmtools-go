@@ -22,6 +22,8 @@ import (
 	"github.com/flexigpt/llmtools-go/webtool"
 )
 
+const defaultBuiltinCallTimeout = 10 * time.Minute
+
 // Registry provides lookup/register for Go tools by funcID, with json.RawMessage I/O.
 type Registry struct {
 	mu     sync.RWMutex
@@ -37,10 +39,10 @@ type RegistryOption func(*Registry) error
 
 // NewBuiltinRegistry returns a Registry with all built-in tools registered.
 // By default it applies a 10mins timeout, but callers can override it by passing
-// WithDefaultCallTimeout as a later option.
+// WithDefaultCallTimeout as a later option. This is a default, not a hard cap.
 func NewBuiltinRegistry(opts ...RegistryOption) (*Registry, error) {
 	defaults := make([]RegistryOption, 0, 1+len(opts))
-	defaults = append(defaults, WithDefaultCallTimeout(10*time.Minute))
+	defaults = append(defaults, WithDefaultCallTimeout(defaultBuiltinCallTimeout))
 	defaults = append(defaults, opts...)
 	r, err := NewRegistry(defaults...)
 	if err != nil {

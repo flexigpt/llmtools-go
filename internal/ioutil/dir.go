@@ -122,7 +122,7 @@ func isValidListDirectoryKind(kind ListDirectoryKind) bool {
 	}
 }
 
-func UniquePathInDir(dir, base string) (string, error) {
+func UniquePathInDir(dir, base string, maxAttempts int) (string, error) {
 	dir = strings.TrimSpace(dir)
 	base = strings.TrimSpace(base)
 	if dir == "" || base == "" {
@@ -158,7 +158,7 @@ func UniquePathInDir(dir, base string) (string, error) {
 	stem := strings.TrimSuffix(base, ext)
 
 	// Try a few times; collisions are extremely unlikely with time+random suffix.
-	for range 12 {
+	for range maxAttempts {
 		sfx, err := randomHex(6) // 12 hex chars
 		if err != nil {
 			return "", err
@@ -174,7 +174,7 @@ func UniquePathInDir(dir, base string) (string, error) {
 			return "", err
 		}
 	}
-	return "", fmt.Errorf("could not allocate unique trash name for %q", base)
+	return "", fmt.Errorf("could not allocate unique path for %q", base)
 }
 
 func randomHex(nBytes int) (string, error) {

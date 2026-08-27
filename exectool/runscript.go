@@ -16,10 +16,8 @@ import (
 )
 
 const (
-	defaultRunScriptMaxArgs     = 256
-	defaultRunScriptMaxArgBytes = 16 * 1024
-	defaultPython3Command       = "python3"
-	defaultPythonCommand        = "python"
+	defaultPython3Command = "python3"
+	defaultPythonCommand  = "python"
 )
 
 const runScriptFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/exectool/runscript.RunScript"
@@ -366,7 +364,7 @@ func runScript(
 	}
 
 	// Validate env + args.
-	if err := executil.ValidateEnvMap(args.Env); err != nil {
+	if err := validateExecutionEnvMap(args.Env); err != nil {
 		return nil, err
 	}
 	if pol.MaxArgs > 0 && len(args.Args) > pol.MaxArgs {

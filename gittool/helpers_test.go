@@ -131,7 +131,7 @@ func TestNormalizeRepoRelativePaths(t *testing.T) {
 		t.Fatalf("normalizeRepoRelativePaths(nil, false) = %#v, want empty slice", got)
 	}
 
-	tooMany := make([]string, maxStagePaths+1)
+	tooMany := make([]string, hardStagePaths+1)
 	for i := range tooMany {
 		tooMany[i] = "a"
 	}
@@ -141,8 +141,8 @@ func TestNormalizeRepoRelativePaths(t *testing.T) {
 }
 
 func TestValidateIdentifiers(t *testing.T) {
-	tooLongRef := strings.Repeat("a", maxRefNameLength+1)
-	tooLongRevision := strings.Repeat("b", maxRevisionLength+1)
+	tooLongRef := strings.Repeat("a", hardRefNameLength+1)
+	tooLongRevision := strings.Repeat("b", hardRevisionLength+1)
 
 	tests := []struct {
 		name    string

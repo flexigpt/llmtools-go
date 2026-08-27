@@ -54,20 +54,6 @@ func TestExtractPDFTextSafe_TableDriven(t *testing.T) {
 			},
 		},
 		{
-			name:      "maxBytes zero => empty after extraction",
-			path:      happyPath,
-			maxBytes:  0,
-			wantErr:   true,
-			errSubstr: errEmptyPDFStr,
-		},
-		{
-			name:      "maxBytes negative => empty after extraction (LimitedReader.N<=0 reads nothing)",
-			path:      happyPath,
-			maxBytes:  -1,
-			wantErr:   true,
-			errSubstr: errEmptyPDFStr,
-		},
-		{
 			name:      "empty text pdf => specific empty error",
 			path:      emptyTextPath,
 			maxBytes:  1 << 20,

@@ -31,9 +31,6 @@ func ExtractPDFTextSafeFromBytes(ctx context.Context, data []byte, maxTextBytes 
 	if len(data) == 0 {
 		return "", errors.New("empty PDF data")
 	}
-	if maxTextBytes <= 0 {
-		maxTextBytes = int64(len(data))
-	}
 
 	reader := bytes.NewReader(data)
 	r, err := pdf.NewReader(reader, int64(len(data)))
@@ -47,14 +44,15 @@ func ExtractPDFTextSafeFromBytes(ctx context.Context, data []byte, maxTextBytes 
 	}
 
 	var buf bytes.Buffer
-	limited := &io.LimitedReader{
-		R: plain,
-		N: maxTextBytes,
+	source := plain
+	if maxTextBytes > 0 {
+		source = io.LimitReader(plain, maxTextBytes)
 	}
 
-	if _, err := io.Copy(&buf, limited); err != nil {
+	if _, err := io.Copy(&buf, source); err != nil {
 		return "", err
 	}
+
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}

@@ -24,9 +24,9 @@ type sessionItem struct {
 	lastUsed time.Time
 }
 
-func NewSessionStore() *SessionStore {
+func NewSessionStore(defaultTTL time.Duration, defaultMaxSessions int) *SessionStore {
 	return &SessionStore{
-		ttl: defaultSessionTTL,
+		ttl: defaultTTL,
 		max: defaultMaxSessions,
 		lru: list.New(),
 		m:   map[string]*list.Element{},

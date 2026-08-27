@@ -15,6 +15,8 @@ const (
 	extTestInvalidPathName     = "invalid path"
 	extTestEmptyPathName       = "empty path"
 	extTestNonExistentPathName = "non-existent path"
+
+	hardMIMESniffBytes int64 = 4096
 )
 
 func TestGetNormalizedExt(t *testing.T) {
@@ -229,7 +231,7 @@ func TestMIMEForLocalFile_ExtensionVsSniff(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			mt, mode, method, err := MIMEForLocalFile(tc.path)
+			mt, mode, method, err := MIMEForLocalFile(tc.path, hardMIMESniffBytes)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil (mt=%q mode=%q method=%q)", mt, mode, method)
@@ -324,7 +326,7 @@ func TestSniffFileMIME(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m, mode, err := SniffFileMIME(tc.path)
+			m, mode, err := SniffFileMIME(tc.path, hardMIMESniffBytes)
 
 			if tc.wantErr {
 				if err == nil {

@@ -12,7 +12,7 @@ import (
 )
 
 func TestNormalizeRawURL(t *testing.T) {
-	overlongURL := "https://example.test/" + strings.Repeat("a", maxURLLength)
+	overlongURL := "https://example.test/" + strings.Repeat("a", hardURLLength)
 
 	tests := []struct {
 		name                 string
@@ -165,7 +165,7 @@ func TestNormalizeRawURL(t *testing.T) {
 }
 
 func TestValidateParsedURL(t *testing.T) {
-	longPath := "/" + strings.Repeat("a", maxURLLength)
+	longPath := "/" + strings.Repeat("a", hardURLLength)
 
 	tests := []struct {
 		name            string
@@ -387,8 +387,8 @@ func TestNewHTTPClientConfigAndRedirectPolicy(t *testing.T) {
 	if transport.DialContext == nil {
 		t.Fatal("transport.DialContext is nil")
 	}
-	if transport.MaxResponseHeaderBytes != maxResponseHeaderBytes {
-		t.Fatalf("MaxResponseHeaderBytes = %d, want %d", transport.MaxResponseHeaderBytes, maxResponseHeaderBytes)
+	if transport.MaxResponseHeaderBytes != hardResponseHeaderBytes {
+		t.Fatalf("MaxResponseHeaderBytes = %d, want %d", transport.MaxResponseHeaderBytes, hardResponseHeaderBytes)
 	}
 	if transport.ResponseHeaderTimeout != cfg.timeout {
 		t.Fatalf("ResponseHeaderTimeout = %v, want %v", transport.ResponseHeaderTimeout, cfg.timeout)

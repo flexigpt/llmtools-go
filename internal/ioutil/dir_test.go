@@ -26,6 +26,8 @@ const (
 	dirTestTxtGlob         = "*." + dirTestTxtPattern
 	dirTestInvalidGlob     = "["
 	dirTestSyntaxErrSubstr = "syntax error in pattern"
+
+	hardTrashUniquePathAttempts = 12
 )
 
 func TestListDirectory(t *testing.T) {
@@ -563,7 +565,7 @@ func TestUniquePathInDir(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := UniquePathInDir(tc.dir, tc.base)
+			got, err := UniquePathInDir(tc.dir, tc.base, hardTrashUniquePathAttempts)
 			if tc.wantErrIs != nil {
 				if err == nil {
 					t.Fatalf("expected error, got nil (got=%q)", got)

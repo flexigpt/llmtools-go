@@ -149,7 +149,7 @@ func parseAndFilterBootstrapEnv(output string) (map[string]string, error) {
 	if len(filtered) == 0 {
 		return nil, errors.New("bootstrap env produced no usable variables")
 	}
-	if err := executil.ValidateEnvMap(filtered); err != nil {
+	if err := validateExecutionEnvMap(filtered); err != nil {
 		return nil, err
 	}
 	return filtered, nil

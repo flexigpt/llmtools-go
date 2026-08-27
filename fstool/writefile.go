@@ -11,7 +11,6 @@ import (
 
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/ioutil"
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -114,8 +113,8 @@ func writeFile(
 	case ioutil.ReadEncodingBinary:
 		b64 := strings.TrimSpace(args.Content)
 		// Pre-check decoded size to avoid huge allocations.
-		if int64(base64.StdEncoding.DecodedLen(len(b64))) > toolutil.MaxFileWriteBytes {
-			return nil, fmt.Errorf("content too large (decoded > %d bytes)", toolutil.MaxFileWriteBytes)
+		if int64(base64.StdEncoding.DecodedLen(len(b64))) > hardFileWriteBytes {
+			return nil, fmt.Errorf("content too large (decoded > %d bytes)", hardFileWriteBytes)
 		}
 		decoded, derr := base64.StdEncoding.DecodeString(b64)
 		if derr != nil {
@@ -124,8 +123,8 @@ func writeFile(
 		data = decoded
 	}
 
-	if int64(len(data)) > toolutil.MaxFileWriteBytes {
-		return nil, fmt.Errorf("content too large (%d bytes; max %d)", len(data), toolutil.MaxFileWriteBytes)
+	if int64(len(data)) > hardFileWriteBytes {
+		return nil, fmt.Errorf("content too large (%d bytes; max %d)", len(data), hardFileWriteBytes)
 	}
 
 	action := WriteFileActionCreated
@@ -144,7 +143,7 @@ func writeFile(
 		0o600,
 		args.Overwrite,
 		args.CreateParents,
-		8, // max new dirs
+		hardWriteFileParentCreations,
 	)
 	if err != nil {
 		if !args.Overwrite && errors.Is(err, os.ErrExist) {

@@ -24,11 +24,6 @@ import (
 
 const fetchURLFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/webtool/fetchurl.FetchURL"
 
-const (
-	defaultFetchMaxLength = 5000
-	maxFetchMaxLength     = 100000
-)
-
 var fetchURLTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019d6b4d-2cf4-71bb-a827-087029d7d09a",
@@ -184,8 +179,8 @@ func normalizeMaxLength(maxLength int) int {
 	if maxLength <= 0 {
 		return defaultFetchMaxLength
 	}
-	if maxLength > maxFetchMaxLength {
-		return maxFetchMaxLength
+	if maxLength > hardFetchMaxLength {
+		return hardFetchMaxLength
 	}
 	return maxLength
 }

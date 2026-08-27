@@ -60,8 +60,8 @@ func TestNormalizeMaxLength(t *testing.T) {
 		{name: "negative uses default", input: -1, want: defaultFetchMaxLength},
 		{name: "one", input: 1, want: 1},
 		{name: "normal", input: 1234, want: 1234},
-		{name: "max", input: maxFetchMaxLength, want: maxFetchMaxLength},
-		{name: "above max clamps", input: maxFetchMaxLength + 1, want: maxFetchMaxLength},
+		{name: "max", input: hardFetchMaxLength, want: hardFetchMaxLength},
+		{name: "above max clamps", input: hardFetchMaxLength + 1, want: hardFetchMaxLength},
 	}
 
 	for _, tt := range tests {

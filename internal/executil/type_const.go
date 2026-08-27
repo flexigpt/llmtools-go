@@ -1,29 +1,5 @@
 package executil
 
-import "time"
-
-// Fixed, package-wide hard limits (single source of truth).
-const (
-	HardMaxTimeout             = 10 * time.Minute
-	HardMaxOutputBytes   int64 = 4 * 1024 * 1024 // per stream
-	HardMaxCommands            = 64
-	HardMaxCommandLength       = 64 * 1024 // bytes
-	MinOutputBytes       int64 = 1024
-
-	DefaultTimeout                = 60 * time.Second
-	DefaultMaxOutputBytes   int64 = 256 * 1024
-	DefaultMaxCommands            = 64
-	DefaultMaxCommandLength       = 64 * 1024
-
-	defaultSessionTTL  = 30 * time.Minute
-	defaultMaxSessions = 256
-
-	hardMaxEnvVars       = 256
-	hardMaxEnvKeyBytes   = 256
-	hardMaxEnvValueBytes = 32 * 1024
-	hardMaxEnvTotalBytes = 256 * 1024
-)
-
 type ShellName string
 
 const (

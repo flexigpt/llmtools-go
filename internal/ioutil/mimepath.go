@@ -16,6 +16,7 @@ import (
 func MIMEForPath(
 	p fspolicy.FSPolicy,
 	path string,
+	maxSniffBytes int64,
 ) (abs string, mimeType MIMEType, mode ExtensionMode, method MIMEDetectMethod, err error) {
 	abs, err = p.ResolvePath(path, "")
 	if err != nil {
@@ -38,7 +39,7 @@ func MIMEForPath(
 		return abs, MIMEEmpty, ExtensionModeDefault, MIMEDetectMethodSniff, err
 	}
 
-	mt, m, e := SniffFileMIME(abs)
+	mt, m, e := SniffFileMIME(abs, maxSniffBytes)
 	if e != nil {
 		return abs, MIMEEmpty, ExtensionModeDefault, MIMEDetectMethodSniff, e
 	}

@@ -204,8 +204,8 @@ func moveToTrash(
 		return "", "", 0, ioutil.ErrInvalidPath
 	}
 
-	for range 12 {
-		dest, err := ioutil.UniquePathInDir(trashDir, base)
+	for range hardTrashUniquePathAttempts {
+		dest, err := ioutil.UniquePathInDir(trashDir, base, hardTrashUniquePathAttempts)
 		if err != nil {
 			return "", "", 0, err
 		}

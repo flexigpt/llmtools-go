@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/flexigpt/llmtools-go/internal/ioutil"
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 func TestNewWebToolOptions(t *testing.T) {
@@ -92,7 +91,7 @@ func TestNewWebToolOptions(t *testing.T) {
 		{name: "empty user agent", option: WithUserAgent("   "), errSubstr: "user-agent cannot be empty"},
 		{
 			name:      "too long user agent",
-			option:    WithUserAgent(strings.Repeat("a", maxUserAgentLength+1)),
+			option:    WithUserAgent(strings.Repeat("a", hardUserAgentLength+1)),
 			errSubstr: "user-agent too long",
 		},
 		{name: "user agent CRLF", option: WithUserAgent("bad\r\nagent"), errSubstr: "user-agent cannot contain CR/LF"},
@@ -100,13 +99,13 @@ func TestNewWebToolOptions(t *testing.T) {
 		{name: "max fetch zero", option: WithMaxFetchBytes(0), errSubstr: "max fetch bytes must be positive"},
 		{
 			name:      "max fetch too large",
-			option:    WithMaxFetchBytes(int64(toolutil.MaxFileReadBytes) + 1),
+			option:    WithMaxFetchBytes(hardFetchBytes + 1),
 			errSubstr: "max fetch bytes too large",
 		},
 		{name: "negative redirects", option: WithMaxRedirects(-1), errSubstr: "max redirects cannot be negative"},
 		{
 			name:      "redirects too large",
-			option:    WithMaxRedirects(maxRedirectsLimit + 1),
+			option:    WithMaxRedirects(hardRedirects + 1),
 			errSubstr: "max redirects too large",
 		},
 		{name: "proxy parse error", option: WithProxyURL("://bad"), errSubstr: "invalid proxy url"},

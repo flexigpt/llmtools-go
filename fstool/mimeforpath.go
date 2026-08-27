@@ -72,7 +72,7 @@ func mimeForPath(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	abs, mt, mode, method, err := ioutil.MIMEForPath(p, args.Path)
+	abs, mt, mode, method, err := ioutil.MIMEForPath(p, args.Path, hardMIMESniffBytes)
 	if err != nil {
 		return nil, err
 	}

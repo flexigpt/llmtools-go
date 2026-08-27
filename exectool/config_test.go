@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexigpt/llmtools-go/internal/executil"
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
@@ -15,10 +14,10 @@ func TestDefaultExecutionPolicy(t *testing.T) {
 	got := DefaultExecutionPolicy()
 	want := ExecutionPolicy{
 		AllowDangerous:   false,
-		Timeout:          executil.DefaultTimeout,
-		MaxOutputBytes:   executil.DefaultMaxOutputBytes,
-		MaxCommands:      executil.DefaultMaxCommands,
-		MaxCommandLength: executil.DefaultMaxCommandLength,
+		Timeout:          defaultExecutionTimeout,
+		MaxOutputBytes:   defaultExecutionMaxOutputBytes,
+		MaxCommands:      defaultExecutionMaxCommands,
+		MaxCommandLength: defaultExecutionMaxCommandLength,
 	}
 	if got != want {
 		t.Fatalf("got %#v want %#v", got, want)

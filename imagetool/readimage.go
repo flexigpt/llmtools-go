@@ -6,7 +6,6 @@ import (
 
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/ioutil"
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -79,7 +78,7 @@ func readImage(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	info, err := ioutil.ReadImage(p, args.Path, args.IncludeBase64Data, toolutil.MaxFileReadBytes)
+	info, err := ioutil.ReadImage(p, args.Path, args.IncludeBase64Data, hardImageReadBytes)
 	if err != nil {
 		return nil, err
 	}

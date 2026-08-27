@@ -2,7 +2,6 @@ package executil
 
 import (
 	"bytes"
-	"math"
 	"sync"
 )
 
@@ -34,17 +33,10 @@ type cappedWriter struct {
 }
 
 func newCappedWriter(capBytes int64) *cappedWriter {
-	if capBytes < MinOutputBytes {
-		capBytes = MinOutputBytes
-	}
-	if capBytes > HardMaxOutputBytes {
-		capBytes = HardMaxOutputBytes
+	if capBytes <= 0 {
+		return &cappedWriter{}
 	}
 
-	// Avoid int overflow / huge allocations even if misconfigured.
-	if capBytes > int64(math.MaxInt) {
-		capBytes = int64(math.MaxInt)
-	}
 	cb := int(capBytes)
 	return &cappedWriter{
 		capBytes: cb,

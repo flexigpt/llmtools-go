@@ -15,12 +15,6 @@ import (
 
 const replaceTextFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/texttool/replacetext.ReplaceText"
 
-const (
-	textBlockEditLineHintTolerance                = 8
-	textBlockEditMaxAmbiguityDiagnosticCandidates = 5
-	textBlockEditAmbiguityDiagnosticContextLines  = 1
-)
-
 var replaceTextTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019c04d3-c723-7dfa-b85a-12ee7d328502",
@@ -162,7 +156,7 @@ func replaceText(
 		return nil, err
 	}
 
-	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, toolutil.MaxTextProcessingBytes)
+	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, hardTextProcessingBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +207,13 @@ func replaceText(
 	}
 
 	outStr := tf.Render()
-	if err := ioutil.WriteRenderedTextFileIfUnchanged(p, tf, originalContent, outStr); err != nil {
+	if err := ioutil.WriteRenderedTextFileIfUnchanged(
+		p,
+		tf,
+		originalContent,
+		outStr,
+		hardTextProcessingBytes,
+	); err != nil {
 		return nil, err
 	}
 

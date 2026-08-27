@@ -7,7 +7,6 @@ import (
 
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/ioutil"
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -54,11 +53,6 @@ var readTextRangeTool = spec.Tool{
 	CreatedAt:  spec.SchemaStartTime,
 	ModifiedAt: spec.SchemaStartTime,
 }
-
-const (
-	maxReadTextRangeOutputLines   = 16000
-	defaultReadTextRangeLineCount = 1000
-)
 
 type ReadTextRangeArgs struct {
 	Path string `json:"path"`
@@ -120,11 +114,11 @@ func readTextRange(
 	if lineCount < 1 {
 		return nil, fmt.Errorf("lineCount must be >= 1 (got %d)", lineCount)
 	}
-	if lineCount > maxReadTextRangeOutputLines {
-		return nil, fmt.Errorf("lineCount too large: %d (max %d)", lineCount, maxReadTextRangeOutputLines)
+	if lineCount > hardReadTextRangeOutputLines {
+		return nil, fmt.Errorf("lineCount too large: %d (max %d)", lineCount, hardReadTextRangeOutputLines)
 	}
 
-	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, toolutil.MaxTextProcessingBytes)
+	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, hardTextProcessingBytes)
 	if err != nil {
 		return nil, err
 	}

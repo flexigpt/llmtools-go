@@ -13,7 +13,6 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/internal/pdfutil"
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -91,7 +90,7 @@ func readFile(
 	}
 
 	// Detect MIME / extension where possible.
-	mimeType, extMode, _, mimeErr := ioutil.MIMEForLocalFile(abs)
+	mimeType, extMode, _, mimeErr := ioutil.MIMEForLocalFile(abs, hardMIMESniffBytes)
 	ext := strings.ToLower(filepath.Ext(abs))
 
 	isPDFByExt := ext == string(ioutil.ExtPDF)
@@ -108,8 +107,8 @@ func readFile(
 
 		if isPDF {
 			// PDF: use the same extraction logic as attachments.
-			// Extraction itself is limited to toolutil.MaxFileReadBytes via LimitedReader.
-			text, err := pdfutil.ExtractPDFTextSafe(ctx, abs, toolutil.MaxFileReadBytes)
+			// Extraction output is limited by this tool's hard read limit.
+			text, err := pdfutil.ExtractPDFTextSafe(ctx, abs, int(hardFileReadBytes))
 			if err != nil {
 				return nil, err
 			}
@@ -133,7 +132,7 @@ func readFile(
 		}
 
 		// Normal text file: read and validate UTF‑8.
-		data, err := ioutil.ReadFile(abs, ioutil.ReadEncodingText, toolutil.MaxFileReadBytes)
+		data, err := ioutil.ReadFile(abs, ioutil.ReadEncodingText, hardFileReadBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -155,7 +154,7 @@ func readFile(
 	}
 
 	// Binary mode: base64-encode and return, like before.
-	data, err := ioutil.ReadFile(abs, ioutil.ReadEncodingBinary, toolutil.MaxFileReadBytes)
+	data, err := ioutil.ReadFile(abs, ioutil.ReadEncodingBinary, hardFileReadBytes)
 	if err != nil {
 		return nil, err
 	}

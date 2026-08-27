@@ -127,38 +127,6 @@ func TestExitCodeFromWait(t *testing.T) {
 	}
 }
 
-func TestNewCappedWriter_ClampsToMinAndHardMax(t *testing.T) {
-	cases := []struct {
-		name    string
-		capIn   int64
-		wantMin int
-		wantMax int
-	}{
-		{name: "below_min_clamps_up", capIn: 1, wantMin: int(MinOutputBytes), wantMax: int(MinOutputBytes)},
-		{
-			name:    "above_hardmax_clamps_down",
-			capIn:   HardMaxOutputBytes + 1,
-			wantMin: int(HardMaxOutputBytes),
-			wantMax: int(HardMaxOutputBytes),
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			w := newCappedWriter(tc.capIn)
-			if w == nil {
-				t.Fatalf("expected writer")
-			}
-			if w.capBytes < tc.wantMin || w.capBytes > tc.wantMax {
-				t.Fatalf("capBytes got %d want in [%d,%d]", w.capBytes, tc.wantMin, tc.wantMax)
-			}
-			if len(w.buf) != w.capBytes {
-				t.Fatalf("buf len got %d want %d", len(w.buf), w.capBytes)
-			}
-		})
-	}
-}
-
 func TestCappedWriter_RingWrapAndOverwrite(t *testing.T) {
 	// Use a small custom writer (not via newCappedWriter) to test ring behavior precisely.
 	cases := []struct {

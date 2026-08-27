@@ -10,7 +10,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 func WriteRenderedTextFileIfUnchanged(
@@ -18,15 +17,16 @@ func WriteRenderedTextFileIfUnchanged(
 	tf *TextFile,
 	originalContent string,
 	nextContent string,
+	maxBytes int64,
 ) error {
 	if tf == nil {
 		return errors.New("internal error: nil text file")
 	}
-	if len(nextContent) > toolutil.MaxTextProcessingBytes {
+	if maxBytes > 0 && int64(len(nextContent)) > maxBytes {
 		return fmt.Errorf(
 			"edited file would be too large: %d bytes; max %d",
 			len(nextContent),
-			toolutil.MaxTextProcessingBytes,
+			maxBytes,
 		)
 	}
 	if !utf8.ValidString(nextContent) {
@@ -40,7 +40,7 @@ func WriteRenderedTextFileIfUnchanged(
 		tf.Perm,
 		true,
 		func() error {
-			current, err := ReadTextFileUTF8(p, tf.Path, toolutil.MaxTextProcessingBytes)
+			current, err := ReadTextFileUTF8(p, tf.Path, maxBytes)
 			if err != nil {
 				return fmt.Errorf("target file changed or became unreadable after it was read: %w", err)
 			}

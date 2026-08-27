@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 const (
@@ -94,9 +92,11 @@ func TestReadFile(t *testing.T) {
 		},
 	}
 
+	const hardFileReadBytes int64 = 32 * 1024 * 1024
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ReadFile(tc.path, tc.encoding, toolutil.MaxFileReadBytes)
+			got, err := ReadFile(tc.path, tc.encoding, hardFileReadBytes)
 
 			if tc.wantErr {
 				if err == nil {

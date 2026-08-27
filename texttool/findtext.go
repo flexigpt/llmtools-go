@@ -11,7 +11,6 @@ import (
 
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/ioutil"
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -71,15 +70,6 @@ var findTextTool = spec.Tool{
 const (
 	findTypeSubstring = "substring"
 	findTypeRegex     = "regex"
-)
-
-// Hard caps to keep responses sane for tool callers.
-const (
-	maxFindTextContextLines = 2000
-	maxFindTextMaxMatches   = 500
-	// Total number of context lines across all matches (rough bound).
-	// This avoids exploding JSON outputs for large contextLines * maxMatches.
-	maxFindTextTotalReturnedLines = 4000
 )
 
 type FindTextArgs struct {
@@ -143,7 +133,7 @@ func findText(ctx context.Context, args FindTextArgs, p fspolicy.FSPolicy) (*Fin
 	}
 
 	contextLines := max(args.ContextLines, 1)
-	if contextLines > maxFindTextContextLines {
+	if contextLines > hardFindTextContextLines {
 		return nil, fmt.Errorf("contextLines too large: %d", contextLines)
 	}
 
@@ -151,7 +141,7 @@ func findText(ctx context.Context, args FindTextArgs, p fspolicy.FSPolicy) (*Fin
 	if maxMatches <= 0 {
 		maxMatches = 10
 	}
-	if maxMatches > maxFindTextMaxMatches {
+	if maxMatches > hardFindTextMaxMatches {
 		return nil, fmt.Errorf("maxMatches too large: %d", maxMatches)
 	}
 
@@ -179,7 +169,7 @@ func findText(ctx context.Context, args FindTextArgs, p fspolicy.FSPolicy) (*Fin
 		}
 	}
 
-	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, toolutil.MaxTextProcessingBytes)
+	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, hardTextProcessingBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -220,10 +210,10 @@ func findText(ctx context.Context, args FindTextArgs, p fspolicy.FSPolicy) (*Fin
 
 		nCtx := ctxEnd - ctxStart + 1
 		totalReturnedLines += nCtx
-		if totalReturnedLines > maxFindTextTotalReturnedLines {
+		if totalReturnedLines > hardFindTextTotalReturnedLines {
 			return fmt.Errorf(
 				"response too large (context window lines exceed %d). Reduce contextLines or maxMatches",
-				maxFindTextTotalReturnedLines,
+				hardFindTextTotalReturnedLines,
 			)
 		}
 

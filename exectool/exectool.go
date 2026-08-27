@@ -18,6 +18,30 @@ import (
 const (
 	defaultBootstrapDetectionTimeout = 3 * time.Second
 	defaultBootstrapEnvTimeout       = 8 * time.Second
+
+	defaultExecutionTimeout = 60 * time.Second
+	hardExecutionTimeout    = 10 * time.Minute
+
+	minExecutionOutputBytes        = 1024
+	defaultExecutionMaxOutputBytes = 256 * 1024
+	hardExecutionMaxOutputBytes    = 4 * 1024 * 1024
+
+	defaultExecutionMaxCommands = 64
+	hardExecutionMaxCommands    = 128
+
+	defaultExecutionMaxCommandLength = 64 * 1024
+	hardExecutionMaxCommandLength    = 64 * 1024
+
+	defaultRunScriptMaxArgs     = 256
+	defaultRunScriptMaxArgBytes = 16 * 1024
+
+	defaultSessionTTL  = 30 * time.Minute
+	defaultMaxSessions = 256
+
+	hardEnvVars       = 256
+	hardEnvKeyBytes   = 256
+	hardEnvValueBytes = 32 * 1024
+	hardEnvTotalBytes = 256 * 1024
 )
 
 // BootstrappedDefaults contains best-effort host-derived defaults suitable for ExecTool setup.
@@ -93,7 +117,7 @@ func WithDefaultShell(shell ShellName) ExecToolOption {
 // WithBaseEnv configures a stable base environment merged into executions after the process env.
 func WithBaseEnv(env map[string]string) ExecToolOption {
 	return func(et *ExecTool) error {
-		if err := executil.ValidateEnvMap(env); err != nil {
+		if err := validateExecutionEnvMap(env); err != nil {
 			return err
 		}
 		et.cfg.baseEnv = maps.Clone(env)
@@ -148,7 +172,7 @@ func WithRunScriptPolicy(p RunScriptPolicy) ExecToolOption {
 func WithSessionTTL(ttl time.Duration) ExecToolOption {
 	return func(et *ExecTool) error {
 		if et.sessions == nil {
-			et.sessions = executil.NewSessionStore()
+			et.sessions = executil.NewSessionStore(defaultSessionTTL, defaultMaxSessions)
 		}
 		et.sessions.SetTTL(ttl)
 		return nil
@@ -158,7 +182,7 @@ func WithSessionTTL(ttl time.Duration) ExecToolOption {
 func WithMaxSessions(maxSessions int) ExecToolOption {
 	return func(et *ExecTool) error {
 		if et.sessions == nil {
-			et.sessions = executil.NewSessionStore()
+			et.sessions = executil.NewSessionStore(defaultSessionTTL, defaultMaxSessions)
 		}
 		et.sessions.SetMaxSessions(maxSessions)
 		return nil
@@ -176,7 +200,7 @@ func NewExecTool(opts ...ExecToolOption) (*ExecTool, error) {
 			executionPolicy: DefaultExecutionPolicy(),
 			runScriptPolicy: DefaultRunScriptPolicy(),
 		},
-		sessions: executil.NewSessionStore(),
+		sessions: executil.NewSessionStore(defaultSessionTTL, defaultMaxSessions),
 	}
 
 	for _, opt := range opts {
@@ -273,9 +297,9 @@ func (et *ExecTool) bootstrapUnsetDefaults() {
 func DefaultExecutionPolicy() ExecutionPolicy {
 	return ExecutionPolicy{
 		AllowDangerous:   false,
-		Timeout:          executil.DefaultTimeout,
-		MaxOutputBytes:   executil.DefaultMaxOutputBytes,
-		MaxCommands:      executil.DefaultMaxCommands,
-		MaxCommandLength: executil.DefaultMaxCommandLength,
+		Timeout:          defaultExecutionTimeout,
+		MaxOutputBytes:   defaultExecutionMaxOutputBytes,
+		MaxCommands:      defaultExecutionMaxCommands,
+		MaxCommandLength: defaultExecutionMaxCommandLength,
 	}
 }

@@ -216,13 +216,52 @@ func TestWriteFile(t *testing.T) {
 			},
 			args: func(t *testing.T, c cfg) WriteFileArgs {
 				t.Helper()
-				p := filepath.Join("1", "2", "3", "4", "5", "6", "7", "8", "9", "f.txt")
+				p := filepath.Join(
+					"1",
+					"2",
+					"3",
+					"4",
+					"5",
+					"6",
+					"7",
+					"8",
+					"9",
+					"10",
+					"11",
+					"12",
+					"13",
+					"14",
+					"15",
+					"16",
+					"17",
+					"f.txt",
+				)
 				return WriteFileArgs{Path: p, Content: testContentX, CreateParents: true}
 			},
 			wantErr: wantErrContains("too many parent directories"),
 			check: func(t *testing.T, c cfg, out *WriteFileOut) {
 				t.Helper()
-				p := filepath.Join(c.workBaseDir, "1", "2", "3", "4", "5", "6", "7", "8", "9", "f.txt")
+				p := filepath.Join(
+					c.workBaseDir,
+					"1",
+					"2",
+					"3",
+					"4",
+					"5",
+					"6",
+					"7",
+					"8",
+					"9",
+					"10",
+					"11",
+					"12",
+					"13",
+					"14",
+					"15",
+					"16",
+					"17",
+					"f.txt",
+				)
 				if _, err := os.Stat(p); err == nil {
 					t.Fatalf("did not expect file to be created on error")
 				}

@@ -8,7 +8,6 @@ import (
 
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/ioutil"
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -147,7 +146,7 @@ func insertText(
 		)
 	}
 
-	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, toolutil.MaxTextProcessingBytes)
+	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, hardTextProcessingBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +169,13 @@ func insertText(
 	tf.Lines = ioutil.ReplaceStringRange(tf.Lines, insertAt, insertAt, textToInsert)
 
 	outStr := tf.Render()
-	if err := ioutil.WriteRenderedTextFileIfUnchanged(p, tf, originalContent, outStr); err != nil {
+	if err := ioutil.WriteRenderedTextFileIfUnchanged(
+		p,
+		tf,
+		originalContent,
+		outStr,
+		hardTextProcessingBytes,
+	); err != nil {
 		return nil, err
 	}
 

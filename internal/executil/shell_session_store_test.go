@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+const (
+	defaultSessionTTL  = 30 * time.Minute
+	defaultMaxSessions = 256
+)
+
 func TestSessionStore_TTL_EvictsWithoutSleep(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -21,7 +26,7 @@ func TestSessionStore_TTL_EvictsWithoutSleep(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ss := NewSessionStore()
+			ss := NewSessionStore(defaultSessionTTL, defaultMaxSessions)
 			ss.SetTTL(tc.ttl)
 
 			s := ss.NewSession()
@@ -71,7 +76,7 @@ func TestSessionStore_Delete_ClosesAndRemoves(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ss := NewSessionStore()
+			ss := NewSessionStore(defaultSessionTTL, defaultMaxSessions)
 			s := ss.NewSession()
 			if s == nil || s.GetID() == "" {
 				t.Fatalf("expected session")
@@ -103,7 +108,7 @@ func TestSessionStore_Get_UpdatesLRUOrder(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ss := NewSessionStore()
+			ss := NewSessionStore(defaultSessionTTL, defaultMaxSessions)
 			ss.SetMaxSessions(1)
 
 			s1 := ss.NewSession()
@@ -135,7 +140,7 @@ func TestSessionStore_SetTTL_EvictsExpiredAndNegativeDisables(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ss := NewSessionStore()
+			ss := NewSessionStore(defaultSessionTTL, defaultMaxSessions)
 			ss.SetTTL(tc.setTTL)
 
 			s := ss.NewSession()
@@ -181,7 +186,7 @@ func TestSessionStore_ConcurrentAccess_NoDeadlocks(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ss := NewSessionStore()
+			ss := NewSessionStore(defaultSessionTTL, defaultMaxSessions)
 			ss.SetMaxSessions(tc.max)
 			ss.SetTTL(tc.ttl)
 

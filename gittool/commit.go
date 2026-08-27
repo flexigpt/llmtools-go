@@ -85,8 +85,8 @@ func commit(ctx context.Context, snap gitToolSnapshot, args CommitArgs) (*Commit
 	if message == "" {
 		return nil, errors.New("message is required")
 	}
-	if len([]byte(args.Message)) > maxCommitMsgBytes {
-		return nil, fmt.Errorf("message too large: max %d bytes", maxCommitMsgBytes)
+	if len([]byte(args.Message)) > hardCommitMessageBytes {
+		return nil, fmt.Errorf("message too large: max %d bytes", hardCommitMessageBytes)
 	}
 
 	repo, wt, abs, err := openWorktree(ctx, snap, args.RepoPath)

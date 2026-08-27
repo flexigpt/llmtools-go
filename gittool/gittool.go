@@ -17,6 +17,44 @@ const (
 	revisionHead = "HEAD"
 )
 
+const (
+	defaultContextLines = 3
+	defaultDiffMaxBytes = 1024 * 1024
+	hardDiffMaxBytes    = 2 * 1024 * 1024
+	hardBlobReadBytes   = 4 * 1024 * 1024
+
+	defaultLogMaxCount = 10
+	hardLogMaxCount    = 100
+
+	defaultTreeMaxCount = 1000
+	hardTreeMaxCount    = 10000
+
+	hardStagePaths         = 500
+	hardRevisionLength     = 256
+	hardRefNameLength      = 256
+	hardTagMessageBytes    = 128 * 1024
+	hardCommitMessageBytes = 128 * 1024
+
+	defaultFindMaxDepth   = 5
+	hardFindMaxDepth      = 12
+	defaultFindMaxRepos   = 100
+	hardFindMaxRepos      = 1000
+	defaultFindMaxVisited = 20000
+	hardFindMaxVisited    = 100000
+
+	hardLineDiffMatrixCells = 2000000
+
+	defaultGrepMaxMatches = 100
+	hardGrepMaxMatches    = 1000
+	defaultGrepMaxFiles   = 10000
+	hardGrepMaxFiles      = 50000
+
+	defaultHistoryMaxCount = 50
+	hardHistoryMaxCount    = 500
+	defaultHistoryMaxWalk  = 2000
+	hardHistoryMaxWalk     = 20000
+)
+
 type gitToolConfig struct {
 	allowedRoots       []string
 	workBaseDir        string

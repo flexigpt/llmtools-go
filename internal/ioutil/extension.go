@@ -266,7 +266,10 @@ const (
 	MIMEDetectMethodSniff     MIMEDetectMethod = "sniff"
 )
 
-func MIMEForLocalFile(path string) (mimeType MIMEType, mode ExtensionMode, method MIMEDetectMethod, err error) {
+func MIMEForLocalFile(
+	path string,
+	maxSniffBytes int64,
+) (mimeType MIMEType, mode ExtensionMode, method MIMEDetectMethod, err error) {
 	if strings.TrimSpace(path) == "" {
 		return MIMEEmpty, ExtensionModeDefault, MIMEDetectMethodSniff, ErrInvalidPath
 	}
@@ -282,7 +285,7 @@ func MIMEForLocalFile(path string) (mimeType MIMEType, mode ExtensionMode, metho
 		}
 	}
 
-	mt, m, e := SniffFileMIME(path)
+	mt, m, e := SniffFileMIME(path, maxSniffBytes)
 	if e != nil {
 		return MIMEEmpty, ExtensionModeDefault, MIMEDetectMethodSniff, e
 	}
@@ -310,7 +313,7 @@ func MIMEFromExtensionString(ext string) (MIMEType, error) {
 	return MIMEApplicationOctetStream, ErrUnknownExtension
 }
 
-func SniffFileMIME(path string) (MIMEType, ExtensionMode, error) {
+func SniffFileMIME(path string, maxSniffBytes int64) (MIMEType, ExtensionMode, error) {
 	if strings.TrimSpace(path) == "" {
 		return MIMEEmpty, ExtensionModeDefault, ErrInvalidPath
 	}
@@ -321,8 +324,12 @@ func SniffFileMIME(path string) (MIMEType, ExtensionMode, error) {
 	}
 	defer f.Close()
 
-	buf := make([]byte, 4096)
-	n, err := f.Read(buf)
+	r := io.Reader(f)
+	if maxSniffBytes > 0 {
+		r = io.LimitReader(f, maxSniffBytes)
+	}
+	buf := make([]byte, maxSniffBytes)
+	n, err := r.Read(buf)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return MIMEEmpty, ExtensionModeDefault, err
 	}

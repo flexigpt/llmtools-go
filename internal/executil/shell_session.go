@@ -218,11 +218,7 @@ func (sess *ShellSession) GetEffectiveWorkdir(inputWorkDir, defaultWorkDir strin
 }
 
 func ValidateEnvMap(m map[string]string) error {
-	if len(m) > hardMaxEnvVars {
-		return fmt.Errorf("too many env vars: %d (max %d)", len(m), hardMaxEnvVars)
-	}
 	seen := map[string]string{}
-	total := 0
 	for k, v := range m {
 		if err := validateEnvKV(k, v); err != nil {
 			return fmt.Errorf("env %q: %w", k, err)
@@ -233,11 +229,6 @@ func ValidateEnvMap(m map[string]string) error {
 			return fmt.Errorf("duplicate env name %q conflicts with %q", kk, prev)
 		}
 		seen[ck] = kk
-
-		total += len(kk) + len(v)
-		if total > hardMaxEnvTotalBytes {
-			return fmt.Errorf("env overrides too large (max %d bytes)", hardMaxEnvTotalBytes)
-		}
 	}
 	return nil
 }
@@ -246,12 +237,6 @@ func validateEnvKV(k, v string) error {
 	kk := strings.TrimSpace(k)
 	if kk == "" {
 		return errors.New("empty name")
-	}
-	if len(kk) > hardMaxEnvKeyBytes {
-		return fmt.Errorf("name too long (%d bytes; max %d)", len(kk), hardMaxEnvKeyBytes)
-	}
-	if len(v) > hardMaxEnvValueBytes {
-		return fmt.Errorf("value too long (%d bytes; max %d)", len(v), hardMaxEnvValueBytes)
 	}
 
 	if strings.ContainsRune(kk, '\x00') || strings.ContainsRune(v, '\x00') {

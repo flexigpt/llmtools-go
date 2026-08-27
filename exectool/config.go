@@ -1,9 +1,12 @@
 package exectool
 
 import (
+	"fmt"
 	"maps"
+	"strings"
 	"time"
 
+	"github.com/flexigpt/llmtools-go/internal/executil"
 	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
@@ -84,4 +87,28 @@ func (p *ExecutionPolicy) Clone() *ExecutionPolicy {
 	cp := new(ExecutionPolicy)
 	*cp = *p
 	return cp
+}
+
+func validateExecutionEnvMap(env map[string]string) error {
+	if len(env) > hardEnvVars {
+		return fmt.Errorf("too many env vars: %d (max %d)", len(env), hardEnvVars)
+	}
+
+	totalBytes := 0
+	for key, value := range env {
+		trimmedKey := strings.TrimSpace(key)
+		if len(trimmedKey) > hardEnvKeyBytes {
+			return fmt.Errorf("env name too long (%d bytes; max %d)", len(trimmedKey), hardEnvKeyBytes)
+		}
+		if len(value) > hardEnvValueBytes {
+			return fmt.Errorf("env value too long (%d bytes; max %d)", len(value), hardEnvValueBytes)
+		}
+
+		totalBytes += len(trimmedKey) + len(value)
+		if totalBytes > hardEnvTotalBytes {
+			return fmt.Errorf("env overrides too large (max %d bytes)", hardEnvTotalBytes)
+		}
+	}
+
+	return executil.ValidateEnvMap(env)
 }

@@ -151,7 +151,7 @@ func TestCommitUsesExplicitAuthorAndRejectsOversizedMessage(t *testing.T) {
 		t.Fatal("Commit(explicit author).All = true, want false")
 	}
 
-	_, err = tool.Commit(ctx, CommitArgs{RepoPath: repoRel, Message: strings.Repeat("x", maxCommitMsgBytes+1)})
+	_, err = tool.Commit(ctx, CommitArgs{RepoPath: repoRel, Message: strings.Repeat("x", hardCommitMessageBytes+1)})
 	if err == nil {
 		t.Fatal("Commit(oversized message) error = nil, want error")
 	}

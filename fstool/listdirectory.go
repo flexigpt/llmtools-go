@@ -11,11 +11,6 @@ import (
 
 const listDirectoryFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/fstool/listdirectory.ListDirectory"
 
-const (
-	defaultListDirectoryMaxEntries = 200
-	maxListDirectoryMaxEntries     = 5000
-)
-
 var listDirectoryTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "018fe0f4-b8cd-7e55-82d5-9df0bd70e4bb",
@@ -118,8 +113,8 @@ func listDirectory(
 	if maxEntries <= 0 {
 		maxEntries = defaultListDirectoryMaxEntries
 	}
-	if maxEntries > maxListDirectoryMaxEntries {
-		return nil, fmt.Errorf("maxEntries must be between 1 and %d", maxListDirectoryMaxEntries)
+	if maxEntries > hardListDirectoryMaxEntries {
+		return nil, fmt.Errorf("maxEntries must be between 1 and %d", hardListDirectoryMaxEntries)
 	}
 
 	items, reachedMaxEntries, err := ioutil.ListDirectoryDetailedNormalized(dir, ioutil.ListDirectoryOptions{

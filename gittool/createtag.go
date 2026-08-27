@@ -106,8 +106,8 @@ func createTag(ctx context.Context, snap gitToolSnapshot, args CreateTagArgs) (*
 	}
 
 	message := strings.TrimSpace(args.Message)
-	if len([]byte(args.Message)) > maxTagMsgBytes {
-		return nil, fmt.Errorf("tag message too large: max %d bytes", maxTagMsgBytes)
+	if len([]byte(args.Message)) > hardTagMessageBytes {
+		return nil, fmt.Errorf("tag message too large: max %d bytes", hardTagMessageBytes)
 	}
 
 	repo, abs, err := openRepository(ctx, snap, args.RepoPath)

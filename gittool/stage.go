@@ -87,7 +87,7 @@ func add(ctx context.Context, snap gitToolSnapshot, args AddArgs) (*AddOut, erro
 	if len(args.Paths) == 0 {
 		return nil, errors.New("paths is required unless all=true")
 	}
-	if len(args.Paths) > maxStagePaths {
+	if len(args.Paths) > hardStagePaths {
 		return nil, errors.New("too many paths to add")
 	}
 

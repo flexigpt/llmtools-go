@@ -74,7 +74,7 @@ func TestMIMEForPathCoverage(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			policy := mustTestPolicy(t)
-			abs, mt, mode, method, err := MIMEForPath(policy, tc.path)
+			abs, mt, mode, method, err := MIMEForPath(policy, tc.path, hardMIMESniffBytes)
 
 			wantAbs := tc.wantAbs
 			if wantAbs != "" {

@@ -186,7 +186,7 @@ func shellCommand(
 	// Validate env early so we don't:
 	//  1) store invalid env into sessions
 	//  2) fail later at exec.Start with confusing errors
-	if err := executil.ValidateEnvMap(args.Env); err != nil {
+	if err := validateExecutionEnvMap(args.Env); err != nil {
 		return nil, err
 	}
 
@@ -611,10 +611,10 @@ func lookupHostExecutable(ctx context.Context, name string) (string, bool) {
 func effectiveTimeout(policy ExecutionPolicy) time.Duration {
 	d := policy.Timeout
 	if d <= 0 {
-		d = executil.DefaultTimeout
+		d = defaultExecutionTimeout
 	}
-	if d > executil.HardMaxTimeout {
-		d = executil.HardMaxTimeout
+	if d > hardExecutionTimeout {
+		d = hardExecutionTimeout
 	}
 	return d
 }
@@ -622,10 +622,10 @@ func effectiveTimeout(policy ExecutionPolicy) time.Duration {
 func effectiveMaxOutputBytes(policy ExecutionPolicy) int64 {
 	v := policy.MaxOutputBytes
 	if v <= 0 {
-		v = executil.DefaultMaxOutputBytes
+		v = defaultExecutionMaxOutputBytes
 	}
-	v = max(v, executil.MinOutputBytes)
-	v = min(v, executil.HardMaxOutputBytes)
+	v = max(v, int64(minExecutionOutputBytes))
+	v = min(v, int64(hardExecutionMaxOutputBytes))
 	v = min(v, int64(math.MaxInt))
 	return v
 }
@@ -633,20 +633,20 @@ func effectiveMaxOutputBytes(policy ExecutionPolicy) int64 {
 func effectiveMaxCommands(policy ExecutionPolicy) int {
 	v := policy.MaxCommands
 	if v <= 0 {
-		v = executil.DefaultMaxCommands
+		v = defaultExecutionMaxCommands
 	}
 	v = max(v, 1)
-	v = min(v, executil.HardMaxCommands)
+	v = min(v, hardExecutionMaxCommands)
 	return v
 }
 
 func effectiveMaxCommandLength(policy ExecutionPolicy) int {
 	v := policy.MaxCommandLength
 	if v <= 0 {
-		v = executil.DefaultMaxCommandLength
+		v = defaultExecutionMaxCommandLength
 	}
 	v = max(v, 1)
-	v = min(v, executil.HardMaxCommandLength)
+	v = min(v, hardExecutionMaxCommandLength)
 	return v
 }
 

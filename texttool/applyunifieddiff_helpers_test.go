@@ -57,14 +57,14 @@ func TestApplyUnifiedDiffValidationHelpers(t *testing.T) {
 		},
 		{
 			name:       "diffText_too_large",
-			args:       ApplyUnifiedDiffArgs{DiffText: strings.Repeat("x", maxUnifiedDiffBytes+1)},
+			args:       ApplyUnifiedDiffArgs{DiffText: strings.Repeat("x", hardUnifiedDiffBytes+1)},
 			wantErrSub: "diffText too large",
 		},
 		{
 			name: "too_many_fileTargets",
 			args: ApplyUnifiedDiffArgs{
 				DiffText:    "diff --git a/a b/a\n",
-				FileTargets: make([]ApplyUnifiedDiffFileTarget, maxUnifiedDiffTargets+1),
+				FileTargets: make([]ApplyUnifiedDiffFileTarget, hardUnifiedDiffTargets+1),
 			},
 			wantErrSub: "too many fileTargets",
 		},
@@ -72,7 +72,7 @@ func TestApplyUnifiedDiffValidationHelpers(t *testing.T) {
 			name: "too_many_candidatePaths",
 			args: ApplyUnifiedDiffArgs{
 				DiffText:       "diff --git a/a b/a\n",
-				CandidatePaths: make([]string, maxUnifiedDiffCandidates+1),
+				CandidatePaths: make([]string, hardUnifiedDiffCandidates+1),
 			},
 			wantErrSub: "too many candidatePaths",
 		},

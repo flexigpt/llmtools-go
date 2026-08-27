@@ -30,14 +30,16 @@ func extractPDFTextSafe(ctx context.Context, path string, maxBytes int) (text st
 		return "", err
 	}
 
-	var buf bytes.Buffer
-	limited := &io.LimitedReader{
-		R: reader,
-		N: int64(maxBytes),
+	source := reader
+	if maxBytes > 0 {
+		source = io.LimitReader(reader, int64(maxBytes))
 	}
-	if _, err := io.Copy(&buf, limited); err != nil {
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, source); err != nil {
 		return "", err
 	}
+
 	text = strings.TrimSpace(buf.String())
 	if text == "" {
 		return "", errors.New("empty PDF text after extraction")

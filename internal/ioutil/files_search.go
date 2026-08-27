@@ -17,8 +17,6 @@ import (
 
 var errSearchLimitReached = errors.New("search limit reached")
 
-const maxSearchContentBytes = 1 * 1024 * 1024
-
 type SearchFilesSearchIn string
 
 const (
@@ -41,6 +39,7 @@ type SearchFilesOptions struct {
 	Regexp            bool
 	SearchIn          SearchFilesSearchIn
 	MaxResults        int
+	MaxContentBytes   int64
 	IncludeDotEntries bool
 	NameGlob          string
 	CaseSensitive     bool
@@ -188,10 +187,10 @@ func SearchFilesDetailed(
 		case SearchFilesSearchInPath:
 			pathMatched = matchString(displayPath)
 		case SearchFilesSearchInContent:
-			contentMatched = searchFileContent(path, matchString)
+			contentMatched = searchFileContent(path, matchString, opts.MaxContentBytes)
 		case SearchFilesSearchInPathOrContent:
 			pathMatched = matchString(displayPath)
-			contentMatched = searchFileContent(path, matchString)
+			contentMatched = searchFileContent(path, matchString, opts.MaxContentBytes)
 		}
 
 		if !pathMatched && !contentMatched {
@@ -246,9 +245,9 @@ func newSearchStringMatcher(query string, useRegexp, caseSensitive bool) (func(s
 	}, nil
 }
 
-func searchFileContent(path string, matchString func(string) bool) bool {
+func searchFileContent(path string, matchString func(string) bool, maxBytes int64) bool {
 	info, err := os.Stat(path)
-	if err != nil || info.IsDir() || info.Size() < 0 || info.Size() > maxSearchContentBytes {
+	if err != nil || info.IsDir() || info.Size() < 0 || (maxBytes > 0 && info.Size() > maxBytes) {
 		return false
 	}
 
@@ -258,11 +257,15 @@ func searchFileContent(path string, matchString func(string) bool) bool {
 	}
 	defer f.Close()
 
-	data, err := io.ReadAll(io.LimitReader(f, maxSearchContentBytes+1))
+	r := io.Reader(f)
+	if maxBytes > 0 {
+		r = io.LimitReader(f, maxBytes+1)
+	}
+	data, err := io.ReadAll(r)
 	if err != nil {
 		return false
 	}
-	if int64(len(data)) > maxSearchContentBytes {
+	if maxBytes > 0 && int64(len(data)) > maxBytes {
 		return false
 	}
 

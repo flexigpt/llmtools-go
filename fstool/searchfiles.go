@@ -12,11 +12,6 @@ import (
 
 const searchFilesFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/fstool/searchfiles.SearchFiles"
 
-const (
-	defaultSearchFilesMaxResults = 100
-	maxSearchFilesMaxResults     = 1000
-)
-
 var searchFilesTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "018fe0f4-b8cd-7e55-82d5-9df0bd70e4bc",
@@ -147,8 +142,8 @@ func searchFiles(
 	if maxResults <= 0 {
 		maxResults = defaultSearchFilesMaxResults
 	}
-	if maxResults > maxSearchFilesMaxResults {
-		return nil, fmt.Errorf("maxResults must be between 1 and %d", maxSearchFilesMaxResults)
+	if maxResults > hardSearchFilesMaxResults {
+		return nil, fmt.Errorf("maxResults must be between 1 and %d", hardSearchFilesMaxResults)
 	}
 
 	searchIn := args.SearchIn
@@ -162,6 +157,7 @@ func searchFiles(
 		Regexp:            regexp,
 		SearchIn:          ioutil.SearchFilesSearchIn(searchIn),
 		MaxResults:        maxResults,
+		MaxContentBytes:   hardSearchContentBytes,
 		IncludeDotEntries: args.IncludeDotEntries,
 		NameGlob:          args.NameGlob,
 		CaseSensitive:     caseSensitive,

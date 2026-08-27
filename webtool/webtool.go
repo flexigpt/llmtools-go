@@ -15,12 +15,23 @@ import (
 )
 
 const (
-	defaultUserAgent    = "FlexiGPT-LLMTools/1.0 (+https://github.com/flexigpt/llmtools-go)"
-	defaultHTTPTimeout  = 30 * time.Second
-	defaultMaxRedirects = 5
+	defaultUserAgent       = "FlexiGPT-LLMTools/1.0 (+https://github.com/flexigpt/llmtools-go)"
+	defaultHTTPTimeout     = 30 * time.Second
+	defaultMaxRedirects    = 5
+	defaultFetchMaxLength  = 5000
+	defaultMaxFetchBytes   = 16 * 1024 * 1024
+	defaultDialTimeout     = 30 * time.Second
+	defaultDialKeepAlive   = 30 * time.Second
+	defaultHeaderTimeout   = 15 * time.Second
+	defaultIdleConnTimeout = 90 * time.Second
+	defaultTLSHandshake    = 10 * time.Second
 
-	maxUserAgentLength = 512
-	maxRedirectsLimit  = 10
+	hardUserAgentLength           = 512
+	hardRedirects                 = 10
+	hardFetchMaxLength            = 100000
+	hardFetchBytes          int64 = 16 * 1024 * 1024
+	hardURLLength                 = 4096
+	hardResponseHeaderBytes       = 1 << 20
 
 	schemeHTTPS = "https"
 	schemeHTTP  = "http"
@@ -58,8 +69,8 @@ func WithUserAgent(userAgent string) WebToolOption {
 		if userAgent == "" {
 			return errors.New("user-agent cannot be empty")
 		}
-		if len(userAgent) > maxUserAgentLength {
-			return fmt.Errorf("user-agent too long (max %d bytes)", maxUserAgentLength)
+		if len(userAgent) > hardUserAgentLength {
+			return fmt.Errorf("user-agent too long (max %d bytes)", hardUserAgentLength)
 		}
 		if strings.ContainsAny(userAgent, "\r\n") {
 			return errors.New("user-agent cannot contain CR/LF")
@@ -85,18 +96,18 @@ func WithHTTPTimeout(timeout time.Duration) WebToolOption {
 
 // WithMaxFetchBytes sets the maximum bytes downloaded for one fetch.
 //
-// It cannot exceed toolutil.MaxFileReadBytes, so the web tool remains aligned
+// It cannot exceed maxBytes, so the web tool remains aligned
 // with local file read safety limits.
 func WithMaxFetchBytes(maxBytes int64) WebToolOption {
 	return func(wt *WebTool) error {
 		if maxBytes <= 0 {
 			return errors.New("max fetch bytes must be positive")
 		}
-		if maxBytes > int64(toolutil.MaxFileReadBytes) {
+		if maxBytes > hardFetchBytes {
 			return fmt.Errorf(
 				"max fetch bytes too large (%d; max %d)",
 				maxBytes,
-				int64(toolutil.MaxFileReadBytes),
+				hardFetchBytes,
 			)
 		}
 		wt.cfg.maxFetchBytes = maxBytes
@@ -112,8 +123,8 @@ func WithMaxRedirects(maxRedirects int) WebToolOption {
 		if maxRedirects < 0 {
 			return errors.New("max redirects cannot be negative")
 		}
-		if maxRedirects > maxRedirectsLimit {
-			return fmt.Errorf("max redirects too large (%d; max %d)", maxRedirects, maxRedirectsLimit)
+		if maxRedirects > hardRedirects {
+			return fmt.Errorf("max redirects too large (%d; max %d)", maxRedirects, hardRedirects)
 		}
 		wt.cfg.maxRedirects = maxRedirects
 		return nil
@@ -161,7 +172,7 @@ func NewWebTool(opts ...WebToolOption) (*WebTool, error) {
 		cfg: webToolConfig{
 			userAgent:           defaultUserAgent,
 			timeout:             defaultHTTPTimeout,
-			maxFetchBytes:       int64(toolutil.MaxFileReadBytes),
+			maxFetchBytes:       defaultMaxFetchBytes,
 			maxRedirects:        defaultMaxRedirects,
 			allowPrivateNetwork: false,
 			proxyURL:            nil,

@@ -10,10 +10,34 @@ import (
 )
 
 const (
-	maybeStartLineTolerance          = 3
-	maxAmbiguityDiagnosticCandidates = 5
-	ambiguityDiagnosticContextLines  = 1
-	toolTagText                      = "text"
+	defaultTextProcessingBytes int64 = 16 * 1024 * 1024
+	hardTextProcessingBytes    int64 = 16 * 1024 * 1024
+
+	defaultReadTextRangeLineCount = 1000
+	hardReadTextRangeOutputLines  = 16000
+
+	hardFindTextContextLines       = 2000
+	hardFindTextMaxMatches         = 500
+	hardFindTextTotalReturnedLines = 4000
+
+	hardUnifiedDiffBytes                   = 4 * 1024 * 1024
+	hardUnifiedDiffFiles                   = 128
+	hardUnifiedDiffHunks                   = 2048
+	hardUnifiedDiffTargets                 = 256
+	hardUnifiedDiffCandidates              = 2048
+	hardCandidatePathsPerFile              = 32
+	hardUnifiedDiffDiagnosticCandidates    = 16
+	hardUnifiedDiffParserDiagnostics       = 64
+	hardUnifiedDiffNewParentCreations      = 8
+	hardUnifiedDiffHunkNearbyLineTolerance = 16
+
+	textBlockEditLineHintTolerance                = 8
+	textBlockEditMaxAmbiguityDiagnosticCandidates = 5
+	textBlockEditAmbiguityDiagnosticContextLines  = 1
+	maybeStartLineTolerance                       = 3
+	maxAmbiguityDiagnosticCandidates              = 5
+	ambiguityDiagnosticContextLines               = 1
+	toolTagText                                   = "text"
 )
 
 type textToolConfig struct {

@@ -23,40 +23,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
-const (
-	defaultContextLines = 3
-	defaultDiffMaxBytes = 1024 * 1024
-	hardDiffMaxBytes    = 2 * 1024 * 1024
-	hardBlobReadBytes   = 4 * 1024 * 1024
-	defaultLogMaxCount  = 10
-	defaultTreeMaxCount = 1000
-	hardLogMaxCount     = 100
-	maxStagePaths       = 500
-	maxRevisionLength   = 256
-	maxRefNameLength    = 256
-	maxTagMsgBytes      = 128 * 1024
-	maxCommitMsgBytes   = 128 * 1024
-)
-
-const (
-	hardTreeMaxCount       = 10000
-	defaultFindMaxDepth    = 5
-	hardFindMaxDepth       = 12
-	defaultFindMaxRepos    = 100
-	hardFindMaxRepos       = 1000
-	defaultFindMaxVisited  = 20000
-	hardFindMaxVisited     = 100000
-	maxLineDiffMatrixCells = 2000000
-	defaultGrepMaxMatches  = 100
-	hardGrepMaxMatches     = 1000
-	defaultGrepMaxFiles    = 10000
-	hardGrepMaxFiles       = 50000
-	defaultHistoryMaxCount = 50
-	hardHistoryMaxCount    = 500
-	defaultHistoryMaxWalk  = 2000
-	hardHistoryMaxWalk     = 20000
-)
-
 var errStopIteration = errors.New("stop git iteration")
 
 type OutputMeta struct {
@@ -169,8 +135,8 @@ func validateRevision(rev string) error {
 	if strings.TrimSpace(rev) == "" {
 		return errors.New("revision is required")
 	}
-	if len(rev) > maxRevisionLength {
-		return fmt.Errorf("revision too long: max %d bytes", maxRevisionLength)
+	if len(rev) > hardRevisionLength {
+		return fmt.Errorf("revision too long: max %d bytes", hardRevisionLength)
 	}
 	if strings.HasPrefix(rev, "-") {
 		return fmt.Errorf("revision %q is invalid: must not start with '-'", rev)
@@ -191,8 +157,8 @@ func validateLocalBranchName(name string) error {
 	if n == "" {
 		return errors.New("branch name is required")
 	}
-	if len(n) > maxRefNameLength {
-		return fmt.Errorf("branch name too long: max %d bytes", maxRefNameLength)
+	if len(n) > hardRefNameLength {
+		return fmt.Errorf("branch name too long: max %d bytes", hardRefNameLength)
 	}
 	if n == "@" {
 		return errors.New(`branch name "@" is invalid`)
@@ -231,8 +197,8 @@ func validateTagName(name string) error {
 	if n == "" {
 		return errors.New("tag name is required")
 	}
-	if len(n) > maxRefNameLength {
-		return fmt.Errorf("tag name too long: max %d bytes", maxRefNameLength)
+	if len(n) > hardRefNameLength {
+		return fmt.Errorf("tag name too long: max %d bytes", hardRefNameLength)
 	}
 	if n == "@" {
 		return errors.New(`tag name "@" is invalid`)
@@ -266,8 +232,8 @@ func validateTagName(name string) error {
 }
 
 func validateTagPattern(pattern string) error {
-	if len(pattern) > maxRefNameLength {
-		return fmt.Errorf("pattern too long: max %d bytes", maxRefNameLength)
+	if len(pattern) > hardRefNameLength {
+		return fmt.Errorf("pattern too long: max %d bytes", hardRefNameLength)
 	}
 	if strings.ContainsRune(pattern, '\x00') {
 		return errors.New("pattern contains NUL byte")
@@ -284,8 +250,8 @@ func normalizeRepoRelativePaths(paths []string, allowEmpty bool) ([]string, erro
 	if len(paths) == 0 && allowEmpty {
 		return nil, nil
 	}
-	if len(paths) > maxStagePaths {
-		return nil, fmt.Errorf("too many paths: max %d", maxStagePaths)
+	if len(paths) > hardStagePaths {
+		return nil, fmt.Errorf("too many paths: max %d", hardStagePaths)
 	}
 	out := make([]string, 0, len(paths))
 	for _, p := range paths {
@@ -594,9 +560,6 @@ func indexPathContentLimited(
 }
 
 func blobContent(repo *git.Repository, hash plumbing.Hash, maxBytes int64) (data []byte, ok bool, err error) {
-	if maxBytes <= 0 || maxBytes > hardBlobReadBytes {
-		maxBytes = hardBlobReadBytes
-	}
 	blob, err := repo.BlobObject(hash)
 	if err != nil {
 		return nil, false, err
@@ -832,9 +795,6 @@ func treePathContentLimited(
 }
 
 func readLimited(r io.Reader, maxBytes int64) (data []byte, ok bool, err error) {
-	if maxBytes <= 0 || maxBytes > hardBlobReadBytes {
-		maxBytes = hardBlobReadBytes
-	}
 	var b bytes.Buffer
 	n, err := io.CopyN(&b, r, maxBytes+1)
 	if err != nil && !errors.Is(err, io.EOF) {
@@ -1015,7 +975,7 @@ func buildDiffOps(oldLines, newLines []diffRecord) []diffOp {
 	if n == 0 && m == 0 {
 		return nil
 	}
-	if (n+1)*(m+1) > maxLineDiffMatrixCells {
+	if (n+1)*(m+1) > hardLineDiffMatrixCells {
 		return buildFullReplaceOps(oldLines, newLines)
 	}
 

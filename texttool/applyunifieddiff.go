@@ -26,19 +26,6 @@ const (
 	statusCanBeApplied      = "Unified diff can be applied."
 	errNoFilesWereProcessed = "No files were processed."
 	pathDevNull             = "/dev/null"
-)
-
-const (
-	maxUnifiedDiffBytes       = 4 * 1024 * 1024
-	maxUnifiedDiffFiles       = 128
-	maxUnifiedDiffHunks       = 2048
-	maxUnifiedDiffTargets     = 256
-	maxUnifiedDiffCandidates  = 2048
-	maxCandidatePathsPerFile  = 32
-	hunkNearbyLineTolerance   = 16
-	maxDiagnosticCandidates   = 12
-	maxParserDiagnostics      = 64
-	newFileMaxParentCreations = 8
 
 	defaultUnifiedDiffNewFilePerm os.FileMode = 0o644
 )
@@ -482,17 +469,17 @@ func validateApplyUnifiedDiffArgs(args ApplyUnifiedDiffArgs) error {
 	if strings.TrimSpace(args.DiffText) == "" {
 		return errors.New("diffText is required")
 	}
-	if len(args.DiffText) > maxUnifiedDiffBytes {
-		return fmt.Errorf("diffText too large: %d bytes; max %d", len(args.DiffText), maxUnifiedDiffBytes)
+	if len(args.DiffText) > hardUnifiedDiffBytes {
+		return fmt.Errorf("diffText too large: %d bytes; max %d", len(args.DiffText), hardUnifiedDiffBytes)
 	}
 	if !utf8.ValidString(args.DiffText) {
 		return errors.New("diffText is not valid UTF-8")
 	}
-	if len(args.FileTargets) > maxUnifiedDiffTargets {
-		return fmt.Errorf("too many fileTargets: %d; max %d", len(args.FileTargets), maxUnifiedDiffTargets)
+	if len(args.FileTargets) > hardUnifiedDiffTargets {
+		return fmt.Errorf("too many fileTargets: %d; max %d", len(args.FileTargets), hardUnifiedDiffTargets)
 	}
-	if len(args.CandidatePaths) > maxUnifiedDiffCandidates {
-		return fmt.Errorf("too many candidatePaths: %d; max %d", len(args.CandidatePaths), maxUnifiedDiffCandidates)
+	if len(args.CandidatePaths) > hardUnifiedDiffCandidates {
+		return fmt.Errorf("too many candidatePaths: %d; max %d", len(args.CandidatePaths), hardUnifiedDiffCandidates)
 	}
 
 	seenFileKeys := map[string]int{}
@@ -770,21 +757,21 @@ func parseUnifiedDiff(diffText string) (parsedPatch, error) {
 	var hunkState looseHunkState
 
 	addPatchDiag := func(level ApplyUnifiedDiffDiagnosticLevel, code, format string, args ...any) {
-		if len(out.Diagnostics) >= maxParserDiagnostics {
+		if len(out.Diagnostics) >= hardUnifiedDiffParserDiagnostics {
 			return
 		}
 		out.Diagnostics = append(out.Diagnostics, newApplyUnifiedDiffDiagnostic(level, code, format, args...))
 	}
 
 	addFileDiag := func(level ApplyUnifiedDiffDiagnosticLevel, code, format string, args ...any) {
-		if current == nil || len(current.Diagnostics) >= maxParserDiagnostics {
+		if current == nil || len(current.Diagnostics) >= hardUnifiedDiffParserDiagnostics {
 			return
 		}
 		current.Diagnostics = append(current.Diagnostics, newApplyUnifiedDiffDiagnostic(level, code, format, args...))
 	}
 
 	addFileDiagnostic := func(diagnostic ApplyUnifiedDiffDiagnostic) {
-		if current == nil || len(current.Diagnostics) >= maxParserDiagnostics {
+		if current == nil || len(current.Diagnostics) >= hardUnifiedDiffParserDiagnostics {
 			return
 		}
 		current.Diagnostics = append(current.Diagnostics, diagnostic)
@@ -1009,16 +996,16 @@ func parseUnifiedDiff(diffText string) (parsedPatch, error) {
 
 	pushCurrent()
 
-	if len(out.Files) > maxUnifiedDiffFiles {
-		return parsedPatch{}, fmt.Errorf("too many files in diff: %d; max %d", len(out.Files), maxUnifiedDiffFiles)
+	if len(out.Files) > hardUnifiedDiffFiles {
+		return parsedPatch{}, fmt.Errorf("too many files in diff: %d; max %d", len(out.Files), hardUnifiedDiffFiles)
 	}
 
 	totalHunks := 0
 	for _, file := range out.Files {
 		totalHunks += len(file.Hunks)
 	}
-	if totalHunks > maxUnifiedDiffHunks {
-		return parsedPatch{}, fmt.Errorf("too many hunks in diff: %d; max %d", totalHunks, maxUnifiedDiffHunks)
+	if totalHunks > hardUnifiedDiffHunks {
+		return parsedPatch{}, fmt.Errorf("too many hunks in diff: %d; max %d", totalHunks, hardUnifiedDiffHunks)
 	}
 
 	if len(out.Diagnostics) == 0 && len(out.Files) == 0 {
@@ -1945,7 +1932,7 @@ func planCreateFilePatch(
 	if perm == 0 {
 		perm = defaultUnifiedDiffNewFilePerm
 	}
-	if err := verifyCreateParentPlanResolved(p, target.ResolvedPath, newFileMaxParentCreations); err != nil {
+	if err := verifyCreateParentPlanResolved(p, target.ResolvedPath, hardUnifiedDiffNewParentCreations); err != nil {
 		result.Status = ApplyUnifiedDiffStatusError
 		result.Message = "new file parent directory cannot be prepared: " + err.Error()
 		return fileApplyPlan{Result: result, Action: filePlanActionNoop}
@@ -2080,7 +2067,7 @@ func executeFilePlan(p fspolicy.FSPolicy, plan fileApplyPlan) error {
 			return errors.New("create plan has no resolved path")
 		}
 		parent := filepath.Dir(plan.ResolvedPath)
-		if _, err := p.EnsureDirResolved(parent, newFileMaxParentCreations); err != nil {
+		if _, err := p.EnsureDirResolved(parent, hardUnifiedDiffNewParentCreations); err != nil {
 			return err
 		}
 		return ioutil.WriteFileAtomicBytesResolved(
@@ -2226,7 +2213,7 @@ func readTextFileNoSymlink(p fspolicy.FSPolicy, resolvedPath string) (*ioutil.Te
 	if err := requireNoSymlinkExistingRegularFileResolved(p, resolvedPath); err != nil {
 		return nil, err
 	}
-	return ioutil.ReadTextFileUTF8(p, resolvedPath, toolutil.MaxTextProcessingBytes)
+	return ioutil.ReadTextFileUTF8(p, resolvedPath, hardTextProcessingBytes)
 }
 
 func requireNoSymlinkExistingRegularFileResolved(p fspolicy.FSPolicy, resolvedPath string) error {
@@ -2261,11 +2248,11 @@ func newFileHasFinalNewline(file parsedPatchFile, lines []string) bool {
 }
 
 func validateUnifiedDiffOutputContent(content string) error {
-	if len(content) > toolutil.MaxTextProcessingBytes {
+	if int64(len(content)) > hardTextProcessingBytes {
 		return fmt.Errorf(
 			"patched file would be too large: %d bytes; max %d",
 			len(content),
-			toolutil.MaxTextProcessingBytes,
+			hardTextProcessingBytes,
 		)
 	}
 	if !utf8.ValidString(content) {
@@ -2506,7 +2493,7 @@ func resolveCandidateMatches(
 		warningDiagnostic("ambiguous_candidate_paths", "multiple candidatePaths match this file patch"),
 	)
 	return targetResolution{},
-		limitStrings(uniqueStrings(matches), maxCandidatePathsPerFile),
+		limitStrings(uniqueStrings(matches), hardCandidatePathsPerFile),
 		diagnostics,
 		ApplyUnifiedDiffStatusNeedsInfo,
 		errors.New("ambiguous target path"),
@@ -2565,7 +2552,7 @@ func resolveCreateTargetFromCandidatePaths(
 		),
 	)
 	return targetResolution{},
-		limitStrings(targetPaths, maxCandidatePathsPerFile),
+		limitStrings(targetPaths, hardCandidatePathsPerFile),
 		diagnostics,
 		ApplyUnifiedDiffStatusNeedsInfo,
 		errors.New("new-file target path is ambiguous after candidatePaths inference"),
@@ -2872,7 +2859,7 @@ func candidatePathDisplayList(patchPaths []string, infos []candidatePathInfo) []
 	for _, info := range infos {
 		out = append(out, info.Path)
 	}
-	return limitStrings(uniqueStrings(out), maxCandidatePathsPerFile)
+	return limitStrings(uniqueStrings(out), hardCandidatePathsPerFile)
 }
 
 func matchCandidatePaths(patchPaths []string, infos []candidatePathInfo, requireExists bool) []string {
@@ -3308,12 +3295,12 @@ func findSingleEditGroupMatch(
 
 		var prefixMatches []int
 		if prefixStrong {
-			prefixMatches = findAllBlockMatches(lines, hunkSpec.Prefix, mode, maxDiagnosticCandidates+1)
+			prefixMatches = findAllBlockMatches(lines, hunkSpec.Prefix, mode, hardUnifiedDiffDiagnosticCandidates+1)
 		}
 
 		var suffixMatches []int
 		if suffixStrong {
-			suffixMatches = findAllBlockMatches(lines, hunkSpec.Suffix, mode, maxDiagnosticCandidates+1)
+			suffixMatches = findAllBlockMatches(lines, hunkSpec.Suffix, mode, hardUnifiedDiffDiagnosticCandidates+1)
 		}
 
 		prefixMatched := prefixStrong && len(prefixMatches) > 0
@@ -3673,7 +3660,7 @@ func blockOnlySingleEditMatches(
 	method string,
 	already bool,
 ) []singleEditMatch {
-	matches := findAllBlockMatches(lines, block, mode, maxDiagnosticCandidates+1)
+	matches := findAllBlockMatches(lines, block, mode, hardUnifiedDiffDiagnosticCandidates+1)
 	out := make([]singleEditMatch, 0, len(matches))
 
 	for _, start := range matches {
@@ -3811,7 +3798,13 @@ func findOldBlockPrimaryMatch(
 	if m, ok, count := findUniqueGlobal(lines, block, compareExact); ok {
 		return blockMatch{Start: m, Method: "exact-global"}, true, diagnostics
 	} else if count > 1 {
-		if m, nearOK := findUniqueNear(lines, block, hint, hunkNearbyLineTolerance, compareExact); nearOK {
+		if m, nearOK := findUniqueNear(
+			lines,
+			block,
+			hint,
+			hardUnifiedDiffHunkNearbyLineTolerance,
+			compareExact,
+		); nearOK {
 			diagnostics = append(
 				diagnostics,
 				warningDiagnostic(
@@ -3833,7 +3826,13 @@ func findOldBlockPrimaryMatch(
 	if m, ok, count := findUniqueGlobal(lines, block, compareTrimmed); ok {
 		return blockMatch{Start: m, Method: "trimmed-global"}, true, diagnostics
 	} else if count > 1 {
-		if m, nearOK := findUniqueNear(lines, block, hint, hunkNearbyLineTolerance, compareTrimmed); nearOK {
+		if m, nearOK := findUniqueNear(
+			lines,
+			block,
+			hint,
+			hardUnifiedDiffHunkNearbyLineTolerance,
+			compareTrimmed,
+		); nearOK {
 			diagnostics = append(
 				diagnostics,
 				warningDiagnostic(
@@ -3889,7 +3888,7 @@ func findOldBlockLocalMatch(
 		return blockMatch{Start: hint, Method: "exact-hint"}, true
 	}
 
-	if m, ok := findUniqueNear(lines, block, hint, hunkNearbyLineTolerance, compareExact); ok {
+	if m, ok := findUniqueNear(lines, block, hint, hardUnifiedDiffHunkNearbyLineTolerance, compareExact); ok {
 		return blockMatch{Start: m, Method: "exact-near"}, true
 	}
 
@@ -3901,7 +3900,7 @@ func findOldBlockLocalMatch(
 		return blockMatch{Start: hint, Method: "trimmed-hint"}, true
 	}
 
-	if m, ok := findUniqueNear(lines, block, hint, hunkNearbyLineTolerance, compareTrimmed); ok {
+	if m, ok := findUniqueNear(lines, block, hint, hardUnifiedDiffHunkNearbyLineTolerance, compareTrimmed); ok {
 		return blockMatch{Start: m, Method: "trimmed-near"}, true
 	}
 
@@ -4058,7 +4057,7 @@ func findAlreadyAppliedMatch(
 			return blockMatch{Start: oldHint, Method: "already-exact-old-hint"}, true
 		}
 
-		if m, ok := findUniqueNear(lines, newBlock, newHint, hunkNearbyLineTolerance, compareExact); ok {
+		if m, ok := findUniqueNear(lines, newBlock, newHint, hardUnifiedDiffHunkNearbyLineTolerance, compareExact); ok {
 			return blockMatch{Start: m, Method: "already-exact-near"}, true
 		}
 	}
@@ -4076,7 +4075,13 @@ func findAlreadyAppliedMatch(
 				return blockMatch{Start: oldHint, Method: "already-trimmed-old-hint"}, true
 			}
 
-			if m, ok := findUniqueNear(lines, newBlock, newHint, hunkNearbyLineTolerance, compareTrimmed); ok {
+			if m, ok := findUniqueNear(
+				lines,
+				newBlock,
+				newHint,
+				hardUnifiedDiffHunkNearbyLineTolerance,
+				compareTrimmed,
+			); ok {
 				return blockMatch{Start: m, Method: "already-trimmed-near"}, true
 			}
 		}
@@ -4123,7 +4128,7 @@ func findUniqueGlobal(lines, block []string, mode compareMode) (start int, ok bo
 			if first < 0 {
 				first = i
 			}
-			if count > maxDiagnosticCandidates {
+			if count > hardUnifiedDiffDiagnosticCandidates {
 				break
 			}
 		}
@@ -4262,7 +4267,7 @@ func cloneApplyUnifiedDiffDiagnostics(in []ApplyUnifiedDiffDiagnostic) []ApplyUn
 }
 
 func fuzzyHintPenalty(start, hint int) float64 {
-	return float64(min(absInt(start-hint), hunkNearbyLineTolerance)) * 0.001
+	return float64(min(absInt(start-hint), hardUnifiedDiffHunkNearbyLineTolerance)) * 0.001
 }
 
 func scoreFuzzyWindow(actual, expected []string, kinds []byte) (float64, bool) {

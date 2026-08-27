@@ -9,6 +9,11 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
+const (
+	defaultImageReadBytes int64 = 16 * 1024 * 1024
+	hardImageReadBytes    int64 = 16 * 1024 * 1024
+)
+
 type imageToolConfig struct {
 	allowedRoots  []string
 	workBaseDir   string

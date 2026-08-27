@@ -179,29 +179,29 @@ func TestNormalizedCommandList(t *testing.T) {
 
 func TestPolicy_EffectiveTimeout_UsesDefaultAndClampsToHardMax(t *testing.T) {
 	p := ExecutionPolicy{}
-	if got := effectiveTimeout(p); got != executil.DefaultTimeout {
-		t.Fatalf("expected DefaultTimeout=%v got %v", executil.DefaultTimeout, got)
+	if got := effectiveTimeout(p); got != defaultExecutionTimeout {
+		t.Fatalf("expected DefaultTimeout=%v got %v", defaultExecutionTimeout, got)
 	}
 
 	p.Timeout = 999 * time.Hour
-	if got := effectiveTimeout(p); got != executil.HardMaxTimeout {
-		t.Fatalf("expected clamp to HardMaxTimeout=%v got %v", executil.HardMaxTimeout, got)
+	if got := effectiveTimeout(p); got != hardExecutionTimeout {
+		t.Fatalf("expected clamp to HardMaxTimeout=%v got %v", hardExecutionTimeout, got)
 	}
 }
 
 func TestPolicy_EffectiveMaxOutputBytes_UsesDefaultAndClamps(t *testing.T) {
 	p := ExecutionPolicy{}
-	if got := effectiveMaxOutputBytes(p); got != executil.DefaultMaxOutputBytes {
-		t.Fatalf("expected DefaultMaxOutputBytes=%d got %d", executil.DefaultMaxOutputBytes, got)
+	if got := effectiveMaxOutputBytes(p); got != defaultExecutionMaxOutputBytes {
+		t.Fatalf("expected DefaultMaxOutputBytes=%d got %d", defaultExecutionMaxOutputBytes, got)
 	}
 
 	p.MaxOutputBytes = 1
-	if got := effectiveMaxOutputBytes(p); got != executil.MinOutputBytes {
-		t.Fatalf("expected clamp to MinOutputBytes=%d got %d", executil.MinOutputBytes, got)
+	if got := effectiveMaxOutputBytes(p); got != minExecutionOutputBytes {
+		t.Fatalf("expected clamp to MinOutputBytes=%d got %d", minExecutionOutputBytes, got)
 	}
 
 	p.MaxOutputBytes = 1 << 62
-	if got := effectiveMaxOutputBytes(p); got != min(executil.HardMaxOutputBytes, int64(^uint(0)>>1)) {
+	if got := effectiveMaxOutputBytes(p); got != min(hardExecutionMaxOutputBytes, int64(^uint(0)>>1)) {
 		// The implementation clamps to HardMaxOutputBytes and also to MaxInt.
 		t.Fatalf("expected clamp to hard max, got %d", got)
 	}
