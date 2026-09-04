@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
 	github.com/go-git/go-git/v5 v5.19.2
-	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
+	github.com/ledongthuc/pdf v0.0.0-20260903153007-b3c860c23753
 	github.com/markusmobius/go-trafilatura v1.12.2
 	golang.org/x/net v0.58.0
 	golang.org/x/sys v0.47.0
