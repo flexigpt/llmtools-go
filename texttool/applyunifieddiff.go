@@ -65,7 +65,7 @@ var applyUnifiedDiffTool = spec.Tool{
 		"Supports Git-style unified diffs, multi-file patches, path overrides, candidate local paths, " +
 		"already-applied detection, no-newline-at-EOF markers, and safe fuzzy hunk matching. " +
 		"The parser is intentionally tolerant of common malformed/LLM diffs. " +
-		"Set dryRun=true to check without writing. Set strict=true to disable fuzzy matching. ",
+		"Set dryRun=true to check without writing. Set strict=true to disable fuzzy matching.",
 	Tags: []string{"fs", "text", "diff", "patch", "write"},
 
 	ArgSchema: spec.JSONSchema(`{
