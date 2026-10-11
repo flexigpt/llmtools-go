@@ -10,8 +10,7 @@ import (
 )
 
 const (
-	defaultTextProcessingBytes int64 = 16 * 1024 * 1024
-	hardTextProcessingBytes    int64 = 16 * 1024 * 1024
+	hardTextProcessingBytes int64 = 16 * 1024 * 1024
 
 	defaultReadTextRangeLineCount = 1000
 	hardReadTextRangeOutputLines  = 16000

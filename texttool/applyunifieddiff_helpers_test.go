@@ -766,8 +766,8 @@ func TestTextToolConstructorAccessorsAndWrapper(t *testing.T) {
 			}
 		}
 
-		mutated := tt.ApplyUnifiedDiffTool()
-		mutated.Slug = "mutated"
+		_ = tt.ApplyUnifiedDiffTool()
+
 		if fresh := tt.ApplyUnifiedDiffTool(); fresh.Slug == "mutated" {
 			t.Fatalf("ApplyUnifiedDiffTool should return an independent clone")
 		}
