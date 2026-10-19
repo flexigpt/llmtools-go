@@ -10,7 +10,7 @@ import (
 	"unicode"
 
 	html2md "github.com/JohannesKaufmann/html-to-markdown/v2"
-	"github.com/markusmobius/go-trafilatura"
+	"github.com/markusmobius/go-trafilatura/v2"
 	"golang.org/x/net/html"
 )
 
