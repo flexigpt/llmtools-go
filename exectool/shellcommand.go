@@ -96,7 +96,20 @@ var shellCommandToolSpec = spec.Tool{
 				"stdoutTruncated": {"type": "boolean"},
 				"stderrTruncated": {"type": "boolean"}
 			},
-			"additionalProperties": true
+			"required": [
+				"command",
+				"workDir",
+				"shell",
+				"shellPath",
+				"exitCode",
+				"timedOut",
+				"durationMS",
+				"stdout",
+				"stderr",
+				"stdoutTruncated",
+				"stderrTruncated"
+			],
+			"additionalProperties": false
 		}
 	}
 },
